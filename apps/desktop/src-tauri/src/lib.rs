@@ -73,6 +73,23 @@ fn migrations() -> Vec<Migration> {
             );
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 2,
+        description: "remember fleet carrier identities",
+        sql: r#"
+            -- Docked at a carrier reports only the callsign; the name arrives in
+            -- CarrierStats, which is emitted when carrier management is opened --
+            -- not every session. Without persistence the name is unavailable in
+            -- any session where the commander did not open that panel.
+            CREATE TABLE IF NOT EXISTS known_carriers (
+                carrier_id  INTEGER PRIMARY KEY,
+                name        TEXT NOT NULL,
+                callsign    TEXT,
+                updated_at  TEXT NOT NULL
+            );
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

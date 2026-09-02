@@ -128,6 +128,19 @@ function resolveCarrierName(s: CommanderState): void {
   if (name) s.carrierName = name;
 }
 
+/**
+ * Record a carrier identity and re-resolve the current station if it matches.
+ *
+ * Separate from `applyEvent` so identities can be loaded from storage or learned
+ * from historical journals without those old events overwriting `lastEvent*` and
+ * making the dashboard report stale activity.
+ */
+export function learnCarrier(state: CommanderState, carrierId: number, name: string): void {
+  if (!Number.isFinite(carrierId) || name.length === 0) return;
+  state.knownCarriers[carrierId] = name;
+  if (isKnown(state.marketId) && state.marketId === carrierId) state.carrierName = name;
+}
+
 function clearLocation(s: CommanderState): void {
   s.stationName = UNKNOWN;
   s.stationType = UNKNOWN;
@@ -203,13 +216,8 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
         carrierId: Known<number>;
         name: Known<string>;
       };
-      if (isKnown(d.carrierId) && isKnown(d.name) && d.name.length > 0) {
-        state.knownCarriers[d.carrierId] = d.name;
-        // A rename while docked should take effect immediately.
-        if (isKnown(state.marketId) && state.marketId === d.carrierId) {
-          state.carrierName = d.name;
-        }
-      }
+      // Also re-resolves, so a rename while docked takes effect immediately.
+      if (isKnown(d.carrierId) && isKnown(d.name)) learnCarrier(state, d.carrierId, d.name);
       break;
     }
 

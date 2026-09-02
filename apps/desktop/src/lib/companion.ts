@@ -8,6 +8,9 @@
 import Database from '@tauri-apps/plugin-sql';
 import {
   JournalEngine,
+  learnCarrier,
+  listJournalFiles,
+  replayFile,
   applyEvent,
   initialState,
   resolveJournalDirectory,
@@ -181,6 +184,10 @@ export class Companion {
       return;
     }
 
+    // Load before ingest starts, so a carrier we are already docked at resolves
+    // on the first Location/Docked event rather than after it.
+    const rememberedCarriers = await this.loadKnownCarriers();
+
     const checkpoint = await this.loadCheckpoint();
     this.engine = new JournalEngine({
       directory: resolution.directory,
@@ -215,6 +222,12 @@ export class Companion {
     // session a write per event would be pointless disk churn.
     setInterval(() => void this.flushCheckpoint(), 3000);
     this.notify();
+
+    // Deliberately not awaited: this reads historical journals and must never
+    // delay live ingest. Only runs when nothing is remembered yet.
+    if (rememberedCarriers === 0) {
+      void this.backfillCarrierIdentities(resolution.directory);
+    }
   }
 
   stop(): void {
@@ -226,6 +239,9 @@ export class Companion {
 
   private onEvent(event: NormalizedEvent): void {
     applyEvent(this.state, event);
+
+    // Carrier identities are stable reference data: learn once, remember forever.
+    if (event.kind === 'carrier-identity') void this.saveCarrierIdentity(event);
 
     // Context resolution runs on every event, including the high-frequency ones:
     // a rule may legitimately key on them, and evaluating a dozen declarative
@@ -297,6 +313,99 @@ export class Companion {
       source: this.resolver.source,
     });
     this.notify();
+  }
+
+  /* ------------------------------------------------- carrier identities */
+
+  /**
+   * Load remembered carrier names into state before ingest begins.
+   *
+   * `CarrierStats` is emitted when carrier management is opened, not at session
+   * start, so in most sessions the name is never mentioned at all. Remembering it
+   * is the only way the name is available while simply docked.
+   */
+  private async loadKnownCarriers(): Promise<number> {
+    if (!this.db) return 0;
+    try {
+      const rows = await this.db.select<Array<{ carrier_id: number; name: string }>>(
+        'SELECT carrier_id, name FROM known_carriers',
+      );
+      for (const row of rows) this.state.knownCarriers[row.carrier_id] = row.name;
+      return rows.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async saveCarrierIdentity(event: NormalizedEvent): Promise<void> {
+    if (!this.db) return;
+    const d = event.data as { carrierId: unknown; name: unknown; callsign: unknown };
+    if (typeof d.carrierId !== 'number' || typeof d.name !== 'string' || d.name.length === 0) return;
+
+    try {
+      await this.db.execute(
+        `INSERT INTO known_carriers (carrier_id, name, callsign, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT(carrier_id) DO UPDATE SET
+           name = excluded.name, callsign = excluded.callsign, updated_at = excluded.updated_at`,
+        [
+          d.carrierId,
+          d.name,
+          typeof d.callsign === 'string' ? d.callsign : null,
+          new Date().toISOString(),
+        ],
+      );
+    } catch (err) {
+      logger.warn('db', 'Could not remember carrier identity', { error: String(err) });
+    }
+  }
+
+  /**
+   * Learn carrier identities from recent journal history.
+   *
+   * Runs only when nothing is remembered yet. Live ingest resumes from a
+   * checkpoint, so a `CarrierStats` written before the app was ever installed
+   * would otherwise never be seen — the name would stay unavailable until the
+   * commander happened to open carrier management again.
+   *
+   * Bounded to the most recent journals and stops as soon as an identity is
+   * found, so this cannot become a 220-file scan on startup (§30). Deliberately
+   * kicked off after the engine is running, so it never delays live ingest.
+   */
+  private async backfillCarrierIdentities(directory: string, maxFiles = 25): Promise<void> {
+    try {
+      const files = (await listJournalFiles(directory, tauriFs)).filter((f) => f.sizeBytes > 0);
+      const recent = files.slice(-maxFiles).reverse(); // newest first
+
+      for (const file of recent) {
+        const result = await replayFile(file.fullPath, tauriFs);
+        let found = false;
+
+        for (const event of result.events) {
+          if (event.kind !== 'carrier-identity') continue;
+          const d = event.data as { carrierId: unknown; name: unknown };
+          if (typeof d.carrierId !== 'number' || typeof d.name !== 'string') continue;
+          // learnCarrier rather than applyEvent: these are historical events, and
+          // replaying them through the reducer would make the dashboard report
+          // stale activity as the latest thing that happened.
+          learnCarrier(this.state, d.carrierId, d.name);
+          await this.saveCarrierIdentity(event);
+          found = true;
+        }
+
+        if (found) {
+          logger.info('journal', 'Learned carrier identities from history', {
+            file: file.fileName,
+          });
+          // Re-resolve: we may already be docked at a carrier we just learned about.
+          this.notify();
+          if (this.overlayEnabled) this.pushOverlayState();
+          return;
+        }
+      }
+    } catch (err) {
+      logger.warn('journal', 'Carrier identity backfill failed', { error: String(err) });
+    }
   }
 
   /* ------------------------------------------------------------ persistence */

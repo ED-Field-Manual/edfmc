@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { JournalSessionContext, parseLine } from '../src/parser.js';
 import { normalize } from '../src/normalizer.js';
-import { applyEvent, initialState, type CommanderState } from '../src/state.js';
+import { applyEvent, initialState, learnCarrier, type CommanderState } from '../src/state.js';
 import { UNKNOWN } from '../src/types.js';
 
 const ctx = new JournalSessionContext();
@@ -123,6 +123,29 @@ describe('CommanderState', () => {
       expect(s.carrierName).toBe(UNKNOWN);
       // The identity itself is remembered for next time.
       expect(s.knownCarriers[3703420416]).toBe('PFC Atlas Unbound');
+    });
+
+    it('learnCarrier resolves the name without disturbing last-event state', () => {
+      // Used when loading identities from storage or historical journals. Pushing
+      // those old events through applyEvent would make the dashboard report stale
+      // activity as the most recent thing that happened.
+      let s = initialState();
+      s = feed(s, DOCKED_CARRIER);
+      const lastEvent = s.lastEventName;
+      const lastId = s.lastEventId;
+
+      learnCarrier(s, 3703420416, 'PFC Atlas Unbound');
+
+      expect(s.carrierName).toBe('PFC Atlas Unbound');
+      expect(s.lastEventName).toBe(lastEvent);
+      expect(s.lastEventId).toBe(lastId);
+    });
+
+    it('learnCarrier ignores junk input', () => {
+      const s = initialState();
+      learnCarrier(s, Number.NaN, 'x');
+      learnCarrier(s, 1, '');
+      expect(Object.keys(s.knownCarriers)).toEqual([]);
     });
 
     it('does not attach a carrier name to a normal station', () => {
