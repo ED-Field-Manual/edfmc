@@ -143,6 +143,39 @@ Warboard (116), EDO Materials Helper (86), EDDLite (45). Software identity is
 retained because source quality is a confidence input, and a buggy uploader version
 is something we will eventually need to exclude.
 
+## Validation: what actually fails, and why we pass unknown schemas
+
+Measured over 1,514 live messages: **4 failed validation (0.26%)**, all of them
+`outfitting/2` violating `uniqueItems` at `message.modules` — uploaders sending
+the same module twice in one list. That is an uploader bug, not ours, and it is
+exactly what the `quarantine` table exists to make visible rather than silent.
+
+**Messages whose schema cannot be fetched are passed through, not rejected.**
+That is deliberate and follows directly from the `outfitting/3` finding: EDDN
+adds schema versions before the repository catches up, so a worker that rejected
+anything it did not already recognise would silently stop ingesting an entire
+message type the day Frontier shipped an update. Normalization is defensive on
+its own, so an unvalidated message is degraded rather than dangerous.
+
+`$schemaRef` is attacker-influenced in principle — anyone can upload to EDDN — so
+schema fetching is restricted to `eddn.edcd.io` over HTTPS, size-capped, and a
+failed fetch is remembered so a hostile ref cannot cause one outbound request per
+message.
+
+## Verified end to end
+
+The worker was run against the live stream in dry-run mode (956 messages over
+120s): 250 station records, 62 markets, 9,947 commodity rows, 0 undecodable
+frames, 0 reconnects, 18 schemas fetched and cached from the live service —
+including `outfitting/3`, which the repository does not have.
+
+```bash
+python -m edfm_eddn.worker --dry-run --seconds 120
+```
+
+Dry-run consumes the real stream and reports what it *would* write, so the
+pipeline is verifiable without a database.
+
 ## Reproducing
 
 ```bash
