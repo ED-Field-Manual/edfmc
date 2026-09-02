@@ -47,8 +47,10 @@ import {
 import {
   DiscoveryState,
   VerificationEngine,
+  createReferenceClient,
+  observeStation,
   createStationProvider,
-  EMPTY_REFERENCE,
+  type ReferenceClient,
 } from '@edfm/verification';
 
 import { logger } from './logger.js';
@@ -119,6 +121,18 @@ const OVERLAY_MISSION_ROWS = 5;
 /** Stamped onto every observation so a report can be traced to a build. */
 const COMPANION_VERSION = '0.1.0';
 
+/**
+ * EDFM API origin.
+ *
+ * Overridable at build time so a developer can point at a local server without
+ * editing source. No secret is involved: this is a public read endpoint, and
+ * everything privileged stays server-side (§19).
+ */
+const API_BASE_URL = import.meta.env.VITE_EDFM_API_URL ?? 'https://api.edfieldmanual.com';
+
+/** Bounds the re-check map; only the newest observation per station matters. */
+const MAX_PENDING_RECHECK = 50;
+
 /** Relative expiry for display. "Expired" rather than a negative duration. */
 export function relativeExpiry(iso: string): string {
   const ms = Date.parse(iso) - Date.now();
@@ -161,6 +175,8 @@ export interface CompanionSnapshot {
   readonly contextRuleSource: string;
   readonly missions: MissionView;
   readonly verification: VerificationStats;
+  /** Whether the commander has opted in to verification (§21). */
+  readonly verificationEnabled: boolean;
 }
 
 /** Aggregate verification counters for the Contributions screen (§15). */
@@ -213,10 +229,41 @@ export class Companion {
   private discoveryFid: string | null = null;
 
   /**
-   * Runs with an empty reference for now: EDFM has no station dataset, so every
-   * station is reported as `unknown_edfm_entity` and nothing is claimed to be
-   * wrong. That is useful — it is the seed list — and it is honest.
+   * Off until the commander turns it on.
+   *
+   * §21: nothing is uploaded by default. A reference lookup is keyed by
+   * MarketID, so making one tells the server which station this commander is
+   * docked at. That is a location disclosure and needs consent, even though
+   * nothing is being submitted yet.
    */
+  private verificationEnabled = false;
+
+  /**
+   * Reference data for comparison.
+   *
+   * Verification-only. It may describe places this commander has never been,
+   * so nothing here may reach the UI: it goes to the engine and nowhere else.
+   * See docs/SPOILERS.md.
+   */
+  private readonly reference: ReferenceClient = createReferenceClient({
+    baseUrl: API_BASE_URL,
+    isEnabled: () => this.verificationEnabled,
+    // A lookup during ingest can only miss, because it cannot wait for the
+    // network. When the data lands, the event that missed is compared again --
+    // otherwise the first visit to every station would silently never be
+    // verified.
+    onArrived: (entityType, entityId) => this.recheck(entityType, entityId),
+    log: (message, detail) => logger.info('reference', message, detail ?? {}),
+  });
+
+  /**
+   * The most recent event per entity, held so `onArrived` has something to
+   * re-compare. One entry per entity, not a queue: only the newest observation
+   * of a station is worth re-checking, and an unbounded backlog of journal
+   * events is a leak.
+   */
+  private readonly pendingRecheck = new Map<string, NormalizedEvent>();
+
   private readonly verification = new VerificationEngine({
     onNotify: (n) =>
       logger.info('verification', `discrepancy ${n.reason}`, {
@@ -283,6 +330,7 @@ export class Companion {
         contextRuleSource: this.resolver.source,
         missions: this.missionView(),
         verification: this.verification.stats(),
+        verificationEnabled: this.verificationEnabled,
       };
     }
     return this.cachedSnapshot;
@@ -334,6 +382,9 @@ export class Companion {
       this.lastError = `Database unavailable: ${String(err)}`;
       logger.error('db', 'Failed to open local database', { error: String(err) });
     }
+
+    // Opt-in, and read before ingest starts so no lookup can happen first.
+    this.verificationEnabled = (await this.getSetting('verificationEnabled')) === 'true';
 
     const storedWidgets = await this.getSetting('overlayWidgets');
     if (storedWidgets) {
@@ -453,9 +504,10 @@ export class Companion {
 
     // Verification runs regardless of what the commander can see: verify
     // aggressively, reveal conservatively.
-    if (this.verification.observe(event, EMPTY_REFERENCE).length > 0) {
+    if (this.verification.observe(event, this.reference).length > 0) {
       this.verificationDirty = true;
     }
+    this.rememberForRecheck(event);
 
     if (this.missions.observe(event)) {
       this.missionsDirty = true;
@@ -866,6 +918,69 @@ export class Companion {
       }
     } catch (err) {
       logger.warn('journal', 'Carrier identity backfill failed', { error: String(err) });
+    }
+  }
+
+  /* -------------------------------------------------------- reference data */
+
+  /** Whether the commander has opted in to verification. */
+  get verificationConsent(): boolean {
+    return this.verificationEnabled;
+  }
+
+  /**
+   * Turn verification on or off.
+   *
+   * Turning it off drops the cache as well as stopping new lookups. Keeping
+   * reference data the commander has withdrawn consent for would be a quiet
+   * way of not honouring the setting.
+   */
+  async setVerificationEnabled(enabled: boolean): Promise<void> {
+    this.verificationEnabled = enabled;
+    if (!enabled) {
+      this.reference.clear();
+      this.pendingRecheck.clear();
+    }
+    await this.setSetting('verificationEnabled', String(enabled));
+    this.notify();
+  }
+
+  /**
+   * Hold the newest station event so it can be compared once reference data
+   * arrives. Without this, the first visit to any station is never verified:
+   * the lookup misses, the fetch completes moments later, and nothing goes
+   * back to look again.
+   */
+  private rememberForRecheck(event: NormalizedEvent): void {
+    if (!this.verificationEnabled) return;
+    const observation = observeStation(event);
+    if (observation === null) return;
+
+    const key = `station:${String(observation.marketId)}`;
+    this.pendingRecheck.delete(key);
+    this.pendingRecheck.set(key, event);
+    while (this.pendingRecheck.size > MAX_PENDING_RECHECK) {
+      const oldest = this.pendingRecheck.keys().next();
+      if (oldest.done) break;
+      this.pendingRecheck.delete(oldest.value);
+    }
+  }
+
+  /** Re-compare the held event now that the reference for it is cached. */
+  private recheck(entityType: string, entityId: string): void {
+    const key = `${entityType}:${entityId}`;
+    const event = this.pendingRecheck.get(key);
+    if (event === undefined) return;
+    this.pendingRecheck.delete(key);
+
+    try {
+      if (this.verification.observe(event, this.reference).length > 0) {
+        this.verificationDirty = true;
+        this.notify();
+      }
+    } catch (err) {
+      // A re-check is best effort. It must never take down ingest.
+      logger.warn('verification', 'Re-check failed', { error: String(err) });
     }
   }
 

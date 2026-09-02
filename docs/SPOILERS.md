@@ -73,6 +73,13 @@ In the client, `apps/desktop/src/lib/spoiler.ts` is the single crossing point.
 Context resources are filtered there, in `Companion.projectedContexts()`, before
 the snapshot is built — so no component ever receives an ungated resource.
 
+Server-supplied reference data is held the same way. `ReferenceClient` describes
+places this commander may never have visited, so it is passed to
+`VerificationEngine.observe()` and to nothing else: it is a private field on
+`Companion` and never enters the snapshot the UI renders from. The verification
+counters that *are* in the snapshot are aggregate counts, which cannot identify a
+location.
+
 ### What is deliberately *not* gated
 
 Dashboard, Missions, travel state and station data are all things this

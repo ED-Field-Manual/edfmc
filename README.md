@@ -8,10 +8,10 @@ and — passively — helps EDFM verify and improve its own information.
 
 This is **not** an EDMC plugin and does not require EDMarketConnector.
 
-> **Status: Phase 1.** The journal engine, local state and application shell work.
-> The overlay, context assistant, mission planner, verification, research and
-> logistics modules are designed but deliberately not built yet. See
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> **Status: Phases 0–5 and 7.** The journal engine, overlay, context assistant,
+> mission planner, EDDN ingestion and the verification backend work end to end.
+> Research (Phase 6) and logistics (Phase 8) are designed but deliberately not
+> built yet. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What works today
 
@@ -26,8 +26,15 @@ This is **not** an EDMC plugin and does not require EDMarketConnector.
   distinct from "the game said none".
 - Dashboard, Settings and Diagnostics screens.
 - Replays any journal file through the identical live pipeline.
+- A game overlay that does not inject anything into Elite Dangerous.
+- Deterministic context assistance and a mission planner with delivery
+  progress.
+- Ingests EDDN into PostgreSQL, and serves station reference data from it.
+- Verifies what your game reports against that reference, and submits
+  disagreements — **off by default**.
 
-Everything is local. Nothing is uploaded, and there is no analytics.
+Everything except verification is local, and verification is opt-in. There is no
+analytics in any configuration.
 
 ## Design commitments
 
@@ -53,9 +60,12 @@ These are constraints, not aspirations:
 apps/desktop         Tauri 2 + React/TypeScript client
 packages/
   elite-journal      Journal engine: tailer, parser, normalizer, state, replay
+  context            Deterministic context rules
+  missions           Mission tracking and delivery progress
+  verification       Evidence model, spoiler gating, comparison engine
 services/
-  api                Backend API (Phase 5+)
-  eddn-worker        EDDN ingestion, Python (Phase 7)
+  api                Backend API: reference data, submissions, notification
+  eddn-worker        EDDN ingestion, Python
 docs/                Architecture and subsystem documentation
 scripts/             Journal profiling tooling
 ```
@@ -75,7 +85,16 @@ npm install
 Run the test suite:
 
 ```bash
-npm test --workspace @edfm/elite-journal
+npm test --workspaces --if-present
+```
+
+Tests needing PostgreSQL skip unless `EDFM_TEST_DSN` is set, and refuse to run
+against a database not named for testing — they `TRUNCATE`, and pointing them at
+the development database while the EDDN worker was ingesting into it wiped a
+table mid-run.
+
+```bash
+createdb edfm_test
 ```
 
 Run the desktop client in development:
@@ -106,6 +125,10 @@ without a journal folder.
 | [PRIVACY.md](docs/PRIVACY.md) | What is stored, what is sent, what never leaves the machine |
 | [SPOILERS.md](docs/SPOILERS.md) | Discovery gating and how spoiler safety is enforced |
 | [VERIFICATION.md](docs/VERIFICATION.md) | Verification engine, evidence model, discrepancy lifecycle |
+| [API.md](docs/API.md) | Backend endpoints, identity hashing, notification rules |
+| [EDDN.md](docs/EDDN.md) | EDDN ingestion, schemas, normalization decisions |
+| [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
+| [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |
+| [MISSIONS.md](docs/MISSIONS.md) | Mission tracking and delivery progress |
 
-Overlay, API, EDDN, research, verification and logistics documents arrive with
-their respective phases.
+Research and logistics documents arrive with their respective phases.

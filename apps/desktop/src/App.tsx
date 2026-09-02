@@ -820,11 +820,41 @@ function Settings({ snap }: { snap: Snap }) {
       </section>
 
       <section className="card">
+        <h2>Verification</h2>
+        <p className="muted">
+          Compares what your game reports about stations against the community observation set,
+          and reports disagreements so EDFM can be corrected.
+        </p>
+        <label className="stack" htmlFor="verification-enabled">
+          <span>
+            <input
+              id="verification-enabled"
+              type="checkbox"
+              checked={snap.verificationEnabled}
+              onChange={(e) => void companion.setVerificationEnabled(e.target.checked)}
+            />{' '}
+            Contribute station observations
+          </span>
+        </label>
+        <p className="muted">
+          Off by default. While it is on, EDFM Companion looks up the station you are docked at,
+          which tells the server where you are. Observations are sent without your commander name
+          or ID: the server stores a one-way hash instead, which lets it tell two reporters apart
+          without knowing who either of them is. Turning this off clears what has been cached.
+        </p>
+        {snap.verificationEnabled && (
+          <p className="note">
+            Observations checked: {snap.verification.checked} · findings: {snap.verification.discrepancies}
+          </p>
+        )}
+      </section>
+
+      <section className="card">
         <h2>Privacy</h2>
         <p className="muted">
-          This build is entirely local. No journal data is uploaded, and there are no analytics.
-          Contribution and research uploads arrive in later phases and will be opt-in, with the
-          exact fields sent shown before anything leaves this machine.
+          Everything else is local. Your journals are read on this machine and never uploaded,
+          and there are no analytics. Chat, friends, private groups and travel history are never
+          sent anywhere, whatever the settings above.
         </p>
       </section>
     </>

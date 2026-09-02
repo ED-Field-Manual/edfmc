@@ -1,7 +1,11 @@
 # EDFM Verification Engine
 
 Status: **engine, evidence model and spoiler gating built; station provider
-registered; reference data still absent.**
+registered; reference data now fed from the EDDN aggregate via the API.**
+
+The comparison described below is no longer hypothetical: `services/api` serves
+station reference data and re-derives every submitted comparison server-side.
+See [API.md](API.md).
 
 ## Shape
 
@@ -112,6 +116,13 @@ This is not a blocker so much as a reordering: the observations the Companion
 collects are the only plausible seed for that dataset. Verification against EDFM
 becomes possible once EDFM has something to be verified.
 
+**Resolved by reordering, not by pretending.** Phase 7 (EDDN) ran first, and its
+aggregate is now the reference. It is served as `source: "eddn-aggregate"` and is
+never described as EDFM's view. The question it answers — "does this commander's
+game disagree with what everyone else reported?" — is real and is what seeds the
+dataset EDFM lacks. When EDFM gains one, it becomes a second `ReferenceSource`
+beside this one rather than replacing it.
+
 ## What is built
 
 **Observation capture** (`observeStation`) turns journal events into evidence.
@@ -137,9 +148,10 @@ Deliberate refusals:
   comparing it would make identical observations look like the station kept
   changing.
 
-**Comparison** (`compareStation`) is written and tested but not called. It exists
-now because it is small, and because getting it wrong produces confident false
-reports — which for a reference project is worse than producing none.
+**Comparison** (`compareStation`) runs on the client for display, and is
+re-derived independently on the server for anything that becomes a discrepancy.
+The client's version is never authoritative: it does not hold the reference, so
+a claim about what the reference says is not its to make.
 
 Its rules:
 
@@ -159,22 +171,20 @@ same journal file counts as one observation repeated. Deliberately conservative:
 treating genuinely independent reports as duplicates only slows confirmation, while
 the reverse manufactures confidence that was never earned.
 
-## Open decisions
+## Decisions, as resolved
 
-These need answers before the rest of Phase 5 is worth building:
+1. **Where does station reference data come from?** The EDDN aggregate, served by
+   the API as `eddn-aggregate`. The Companion is therefore *a* source of the data
+   it also verifies against, which is why nothing here writes to the wiki: §32
+   keeps the verification queue and the MediaWiki update separate, and human
+   review sits between them.
+2. **Where does the backend live?** `services/api`. Rate limiting, validation and
+   audit logging are built; hosting is still to be chosen.
+3. **What identity model?** Anonymous and CMDR-attributed together. Both carry a
+   keyed FID hash, because independence scoring is meaningless without a
+   distinguisher — and because it is a hash, supporting attribution costs the
+   server no knowledge of who anyone is. Independence fails closed, so a report
+   with no distinguisher cannot inflate a confirmation count.
 
-1. **Where does station reference data come from?** The Companion can seed it from
-   observations, but that makes the Companion the source of truth for data it is
-   also supposed to verify — which needs care, and human review before anything
-   reaches the wiki (§32 already says the verification queue and the MediaWiki
-   update stay separate operations).
-2. **Where does the backend live?** Discrepancy submission, server-side validation,
-   independence scoring and Discord notification all require one. §19's security
-   requirements — rate limiting, authentication, audit logging — are hosting
-   decisions as much as code ones.
-3. **What identity model?** §20 offers anonymous, CMDR-attributed and
-   EDFM-account-linked. Independence scoring is materially weaker under anonymity,
-   since FID is what makes two reports distinguishable.
-
-Until then the client captures and stores locally, which costs nothing and loses
-nothing: §22 already requires observations to queue offline and survive.
+Still open: **hosting**, and whether EDFM ever grows a first-party station
+dataset to verify against directly.
