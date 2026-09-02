@@ -275,3 +275,18 @@ input[type='text']:focus { border-color: var(--accent); }
 /* Matches the Unknown treatment used for fields: worded, italic and dimmed, so a
    gap in Frontier's data never reads as a value. */
 .unknown-inline { color: var(--muted); font-style: italic; }
+
+/* Explanatory copy under a mission. Deliberately quieter than the mission itself:
+   it is there when a player needs it and easy to skim past when they do not. */
+.mission-explain {
+  font-size: 0.75rem;
+  color: var(--muted);
+  max-width: 68ch;
+  line-height: 1.45;
+}
+.mission-caveat {
+  font-size: 0.75rem;
+  color: var(--warn);
+  max-width: 68ch;
+  line-height: 1.45;
+}

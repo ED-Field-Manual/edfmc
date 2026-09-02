@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type CommanderState, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl } from '@edfm/context';
-import type { Mission } from '@edfm/missions';
+import { explainMission, missionCaveat, type Mission } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { companion, travelLabel } from './lib/companion.js';
@@ -473,7 +473,10 @@ function MissionList({
 }) {
   return (
     <ul className="missions">
-      {missions.map((m) => (
+      {missions.map((m) => {
+        const explanation = explainMission(m);
+        const caveat = missionCaveat(m);
+        return (
         <li key={m.missionId} className="mission">
           <div className="mission-main">
             <span className="mission-name">
@@ -503,6 +506,16 @@ function MissionList({
                 )}
               </span>
             )}
+
+            {/* Frontier's own mission titles assume the mechanic is already
+                understood: "Source and return" never says you buy the cargo. */}
+            {explanation && <span className="mission-explain">{explanation}</span>}
+            {caveat && (
+              <span className="mission-caveat">
+                <span aria-hidden="true">▲ </span>
+                {caveat}
+              </span>
+            )}
           </div>
           <div className="mission-side">
             {isKnown(m.expiry) ? (
@@ -512,7 +525,8 @@ function MissionList({
             )}
           </div>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

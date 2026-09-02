@@ -7,7 +7,13 @@ import {
   type NormalizedEvent,
 } from '@edfm/elite-journal';
 
-import { MissionStore, missionCategory, missionTypeKey } from '../src/index.js';
+import {
+  MissionStore,
+  explainMission,
+  missionCaveat,
+  missionCategory,
+  missionTypeKey,
+} from '../src/index.js';
 
 let offset = 0;
 const ctx = new JournalSessionContext();
@@ -230,6 +236,52 @@ describe('reconciliation against the Missions snapshot', () => {
   it('does nothing for a snapshot with no arrays at all', () => {
     const s = new MissionStore();
     expect(s.observe(ev('{ "timestamp":"2026-07-25T18:00:00Z", "event":"Missions" }'))).toBe(false);
+  });
+});
+
+describe('explanations', () => {
+  function missionFrom(line: string) {
+    const s = new MissionStore();
+    s.observe(ev(line));
+    return s.all()[0]!;
+  }
+
+  it('explains what "source and return" actually asks of the player', () => {
+    // The journal cannot distinguish this from a provided-cargo delivery: both
+    // carry Commodity and Count and nothing else. It is editorial knowledge.
+    const m = missionFrom(
+      '{ "timestamp":"2026-07-25T05:00:00Z", "event":"MissionAccepted", "Faction":"F", "Name":"Mission_Collect_Industrial", "LocalisedName":"Source and return 1386 units of Bertrandite", "Commodity":"$Bertrandite_Name;", "Count":1386, "DestinationSystem":"Sol", "Expiry":"2026-07-26T00:00:00Z", "Wing":false, "Influence":"+", "Reputation":"+", "MissionID":901 }',
+    );
+    const text = explainMission(m)!;
+    expect(text).toContain('acquire the commodity yourself');
+    expect(text).toContain('Nothing is provided');
+  });
+
+  it('distinguishes a commodity donation from a credit donation', () => {
+    // Both are category 'donation', but only one costs you cargo and money for
+    // goods. Splitting on the data rather than the category is what makes this
+    // possible.
+    const commodity = missionFrom(COMMODITY_DONATION);
+    const credits = missionFrom(DONATION_NO_DESTINATION);
+
+    expect(explainMission(commodity)).toContain('source it yourself');
+    expect(explainMission(credits)).toContain('credits');
+    expect(explainMission(commodity)).not.toBe(explainMission(credits));
+  });
+
+  it('warns that kill progress is not journalled', () => {
+    const m = missionFrom(MASSACRE);
+    expect(missionCaveat(m)).toContain('does not record kill progress');
+  });
+
+  it('returns null rather than filler when it has nothing useful to say', () => {
+    // A vague line under every mission trains the eye to skip the useful ones.
+    const m = missionFrom(
+      '{ "timestamp":"2026-07-25T05:00:00Z", "event":"MissionAccepted", "Faction":"F", "Name":"Mission_SomethingNew", "LocalisedName":"x", "Expiry":"2026-07-26T00:00:00Z", "Wing":false, "Influence":"+", "Reputation":"+", "MissionID":902 }',
+    );
+    expect(m.category).toBe('other');
+    expect(explainMission(m)).toBeNull();
+    expect(missionCaveat(m)).toBeNull();
   });
 });
 

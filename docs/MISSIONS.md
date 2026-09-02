@@ -81,6 +81,41 @@ itself an inference from a name.
 commodity is worth flagging, which surfaces as "(incomplete)" on a destination group
 rather than a confident total that happens to be wrong.
 
+## Mission explanations are editorial, not derived
+
+Frontier's own mission titles assume the mechanic is already understood. "Source and
+return 1,386 units of Bertrandite" never says that *you* buy the 1,386 tonnes — which
+is precisely what a new commander needs to know before accepting it.
+
+**The journal cannot tell us this.** `Mission_Collect_Industrial` (source it yourself)
+and `Mission_Delivery_Boom` (cargo provided) both carry a `Commodity` and a `Count`
+and nothing that separates them. The difference is game mechanics, which only a human
+reference knows.
+
+So `explanations.ts` is explicitly editorial content. It is bundled so the feature
+works today, but structured like the context rules — versioned, keyed, replaceable —
+so **EDFM should serve it**, and correct it, without a client release. This is
+arguably wiki content that the Companion links to rather than restates; it sits in
+the client for now only because EDFM has no missions page yet (see the content gaps
+in [CONTEXT.md](CONTEXT.md)).
+
+Rules for anything added there:
+
+- describe only what the mission *requires*, never tactics or best routes;
+- never state a mechanic that cannot be checked against the game;
+- one or two sentences, because it renders beneath every mission;
+- return null rather than filler — a vague line under every mission trains the eye
+  to skip the ones worth reading.
+
+Donations split on **data** rather than category: `Mission_Altruism` and
+`Mission_AltruismCredits` are both `donation`, but one wants a commodity you have to
+source and the other wants money. The presence of a `Commodity` decides which
+explanation appears.
+
+A separate `missionCaveat()` carries statements about *the Companion's* limits rather
+than the mission's requirements — currently that Elite does not journal kill progress.
+Keeping the two apart matters: one is about the game, the other is about us.
+
 ## Reconciliation, and the `ended-unknown` status
 
 `Missions` is emitted at session start and is the authoritative list of what is
