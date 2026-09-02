@@ -7,8 +7,7 @@
  * platform-agnostic and testable without touching a real machine.
  */
 
-import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { getDefaultFs, type JournalFs } from './fs.js';
 
 /** Two filename shapes have shipped over the game's life; both are supported. */
 const MODERN = /^Journal\.(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})\.(\d+)\.log$/;
@@ -54,25 +53,20 @@ export function parseJournalFileName(
  * Ordering is by (filename timestamp, part) rather than mtime, because mtime is
  * rewritten by file copies, backups and cloud sync, and would reorder history.
  */
-export async function listJournalFiles(directory: string): Promise<JournalFile[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(directory);
-  } catch {
-    return [];
-  }
+export async function listJournalFiles(
+  directory: string,
+  io?: JournalFs,
+): Promise<JournalFile[]> {
+  const fs = io ?? getDefaultFs();
+  const entries = await fs.readDir(directory);
 
   const files: JournalFile[] = [];
   for (const fileName of entries) {
     const parsed = parseJournalFileName(fileName);
     if (!parsed) continue;
-    const fullPath = join(directory, fileName);
-    let sizeBytes = 0;
-    try {
-      sizeBytes = (await stat(fullPath)).size;
-    } catch {
-      continue; // vanished between readdir and stat
-    }
+    const fullPath = fs.join(directory, fileName);
+    const sizeBytes = await fs.size(fullPath);
+    if (sizeBytes === null) continue; // vanished between listing and stat
     files.push({ fileName, fullPath, sortKey: parsed.sortKey, part: parsed.part, sizeBytes });
   }
 
@@ -117,16 +111,7 @@ export interface ResolveOptions {
   readonly savedGamesPath?: string | undefined;
   /** Existence probe, injected for testability. */
   readonly exists?: (path: string) => Promise<boolean>;
-}
-
-const GAME_SUBPATH = join('Frontier Developments', 'Elite Dangerous');
-
-async function defaultExists(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
-  }
+  readonly fs?: JournalFs;
 }
 
 /**
@@ -136,7 +121,9 @@ async function defaultExists(path: string): Promise<boolean> {
 export async function resolveJournalDirectory(
   options: ResolveOptions = {},
 ): Promise<DirectoryResolution> {
-  const exists = options.exists ?? defaultExists;
+  const fs = options.fs ?? getDefaultFs();
+  const exists = options.exists ?? ((p: string) => fs.isDirectory(p));
+  const GAME_SUBPATH = fs.join('Frontier Developments', 'Elite Dangerous');
 
   if (options.manualOverride) {
     const ok = await exists(options.manualOverride);
@@ -150,7 +137,7 @@ export async function resolveJournalDirectory(
   }
 
   if (options.savedGamesPath) {
-    const candidate = join(options.savedGamesPath, GAME_SUBPATH);
+    const candidate = fs.join(options.savedGamesPath, GAME_SUBPATH);
     if (await exists(candidate)) {
       return {
         directory: candidate,
@@ -164,7 +151,7 @@ export async function resolveJournalDirectory(
   // relocated or absent, and Saved Games can be redirected away from it.
   const home = process.env['USERPROFILE'] ?? process.env['HOME'];
   if (home) {
-    const candidate = join(home, 'Saved Games', GAME_SUBPATH);
+    const candidate = fs.join(home, 'Saved Games', GAME_SUBPATH);
     if (await exists(candidate)) {
       return {
         directory: candidate,

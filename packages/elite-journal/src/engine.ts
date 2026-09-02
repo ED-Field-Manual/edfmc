@@ -6,10 +6,8 @@
  * regression test is only meaningful if it exercises the same code the game does.
  */
 
-import { watch, type FSWatcher } from 'node:fs';
-import { basename } from 'node:path';
-
 import { listJournalFiles, selectActiveJournal, type JournalFile } from './directory.js';
+import { getDefaultFs, type JournalFs } from './fs.js';
 import { JournalSessionContext, parseLine } from './parser.js';
 import { normalize } from './normalizer.js';
 import { FileTailer, type TailedLine } from './tailer.js';
@@ -37,6 +35,14 @@ export interface JournalEngineOptions {
    * driven purely by explicit calls and event ordering is deterministic.
    */
   readonly useWatcher?: boolean;
+  /**
+   * Change-notification source. Injected because the mechanism differs by host:
+   * `node:fs.watch` under Node, the Tauri fs-watch plugin in the webview. Returns
+   * an unsubscribe function. Falls back to the safety poll when absent.
+   */
+  readonly watchDirectory?: (directory: string, onChange: () => void) => () => void;
+  /** Filesystem port. Defaults to the Node adapter. */
+  readonly fs?: JournalFs;
   readonly onEvent: (event: NormalizedEvent) => void;
   readonly onFailure?: (failure: IngestFailure) => void;
   readonly onCheckpoint?: (checkpoint: JournalCheckpoint) => void;
@@ -85,8 +91,9 @@ export class JournalEngine {
   private tailer: FileTailer | null = null;
   private activeFile: JournalFile | null = null;
   private context = new JournalSessionContext();
-  private watcher: FSWatcher | null = null;
-  private timer: NodeJS.Timeout | null = null;
+  private unwatch: (() => void) | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly fs: JournalFs;
   /** Serialises pumps so overlapping triggers cannot interleave offset bookkeeping. */
   private pumpChain: Promise<void> = Promise.resolve();
   /** A queued-but-not-yet-started pump, used to coalesce watcher bursts. */
@@ -98,6 +105,7 @@ export class JournalEngine {
 
   constructor(options: JournalEngineOptions) {
     this.opts = options;
+    this.fs = options.fs ?? getDefaultFs();
   }
 
   get currentFile(): string | null {
@@ -112,27 +120,25 @@ export class JournalEngine {
 
     // Primary trigger: directory watch catches both appends to the active journal
     // and the appearance of a new one on rotation.
-    if (this.opts.useWatcher !== false) {
+    if (this.opts.useWatcher !== false && this.opts.watchDirectory) {
       try {
-        this.watcher = watch(this.opts.directory, { persistent: false }, () => {
-          void this.pump();
-        });
+        this.unwatch = this.opts.watchDirectory(this.opts.directory, () => void this.pump());
       } catch {
-        this.watcher = null; // fall back to the safety poll alone
+        this.unwatch = null; // fall back to the safety poll alone
       }
     }
 
     const interval = this.opts.safetyPollMs ?? 2000;
     this.timer = setInterval(() => void this.pump(), interval);
-    if (typeof this.timer.unref === 'function') this.timer.unref();
+    (this.timer as { unref?: () => void }).unref?.();
 
     await this.pump();
   }
 
   stop(): void {
     this.running = false;
-    this.watcher?.close();
-    this.watcher = null;
+    this.unwatch?.();
+    this.unwatch = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
@@ -145,7 +151,7 @@ export class JournalEngine {
    * rather than reading from a meaningless position.
    */
   private async selectFile(checkpoint: JournalCheckpoint | null): Promise<void> {
-    const files = await listJournalFiles(this.opts.directory);
+    const files = await listJournalFiles(this.opts.directory, this.fs);
     const empties = files.filter((f) => f.sizeBytes === 0).length;
     this.stats.emptyFilesSkipped = empties;
 
@@ -175,7 +181,7 @@ export class JournalEngine {
 
     const previous = this.activeFile?.fileName ?? null;
     this.activeFile = target;
-    this.tailer = new FileTailer(target.fullPath, offset);
+    this.tailer = new FileTailer(target.fullPath, offset, this.fs);
     this.context = new JournalSessionContext();
     this.stats.filesOpened += 1;
     if (previous && previous !== target.fileName) {
@@ -244,7 +250,7 @@ export class JournalEngine {
    * previous session.
    */
   private async checkRotation(): Promise<void> {
-    const files = await listJournalFiles(this.opts.directory);
+    const files = await listJournalFiles(this.opts.directory, this.fs);
     const newest = selectActiveJournal(files);
     if (!newest) return;
 
@@ -265,7 +271,7 @@ export class JournalEngine {
 
     const previous = this.activeFile.fileName;
     this.activeFile = newest;
-    this.tailer = new FileTailer(newest.fullPath, 0);
+    this.tailer = new FileTailer(newest.fullPath, 0, this.fs);
     this.context = new JournalSessionContext();
     this.stats.filesOpened += 1;
     this.stats.rotations += 1;
@@ -289,17 +295,22 @@ export interface ReplayResult {
  * Reads via FileTailer so the same partial-line and offset logic applies, which
  * means replayed events carry byte-identical `eventId`s to live ingestion.
  */
-export async function replayFile(filePath: string): Promise<ReplayResult> {
+export async function replayFile(
+  filePath: string,
+  fs?: JournalFs,
+): Promise<ReplayResult> {
   const events: NormalizedEvent[] = [];
   const failures: IngestFailure[] = [];
   const stats = emptyStats();
   const context = new JournalSessionContext();
-  const tailer = new FileTailer(filePath, 0);
+  const tailer = new FileTailer(filePath, 0, fs ?? getDefaultFs());
 
   const result = await tailer.read();
   processLines(
     result.lines,
-    basename(filePath),
+    // Basename without node:path, so replay works in the webview too. The source
+    // file name is part of every eventId, so it must match live ingestion exactly.
+    filePath.split(/[\\/]/).pop() ?? filePath,
     context,
     stats,
     (e) => events.push(e),

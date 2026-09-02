@@ -270,6 +270,7 @@ function applyLocationLike(state: CommanderState, d: LocationData): void {
     state.docking = d.docked ? 'docked' : 'undocked';
     if (d.docked) {
       state.stationName = set(state.stationName, d.stationName);
+      state.stationType = set(state.stationType, d.stationType);
       state.marketId = set(state.marketId, d.marketId);
       if (d.services !== UNKNOWN) state.stationServices = d.services as readonly StationService[];
     } else {

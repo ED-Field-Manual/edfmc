@@ -47,6 +47,23 @@ describe('CommanderState', () => {
     expect(s.stationServices).toHaveLength(2);
   });
 
+  it('takes station context from a docked Location, not only from Docked', () => {
+    // Regression: replaying a real journal that began while already docked at a
+    // fleet carrier left stationType Unknown, because Location carries the station
+    // block (57.1% of the time) and it was not being read.
+    let s = initialState();
+    s = feed(
+      s,
+      '{ "timestamp":"2026-09-02T01:00:00Z", "event":"Location", "Docked":true, "StationName":"HBN-TXN", "StationType":"FleetCarrier", "MarketID":3703420416, "StationServices":[ "dock", "commodities" ], "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "StarPos":[487.96875,90.375,-10.5625], "Body":"Wregoe JO-G c24-27 A 5", "BodyID":8, "BodyType":"Planet", "Population":0, "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$GAlAXY_MAP_INFO_state_anarchy;", "SystemSecurity_Localised":"Anarchy" }',
+    );
+
+    expect(s.docking).toBe('docked');
+    expect(s.stationName).toBe('HBN-TXN');
+    expect(s.stationType).toBe('FleetCarrier');
+    expect(s.marketId).toBe(3703420416);
+    expect(s.starPos).toEqual([487.96875, 90.375, -10.5625]);
+  });
+
   it('clears station context on undock', () => {
     let s = initialState();
     s = feed(s, DOCKED);

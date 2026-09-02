@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './fs.js';
 export * from './parser.js';
 export * from './tailer.js';
 export * from './directory.js';

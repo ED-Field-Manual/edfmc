@@ -120,6 +120,7 @@ export interface LocationData {
   readonly bodyType: Known<string>;
   readonly docked: Known<boolean>;
   readonly stationName: Known<string>;
+  readonly stationType: Known<string>;
   readonly marketId: Known<number>;
   readonly services: ReturnType<typeof normalizeStationServices> | typeof UNKNOWN;
   /** Appears only when true; absence means "not reported", handled by state. */
@@ -346,6 +347,7 @@ function locationLike(r: Readonly<Record<string, unknown>>): LocationData {
     bodyType: str(r, 'BodyType'),
     docked: bool(r, 'Docked'),
     stationName: str(r, 'StationName'),
+    stationType: str(r, 'StationType'),
     marketId: num(r, 'MarketID'),
     services: 'StationServices' in r ? normalizeStationServices(r['StationServices']) : UNKNOWN,
     onFoot: bool(r, 'OnFoot'),
