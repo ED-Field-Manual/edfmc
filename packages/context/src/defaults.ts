@@ -88,10 +88,31 @@ export const BUNDLED_RULES: ContextRuleSet = {
     },
 
     /* -------------------------------------------------------- engineering */
+    /*
+     * Engineering is triggered by *activity*, not by a station service.
+     *
+     * There was previously a rule keyed on the `engineer` service token, which was
+     * wrong: that token appears at 227 of 242 distinct stations in the corpus —
+     * including all 17 Fleet Carriers — so it does not mean "at an Engineer". It
+     * reported "At an Engineer" while docked at the commander's own carrier.
+     *
+     * `tuning` was evaluated as an alternative and rejected too: 103 of 266
+     * stations, including Lave Station and Hutton Orbital. Its actual meaning is
+     * unverified, and a rule built on an unverified token is a guess.
+     *
+     * EngineerCraft / EngineerProgress / EngineerContribution are unambiguous —
+     * they only occur when the commander is actually engineering something.
+     * Recognising the *station* as an Engineer needs a station-identity list,
+     * which is reference data belonging server-side. See docs/CONTEXT.md.
+     */
     {
-      id: 'station-engineer',
-      title: 'At an Engineer',
-      when: { kind: 'service', id: 'engineer' },
+      id: 'engineering-activity',
+      title: 'Engineering',
+      subtitle: 'Working with an Engineer',
+      when: {
+        kind: 'event',
+        name: ['EngineerCraft', 'EngineerProgress', 'EngineerContribution'],
+      },
       priority: 75,
       ttlSeconds: 1800,
       resources: [

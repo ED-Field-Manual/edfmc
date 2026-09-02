@@ -40,6 +40,18 @@ const SCAN_ORGANIC =
 
 const MUSIC = '{ "timestamp":"2026-09-01T13:28:26Z", "event":"Music", "MusicTrack":"NoTrack" }';
 
+/**
+ * Verbatim service list from the commander's own Fleet Carrier.
+ *
+ * Note it contains `engineer` — which is exactly why that token cannot be used to
+ * mean "at an Engineer".
+ */
+const DOCKED_FLEET_CARRIER =
+  '{ "timestamp":"2026-09-01T20:00:00Z", "event":"Docked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "Taxi":false, "Multicrew":false, "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "MarketID":3703420416, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationServices":[ "dock", "autodock", "commodities", "contacts", "crewlounge", "rearm", "refuel", "repair", "engineer", "flightcontroller", "stationoperations", "stationMenu", "carriermanagement", "carrierfuel", "socialspace", "exploration", "vistagenomics", "voucherredemption" ], "StationEconomy":"$economy_Carrier;", "StationEconomies":[], "DistFromStarLS":1000.0, "LandingPads":{ "Small":4, "Medium":4, "Large":8 } }';
+
+const ENGINEER_CRAFT =
+  '{ "timestamp":"2026-08-15T10:00:00Z", "event":"EngineerCraft", "Slot":"PowerPlant", "Module":"int_powerplant_size6_class5", "Ingredients":[ { "Name":"iron", "Count":1 } ], "Engineer":"Felicity Farseer", "EngineerID":300100, "BlueprintID":128673738, "BlueprintName":"PowerPlant_Armoured", "Level":1, "Quality":0.412000 }';
+
 function stateWith(line?: string): CommanderState {
   const s = initialState();
   if (line) applyEvent(s, ev(line));
@@ -151,17 +163,29 @@ describe('ContextResolver', () => {
     expect(active[0]!.triggerEvent).toBe('ProspectedAsteroid');
   });
 
-  it('activates engineering context from station services alone', () => {
+  it('activates engineering from actual engineering activity', () => {
     const r = resolver(() => 1000);
-    const state = stateWith(DOCKED_ENGINEER);
-    r.observe(ev(MUSIC), state);
-    expect(r.current().map((a) => a.rule.id)).toContain('station-engineer');
+    r.observe(ev(ENGINEER_CRAFT), initialState());
+    expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
+  });
+
+  it('does NOT claim "at an Engineer" merely because a station reports the service', () => {
+    // Regression. The `engineer` service token appears at 227 of 242 distinct
+    // stations in the corpus, including all 17 Fleet Carriers, so it says nothing
+    // about being at an Engineer. A rule keyed on it reported "At an Engineer"
+    // while the commander was docked at their own carrier.
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), stateWith(DOCKED_FLEET_CARRIER));
+
+    const ids = r.current().map((a) => a.rule.id);
+    expect(ids).not.toContain('engineering-activity');
+    expect(ids).toContain('fleet-carrier'); // what it should say instead
   });
 
   it('ranks by priority so the commander is not shown ten links at once', () => {
     const r = resolver(() => 1000);
-    const state = stateWith(DOCKED_ENGINEER);
-    r.observe(ev(MUSIC), state); // station-engineer (75)
+    const state = stateWith(DOCKED_FLEET_CARRIER);
+    r.observe(ev(ENGINEER_CRAFT), state); // engineering-activity (75)
     r.observe(ev(SCAN_ORGANIC), state); // exobiology-scan (80)
     r.observe(ev(PROSPECTED), state); // mining-prospecting (70)
 
@@ -284,6 +308,7 @@ describe('bundled rule set', () => {
     const OBSERVED = new Set([
       'Interdicted', 'ColonisationConstructionDepot', 'ScanOrganic', 'ProspectedAsteroid',
       'SAASignalsFound', 'MiningRefined', 'PowerplayMerits', 'PowerplayCollect',
+      'EngineerCraft', 'EngineerProgress', 'EngineerContribution',
       'PowerplayDeliver', 'PowerplayRank',
     ]);
 

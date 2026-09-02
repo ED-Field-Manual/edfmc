@@ -83,6 +83,33 @@ among 38 otherwise-lowercase tokens across the corpus).
 Rules store page *titles*, not URLs, so a change of domain or article path is a
 one-line change rather than an edit to every rule.
 
+## Station service tokens do not mean what their names suggest
+
+A rule keyed on the `engineer` service token shipped briefly and was wrong: it
+announced "At an Engineer" while the commander was docked at their own Fleet Carrier.
+
+Measured across the corpus (242 distinct stations docked at):
+
+| Token | Distinct stations | Verdict |
+|---|---|---|
+| `engineer` | **227 / 242**, including all 17 Fleet Carriers | Useless as an "at an Engineer" signal |
+| `tuning` | 103 / 266, including Lave Station and Hutton Orbital | Not engineer-specific either; meaning unverified |
+| `vistagenomics` | 129 / 266 | Genuine — carriers can install it, and do |
+| `materialtrader` | 37 / 266 | Genuine |
+
+Engineering is therefore triggered by **activity** (`EngineerCraft`,
+`EngineerProgress`, `EngineerContribution`), which is unambiguous, rather than by a
+station service.
+
+**No service token reliably identifies an Engineer base.** Recognising one requires a
+station-identity list — reference data that belongs server-side, since EDFM already
+holds it. Until then the Companion says nothing rather than guessing.
+
+The general lesson, and the reason this is recorded rather than quietly fixed: a
+service token's *name* is not evidence of its meaning. Before a rule depends on one,
+count how many distinct stations report it. A token present at 94% of stations cannot
+be telling you anything specific.
+
 ## Content gaps found while building this
 
 Several contexts named in the original brief have **no corresponding EDFM page**, so
