@@ -340,8 +340,7 @@ function OverlayPanel() {
             <span>
               Edit mode{' '}
               <span className="muted-inline">
-                — widgets become draggable. Press Esc, click Done, or switch away to
-                leave.
+                — widgets become draggable. Leave with the Done button or Esc.
               </span>
             </span>
           </label>

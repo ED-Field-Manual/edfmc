@@ -31,6 +31,11 @@ interface WidgetPosition {
 
 const STORAGE_KEY = 'edfm.overlay.layout.v1';
 
+/** Leave edit mode. The backend restores click-through and tells both windows. */
+function exitEditMode(): void {
+  void invoke('overlay_set_edit_mode', { editing: false }).catch(() => undefined);
+}
+
 function loadLayout(): WidgetPosition {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -51,6 +56,7 @@ export default function Overlay() {
   const [editing, setEditing] = useState(false);
   const [pos, setPos] = useState<WidgetPosition>(loadLayout);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const subs = [
@@ -75,27 +81,25 @@ export default function Overlay() {
    * Escape hatches from edit mode.
    *
    * Edit mode makes a fullscreen, always-on-top window interactive, which puts it
-   * in front of the main window's own "Edit mode" control. Without a way out from
-   * inside the overlay itself, the user is locked out of the entire desktop. Three
-   * independent exits, so no single failure can trap anyone:
-   *   1. Escape
-   *   2. the Done button
-   *   3. losing focus (alt-tab), which also restores click-through automatically
+   * in front of the main window's own control. Without a way out from inside the
+   * overlay, the user is locked out of the desktop, so there are two: Escape, and
+   * the Done button in the banner.
+   *
+   * A blur handler was tried here and removed: entering edit mode calls set_focus
+   * on the overlay, and the focus churn around that fired blur immediately, which
+   * exited edit mode before the banner was ever usable.
    */
   useEffect(() => {
     if (!editing) return;
 
-    const exit = () => void invoke('overlay_set_edit_mode', { editing: false }).catch(() => undefined);
+    // The document must hold focus for keydown to arrive at all.
+    rootRef.current?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') exit();
+      if (e.key === 'Escape') exitEditMode();
     };
     window.addEventListener('keydown', onKey);
-    window.addEventListener('blur', exit);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('blur', exit);
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [editing]);
 
   function onPointerDown(e: React.PointerEvent) {
@@ -118,17 +122,20 @@ export default function Overlay() {
   }
 
   return (
-    <div className={`overlay-root${editing ? ' editing' : ''}`}>
+    <div
+      ref={rootRef}
+      className={`overlay-root${editing ? ' editing' : ''}`}
+      // Focusable so Escape reaches the document while editing. -1 keeps it out of
+      // the tab order, since the overlay is not a normal navigable surface.
+      tabIndex={-1}
+    >
       {editing && (
         <div className="edit-banner">
           <span>Edit mode — drag the widget to reposition it.</span>
-          <button
-            type="button"
-            className="edit-done"
-            onClick={() => void invoke('overlay_set_edit_mode', { editing: false })}
-          >
-            Done (Esc)
+          <button type="button" className="edit-done" onClick={exitEditMode}>
+            Done
           </button>
+          <span className="edit-hint">or press Esc</span>
         </div>
       )}
 

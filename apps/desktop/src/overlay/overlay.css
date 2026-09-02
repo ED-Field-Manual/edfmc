@@ -81,9 +81,12 @@ body,
   color: #1a1005;
   font-size: 0.8125rem;
   font-weight: 600;
-  /* The banner itself is inert, but its Done button must be clickable --
-     it is one of the three ways out of edit mode. */
-  pointer-events: none;
+  /* Above the widget: the Done button must never end up underneath a widget the
+     user has dragged to the top of the screen. */
+  z-index: 10;
+  /* The banner only exists in edit mode, when the window is interactive anyway,
+     so it takes pointer events rather than relying on the child alone. */
+  pointer-events: auto;
 }
 
 .edit-done {
@@ -98,3 +101,13 @@ body,
   padding: 0.125rem 0.625rem;
 }
 .edit-done:hover { background: rgba(0, 0, 0, 0.3); }
+
+.edit-hint { opacity: 0.8; font-weight: 600; }
+
+/* The root is focused programmatically so Escape reaches it; that focus is a
+   mechanism, not something to advertise with a ring across the whole screen. */
+.overlay-root:focus,
+.overlay-root:focus-visible { outline: none; }
+
+/* Keep the widget clear of the banner when it is parked at the very top. */
+.overlay-root.editing .widget { margin-top: 2.25rem; }
