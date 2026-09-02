@@ -207,6 +207,28 @@ describe('ContextResolver', () => {
     expect(ids).toContain('fleet-carrier'); // what it should say instead
   });
 
+  it('drops a station context the moment the commander leaves', () => {
+    // Regression. Fleet Carrier services has a 30-minute TTL, so after undocking
+    // and flying to an orbital station it kept offering carrier links from a
+    // Coriolis. A state-scoped rule is true exactly while its condition holds.
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), stateWith(DOCKED_FLEET_CARRIER));
+    expect(r.current().map((a) => a.rule.id)).toContain('fleet-carrier');
+
+    // Same instant — well inside the TTL — but docked somewhere else.
+    expect(r.observe(ev(MUSIC), stateWith(DOCKED_ENGINEER))).toBe(true);
+    expect(r.current().map((a) => a.rule.id)).not.toContain('fleet-carrier');
+  });
+
+  it('keeps an event-triggered context after the event has passed', () => {
+    // The counterpart: prospecting is a moment, not a situation, so it must
+    // survive subsequent unrelated events for its full TTL.
+    const r = resolver(() => 1000);
+    r.observe(ev(PROSPECTED), initialState());
+    r.observe(ev(MUSIC), initialState());
+    expect(r.current().map((a) => a.rule.id)).toContain('mining-prospecting');
+  });
+
   it('ranks by priority so the commander is not shown ten links at once', () => {
     const r = resolver(() => 1000);
     const state = stateWith(DOCKED_FLEET_CARRIER);

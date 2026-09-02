@@ -15,6 +15,38 @@ export interface EvaluationInput {
 }
 
 /**
+ * Whether a condition depends on the triggering event at all.
+ *
+ * Rules split into two kinds, and they must expire differently:
+ *
+ *  - **Event-triggered** ("you prospected an asteroid") describe a moment. They
+ *    stay relevant for a while afterwards, so a TTL is the right model.
+ *  - **State-scoped** ("this station has a Material Trader") describe a situation.
+ *    They are true exactly while the situation holds, and a TTL is the *wrong*
+ *    model: the Fleet Carrier context survived for its full 30 minutes after the
+ *    commander had undocked and flown to an orbital station, cheerfully offering
+ *    carrier links from a Coriolis.
+ *
+ * A rule with no `event` node anywhere in its condition is state-scoped.
+ */
+export function usesEvent(condition: Condition, depth = 0): boolean {
+  if (depth > RULE_LIMITS.maxConditionDepth) return false;
+  if (condition === null || typeof condition !== 'object') return false;
+
+  switch (condition.kind) {
+    case 'event':
+      return true;
+    case 'all':
+    case 'any':
+      return Array.isArray(condition.of) && condition.of.some((c) => usesEvent(c, depth + 1));
+    case 'not':
+      return usesEvent(condition.of, depth + 1);
+    default:
+      return false;
+  }
+}
+
+/**
  * Read a dotted path out of an arbitrary object.
  *
  * Prototype keys are refused: rules are untrusted input, and `__proto__` or

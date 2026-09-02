@@ -5,7 +5,7 @@ import { resourceUrl } from '@edfm/context';
 import type { Mission } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-import { companion } from './lib/companion.js';
+import { companion, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
   onEditMode,
@@ -171,7 +171,7 @@ function bodyDuplicatesStation(s: CommanderState): boolean {
  * across two rows made the pair harder to read rather than easier.
  */
 function stationDisplay(s: CommanderState): string {
-  if (!isKnown(s.stationName)) return 'Unknown';
+  if (!isKnown(s.stationName)) return travelLabel(s.travel);
   if (isKnown(s.carrierName)) return `${s.carrierName} (${s.stationName})`;
   return s.stationName;
 }
@@ -216,8 +216,12 @@ function Dashboard({ snap }: { snap: Snap }) {
           <Field label="Coordinates" value={pos} wide />
           <Field label="Station" value={stationLabel} />
           <Field label="Market ID" value={show(s.marketId)} />
-          <Field label="Docking" value={s.docking === 'unknown' ? 'Unknown' : s.docking} />
+          <Field label="Status" value={travelLabel(s.travel)} />
           <Field label="Services reported" value={services} />
+          {isKnown(s.jumpTarget) && <Field label="Next jump" value={s.jumpTarget} />}
+          {isKnown(s.remainingJumps) && (
+            <Field label="Jumps remaining" value={String(s.remainingJumps)} />
+          )}
         </div>
       </section>
 

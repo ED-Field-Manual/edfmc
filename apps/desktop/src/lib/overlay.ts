@@ -47,6 +47,10 @@ export interface OverlayPushState {
   body: string | null;
   docking: string | null;
   vehicle: string | null;
+  /** Destination system while travelling; null when not on a route. */
+  jumpTarget: string | null;
+  /** Jumps left in the plotted route; null when no route is plotted. */
+  remainingJumps: number | null;
   /** Highest-ranked context only; null when nothing is currently relevant. */
   context: OverlayContext | null;
 }

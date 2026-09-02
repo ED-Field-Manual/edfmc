@@ -67,6 +67,30 @@ const HIGH_FREQUENCY_NOISE = new Set([
  */
 setDefaultFs(tauriFs);
 
+/**
+ * Human label for a travel state.
+ *
+ * "Unknown" is reserved for genuinely unknown. When the commander is in
+ * supercruise there is no station, and reporting that as missing data would
+ * misdescribe a situation the journal states plainly.
+ */
+export function travelLabel(travel: CommanderState['travel']): string {
+  switch (travel) {
+    case 'docked':
+      return 'Docked';
+    case 'landed':
+      return 'Landed';
+    case 'normal-space':
+      return 'In flight';
+    case 'supercruise':
+      return 'Supercruise';
+    case 'witch-space':
+      return 'Witch space';
+    default:
+      return 'Unknown';
+  }
+}
+
 export type ConnectionState = 'starting' | 'watching' | 'no-directory' | 'stopped' | 'error';
 
 export interface CompanionSnapshot {
@@ -314,11 +338,15 @@ export class Companion {
         starSystem: text(s.starSystem),
         // Carrier name and callsign go on one line: two rows for one place wasted
         // scarce overlay space and read as two separate things.
+        //
+        // When not docked, this row shows what the commander is *doing* instead of
+        // "Unknown". There is no station, and saying so as though it were missing
+        // data misrepresents a perfectly known situation.
         station: isKnown(s.stationName)
           ? isKnown(s.carrierName)
             ? `${s.carrierName} (${s.stationName})`
             : s.stationName
-          : null,
+          : travelLabel(s.travel),
         // Body is omitted when it merely repeats the station. BodyType "Station"
         // means the journal reported Body='Elder Hub' next to
         // StationName='Elder Hub'; a carrier is Planet or Star, so its body is
@@ -326,6 +354,9 @@ export class Companion {
         body: isKnown(s.bodyType) && s.bodyType === 'Station' ? null : text(s.body),
         docking: s.docking === 'unknown' ? null : s.docking,
         vehicle: s.vehicle === 'unknown' ? null : s.vehicle,
+        // Destination and route progress, shown only while actually travelling.
+        jumpTarget: isKnown(s.jumpTarget) ? s.jumpTarget : null,
+        remainingJumps: isKnown(s.remainingJumps) ? s.remainingJumps : null,
         // Only the single highest-ranked context reaches the overlay. Space over a
         // game window is scarce, and §6 is explicit that the commander should not
         // be handed a wall of links mid-flight.

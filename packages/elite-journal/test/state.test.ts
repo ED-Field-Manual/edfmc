@@ -181,6 +181,91 @@ describe('CommanderState', () => {
     });
   });
 
+  describe('travel state', () => {
+    const SC_ENTRY =
+      '{ "timestamp":"2026-09-01T13:30:04Z", "event":"SupercruiseEntry", "Taxi":false, "Multicrew":false, "StarSystem":"Wregoe KO-G c24-7", "SystemAddress":2008870359762 }';
+    const SC_EXIT =
+      '{ "timestamp":"2026-09-01T13:33:32Z", "event":"SupercruiseExit", "Taxi":false, "Multicrew":false, "StarSystem":"Wregoe KO-G c24-7", "SystemAddress":2008870359762, "Body":"Wregoe KO-G c24-7 7", "BodyID":13, "BodyType":"Planet" }';
+    const START_HYPER =
+      '{ "timestamp":"2026-09-01T16:45:17Z", "event":"StartJump", "JumpType":"Hyperspace", "Taxi":false, "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "StarClass":"G" }';
+    const START_SC =
+      '{ "timestamp":"2026-09-01T13:29:59Z", "event":"StartJump", "JumpType":"Supercruise", "Taxi":false }';
+    const FSD_TARGET =
+      '{ "timestamp":"2026-09-01T16:44:24Z", "event":"FSDTarget", "Name":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "StarClass":"G", "RemainingJumpsInRoute":3 }';
+    const JUMP = (sys: string) =>
+      `{ "timestamp":"2026-09-01T16:46:00Z", "event":"FSDJump", "StarSystem":"${sys}", "SystemAddress":7506361389778, "StarPos":[1.0,2.0,3.0], "Body":"${sys}", "BodyID":0, "BodyType":"Star", "JumpDist":8.0, "FuelUsed":1.0, "FuelLevel":30.0, "Population":0, "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$x;", "SystemSecurity_Localised":"Low", "Taxi":false, "Multicrew":false }`;
+
+    it('follows the observed docked -> supercruise -> docked sequence', () => {
+      let s = initialState();
+      s = feed(s, DOCKED);
+      expect(s.travel).toBe('docked');
+
+      s = feed(s, '{ "timestamp":"2026-09-01T13:40:00Z", "event":"Undocked", "StationName":"Elder Hub", "StationType":"Coriolis", "MarketID":128, "Taxi":false, "Multicrew":false }');
+      expect(s.travel).toBe('normal-space');
+
+      s = feed(s, SC_ENTRY);
+      expect(s.travel).toBe('supercruise');
+
+      s = feed(s, SC_EXIT);
+      expect(s.travel).toBe('normal-space');
+    });
+
+    it('reports witch space only for a hyperspace jump', () => {
+      // StartJump carries JumpType Hyperspace (3842) or Supercruise (1644).
+      let s = initialState();
+      s = feed(s, START_SC);
+      expect(s.travel).not.toBe('witch-space');
+
+      s = feed(s, START_HYPER);
+      expect(s.travel).toBe('witch-space');
+      expect(s.jumpTarget).toBe('Wregoe JO-G c24-27');
+    });
+
+    it('arrives in supercruise and clears the reached target', () => {
+      let s = initialState();
+      s = feed(s, START_HYPER);
+      s = feed(s, JUMP('Wregoe JO-G c24-27'));
+      expect(s.travel).toBe('supercruise');
+      expect(s.jumpTarget).toBe(UNKNOWN);
+    });
+
+    it('keeps the target when the jump landed somewhere else', () => {
+      let s = initialState();
+      s = feed(s, FSD_TARGET);
+      s = feed(s, JUMP('Somewhere Else'));
+      expect(s.jumpTarget).toBe('Wregoe JO-G c24-27');
+    });
+
+    it('tracks remaining jumps, and clears the count when a route ends', () => {
+      let s = initialState();
+      s = feed(s, FSD_TARGET);
+      expect(s.remainingJumps).toBe(3);
+
+      // RemainingJumpsInRoute is absent on 5.5% of FSDTarget events — targeting a
+      // single system with no route. That must clear the count, not keep a stale 3.
+      s = feed(s, '{ "timestamp":"2026-09-01T16:50:00Z", "event":"FSDTarget", "Name":"Sol", "SystemAddress":1, "StarClass":"G" }');
+      expect(s.jumpTarget).toBe('Sol');
+      expect(s.remainingJumps).toBe(UNKNOWN);
+    });
+
+    it('clears the route on NavRouteClear', () => {
+      let s = initialState();
+      s = feed(s, FSD_TARGET);
+      s = feed(s, '{ "timestamp":"2026-09-01T16:45:39Z", "event":"NavRouteClear" }');
+      expect(s.jumpTarget).toBe(UNKNOWN);
+      expect(s.remainingJumps).toBe(UNKNOWN);
+    });
+
+    it('records landing and lift-off', () => {
+      let s = initialState();
+      s = feed(s, '{ "timestamp":"2026-09-01T19:42:47Z", "event":"Touchdown", "PlayerControlled":true, "Taxi":false, "Multicrew":false, "StarSystem":"HIP 54134", "SystemAddress":835127920987, "Body":"HIP 54134 4 g", "BodyID":49, "OnStation":false, "OnPlanet":true, "Latitude":-32.7, "Longitude":-55.9, "NearestDestination":"X" }');
+      expect(s.travel).toBe('landed');
+
+      s = feed(s, '{ "timestamp":"2026-09-01T19:53:20Z", "event":"Liftoff", "PlayerControlled":false, "Taxi":false, "Multicrew":false, "StarSystem":"HIP 54134", "SystemAddress":835127920987, "Body":"HIP 54134 4 g", "BodyID":49, "OnStation":false, "OnPlanet":true }');
+      expect(s.travel).toBe('normal-space');
+    });
+  });
+
   it('clears station context on undock', () => {
     let s = initialState();
     s = feed(s, DOCKED);

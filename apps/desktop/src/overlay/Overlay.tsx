@@ -28,6 +28,10 @@ interface OverlayState {
   body: string | null;
   docking: string | null;
   vehicle: string | null;
+  /** Destination system while travelling; null when not on a route. */
+  jumpTarget: string | null;
+  /** Jumps left in the plotted route; null when no route is plotted. */
+  remainingJumps: number | null;
   context: OverlayContext | null;
 }
 
@@ -171,6 +175,19 @@ export default function Overlay() {
                 surface port or a carrier it is a different place and stays. */}
             {state.body && <Row label="Body" value={state.body} />}
             <Row label="Station" value={state.station} />
+            {/* Destination shown only while one is actually targeted. The jump
+                count is separate: it is absent when no multi-jump route is
+                plotted, which is not the same as one jump remaining. */}
+            {state.jumpTarget && (
+              <Row
+                label="Next jump"
+                value={
+                  state.remainingJumps !== null
+                    ? `${state.jumpTarget} · ${state.remainingJumps} left`
+                    : state.jumpTarget
+                }
+              />
+            )}
 
             {state.context && (
               <div className="context">

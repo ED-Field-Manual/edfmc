@@ -21,6 +21,30 @@ import type {
 export type DockingState = 'docked' | 'undocked' | 'unknown';
 export type VehicleState = 'ship' | 'srv' | 'on-foot' | 'taxi' | 'unknown';
 
+/**
+ * Where the commander is, in travel terms.
+ *
+ * Derived from an explicit event sequence, never inferred from absence:
+ *   Docked -> docked
+ *   Undocked / Liftoff / SupercruiseExit -> normal-space
+ *   SupercruiseEntry -> supercruise
+ *   StartJump JumpType=Hyperspace -> witch-space
+ *   FSDJump -> supercruise (arrival is always in supercruise)
+ *   Touchdown -> landed
+ *
+ * `StartJump` carries JumpType "Hyperspace" (3842) or "Supercruise" (1644);
+ * only the former means witch space. Supercruise entry is taken from
+ * SupercruiseEntry rather than StartJump, because the jump can be aborted while
+ * charging and no supercruise ever happens.
+ */
+export type TravelState =
+  | 'docked'
+  | 'landed'
+  | 'normal-space'
+  | 'supercruise'
+  | 'witch-space'
+  | 'unknown';
+
 export interface CommanderState {
   commander: Known<string>;
   fid: Known<string>;
@@ -67,6 +91,25 @@ export interface CommanderState {
   /** CarrierID -> name, accumulated from CarrierStats / CarrierNameChange. */
   knownCarriers: Record<number, string>;
 
+  travel: TravelState;
+
+  /**
+   * System the FSD is currently targeting.
+   *
+   * From `FSDTarget.Name`, and from `StartJump.StarSystem` while in witch space
+   * (100% present on hyperspace jumps, n=3842). Cleared on arrival and when the
+   * route is cleared.
+   */
+  jumpTarget: Known<string>;
+  /**
+   * Jumps left in the plotted route, from `FSDTarget.RemainingJumpsInRoute`.
+   *
+   * Present on 94.5% of FSDTarget events (n=4157) — absent when targeting a
+   * single system with no route plotted, so UNKNOWN here means "not on a route",
+   * not "zero jumps left".
+   */
+  remainingJumps: Known<number>;
+
   vehicle: VehicleState;
   ship: Known<string>;
   shipName: Known<string>;
@@ -107,6 +150,9 @@ export function initialState(): CommanderState {
     carrierName: UNKNOWN,
     knownCarriers: {},
     docking: 'unknown',
+    travel: 'unknown',
+    jumpTarget: UNKNOWN,
+    remainingJumps: UNKNOWN,
     vehicle: 'unknown',
     ship: UNKNOWN,
     shipName: UNKNOWN,
@@ -214,12 +260,20 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       state.body = set(state.body, d.body);
       state.bodyType = set(state.bodyType, d.bodyType);
       state.bodyId = set(state.bodyId, d.bodyId);
-      // Jumping always leaves any station and any planetary surface behind.
+      // Jumping always leaves any station and any planetary surface behind, and
+      // always arrives in supercruise.
       state.docking = 'undocked';
+      state.travel = 'supercruise';
       state.latitude = UNKNOWN;
       state.longitude = UNKNOWN;
       state.lastSettlement = UNKNOWN;
       clearLocation(state);
+
+      // Arrived at the target, so it is no longer a destination. A further
+      // FSDTarget will set the next leg of a route.
+      if (isKnown(state.jumpTarget) && isKnown(d.starSystem) && state.jumpTarget === d.starSystem) {
+        state.jumpTarget = UNKNOWN;
+      }
       break;
     }
 
@@ -236,6 +290,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
     case 'docked': {
       const d = event.data as DockedData;
       state.docking = 'docked';
+      state.travel = 'docked';
       state.stationName = set(state.stationName, d.stationName);
       state.stationType = set(state.stationType, d.stationType);
       state.marketId = set(state.marketId, d.marketId);
@@ -248,6 +303,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
 
     case 'undocked': {
       state.docking = 'undocked';
+      state.travel = 'normal-space';
       clearLocation(state);
       break;
     }
@@ -267,12 +323,14 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       const d = event.data as { latitude: Known<number>; longitude: Known<number> };
       state.latitude = set(state.latitude, d.latitude);
       state.longitude = set(state.longitude, d.longitude);
+      state.travel = 'landed';
       break;
     }
 
     case 'liftoff': {
       state.latitude = UNKNOWN;
       state.longitude = UNKNOWN;
+      state.travel = 'normal-space';
       break;
     }
 
@@ -293,6 +351,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
 
     case 'supercruise-entry': {
       state.docking = 'undocked';
+      state.travel = 'supercruise';
       state.latitude = UNKNOWN;
       state.longitude = UNKNOWN;
       break;
@@ -302,6 +361,33 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       const d = event.data as { body: Known<string>; bodyType: Known<string> };
       state.body = set(state.body, d.body);
       state.bodyType = set(state.bodyType, d.bodyType);
+      state.travel = 'normal-space';
+      break;
+    }
+
+    case 'fsd-target': {
+      const d = event.data as { system: Known<string>; remainingJumps: Known<number> };
+      state.jumpTarget = set(state.jumpTarget, d.system);
+      // Assigned directly rather than through set(): when no route is plotted the
+      // field is absent, and that must clear a stale count rather than keep it.
+      state.remainingJumps = d.remainingJumps;
+      break;
+    }
+
+    case 'start-jump': {
+      const d = event.data as { jumpType: Known<string>; system: Known<string> };
+      if (isKnown(d.jumpType) && d.jumpType === 'Hyperspace') {
+        state.travel = 'witch-space';
+        state.jumpTarget = set(state.jumpTarget, d.system);
+      }
+      // A Supercruise StartJump is only the charge-up. SupercruiseEntry confirms
+      // it actually happened; the jump can still be aborted before then.
+      break;
+    }
+
+    case 'nav-route-clear': {
+      state.jumpTarget = UNKNOWN;
+      state.remainingJumps = UNKNOWN;
       break;
     }
 
@@ -336,6 +422,12 @@ function applyLocationLike(state: CommanderState, d: LocationData): void {
 
   if (isKnown(d.docked)) {
     state.docking = d.docked ? 'docked' : 'undocked';
+    // Only the docked case is certain. Location does not distinguish supercruise
+    // from normal space when undocked, so travel is left alone rather than
+    // guessed — a subsequent SupercruiseEntry/Exit will say.
+    if (d.docked) state.travel = 'docked';
+    else if (isKnown(d.latitude)) state.travel = 'landed';
+
     if (d.docked) {
       state.stationName = set(state.stationName, d.stationName);
       state.stationType = set(state.stationType, d.stationType);

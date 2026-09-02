@@ -348,6 +348,39 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
     }),
   },
 
+  /**
+   * FSD target and route progress.
+   *
+   * `RemainingJumpsInRoute` is present on 94.5% of these (n=4157). Its absence
+   * means no multi-jump route is plotted — not zero jumps remaining.
+   */
+  FSDTarget: {
+    kind: 'fsd-target',
+    fn: (r) => ({
+      system: str(r, 'Name'),
+      systemAddress: num(r, 'SystemAddress'),
+      starClass: str(r, 'StarClass'),
+      remainingJumps: num(r, 'RemainingJumpsInRoute'),
+    }),
+  },
+  /**
+   * Jump charging.
+   *
+   * `JumpType` is "Hyperspace" (n=3842) or "Supercruise" (n=1644). Only the
+   * hyperspace form carries StarSystem/SystemAddress/StarClass, and it does so at
+   * 100% presence — that is where the destination shown during witch space comes
+   * from.
+   */
+  StartJump: {
+    kind: 'start-jump',
+    fn: (r) => ({
+      jumpType: str(r, 'JumpType'),
+      system: str(r, 'StarSystem'),
+      starClass: str(r, 'StarClass'),
+    }),
+  },
+  NavRouteClear: { kind: 'nav-route-clear', fn: () => ({}) },
+
   Shutdown: { kind: 'shutdown', fn: () => ({}) },
   Embark: { kind: 'embark', fn: (r) => onFootTransition(r) },
   Disembark: { kind: 'disembark', fn: (r) => onFootTransition(r) },

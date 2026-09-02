@@ -8,7 +8,7 @@
 
 import type { CommanderState, NormalizedEvent } from '@edfm/elite-journal';
 
-import { evaluate } from './evaluate.js';
+import { evaluate, usesEvent } from './evaluate.js';
 import { RULE_LIMITS, type ActiveContext, type ContextRule, type ContextRuleSet } from './types.js';
 
 export interface ResolverOptions {
@@ -21,11 +21,14 @@ export interface ResolverOptions {
 export class ContextResolver {
   private ruleSet: ContextRuleSet;
   private readonly active = new Map<string, ActiveContext>();
+  /** Rule ids whose conditions never reference the triggering event. */
+  private stateScoped = new Set<string>();
   private readonly maxActive: number;
   private readonly now: () => number;
 
   constructor(ruleSet: ContextRuleSet, options: ResolverOptions = {}) {
     this.ruleSet = sanitise(ruleSet);
+    this.stateScoped = scopedIds(this.ruleSet);
     this.maxActive = options.maxActive ?? 3;
     this.now = options.now ?? (() => Date.now());
   }
@@ -47,6 +50,7 @@ export class ContextResolver {
    */
   setRuleSet(ruleSet: ContextRuleSet): void {
     this.ruleSet = sanitise(ruleSet);
+    this.stateScoped = scopedIds(this.ruleSet);
     this.active.clear();
   }
 
@@ -59,13 +63,24 @@ export class ContextResolver {
     let changed = this.expire(now);
 
     for (const rule of this.ruleSet.rules) {
-      if (!evaluate(rule.when, { event, state })) continue;
+      const matches = evaluate(rule.when, { event, state });
+
+      if (!matches) {
+        // A state-scoped rule is true exactly while its situation holds. Letting
+        // it ride out a TTL kept "Fleet Carrier services" on screen for half an
+        // hour after the commander had docked somewhere else entirely.
+        if (this.stateScoped.has(rule.id) && this.active.delete(rule.id)) changed = true;
+        continue;
+      }
 
       const previous = this.active.get(rule.id);
       this.active.set(rule.id, {
         rule,
         matchedAt: now,
-        expiresAt: now + rule.ttlSeconds * 1000,
+        // State-scoped rules are held open by their condition, not by a clock.
+        expiresAt: this.stateScoped.has(rule.id)
+          ? Number.POSITIVE_INFINITY
+          : now + rule.ttlSeconds * 1000,
         triggerEvent: event.source.event,
         triggerEventId: event.source.provenance.eventId,
       });
@@ -143,4 +158,13 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
   }
 
   return { ...ruleSet, rules };
+}
+
+/** Ids of rules whose conditions never reference the triggering event. */
+function scopedIds(ruleSet: ContextRuleSet): Set<string> {
+  const out = new Set<string>();
+  for (const rule of ruleSet.rules) {
+    if (!usesEvent(rule.when)) out.add(rule.id);
+  }
+  return out;
 }
