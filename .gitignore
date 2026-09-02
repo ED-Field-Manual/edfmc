@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+!test/fixtures/**/*.log
+__pycache__/
+.venv/
+*.db
+*.db-journal
+*.sqlite
+.DS_Store
