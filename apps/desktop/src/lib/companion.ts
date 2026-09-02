@@ -33,6 +33,7 @@ import {
 import {
   MISSION_COLUMNS,
   MissionStore,
+  explainMission,
   fromRow,
   toRow,
   type DestinationGroup,
@@ -42,7 +43,13 @@ import {
 } from '@edfm/missions';
 
 import { logger } from './logger.js';
-import { overlayApi } from './overlay.js';
+import {
+  DEFAULT_WIDGETS,
+  overlayApi,
+  type OverlayMissionRow,
+  type OverlayMissions,
+  type OverlayWidgets,
+} from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
 
 /**
@@ -91,6 +98,26 @@ export function travelLabel(travel: CommanderState['travel']): string {
   }
 }
 
+/**
+ * How many mission rows reach the overlay.
+ *
+ * Small on purpose. The overlay competes with the game for attention, and a long
+ * list there is worse than none — the main window holds the complete set.
+ */
+const OVERLAY_MISSION_ROWS = 5;
+
+/** Relative expiry for display. "Expired" rather than a negative duration. */
+export function relativeExpiry(iso: string): string {
+  const ms = Date.parse(iso) - Date.now();
+  if (Number.isNaN(ms)) return 'Unknown';
+  if (ms <= 0) return 'Expired';
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 export type ConnectionState = 'starting' | 'watching' | 'no-directory' | 'stopped' | 'error';
 
 export interface CompanionSnapshot {
@@ -137,6 +164,7 @@ export class Companion {
   private readonly missions = new MissionStore();
   /** Set when mission state changed and has not yet been written to disk. */
   private missionsDirty = false;
+  private widgets: OverlayWidgets = { ...DEFAULT_WIDGETS };
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
   private engine: JournalEngine | null = null;
@@ -208,6 +236,17 @@ export class Companion {
     } catch (err) {
       this.lastError = `Database unavailable: ${String(err)}`;
       logger.error('db', 'Failed to open local database', { error: String(err) });
+    }
+
+    const storedWidgets = await this.getSetting('overlayWidgets');
+    if (storedWidgets) {
+      try {
+        // Merged over the defaults so a setting saved by an older build, before a
+        // widget existed, does not leave that widget permanently undefined.
+        this.widgets = { ...DEFAULT_WIDGETS, ...(JSON.parse(storedWidgets) as OverlayWidgets) };
+      } catch {
+        this.widgets = { ...DEFAULT_WIDGETS };
+      }
     }
 
     const override = await this.getSetting('journalDirectory');
@@ -360,6 +399,8 @@ export class Companion {
         // Only the single highest-ranked context reaches the overlay. Space over a
         // game window is scarce, and §6 is explicit that the commander should not
         // be handed a wall of links mid-flight.
+        missions: this.overlayMissions(),
+        widgets: this.widgets,
         context: top
           ? {
               title: top.rule.title,
@@ -372,6 +413,71 @@ export class Companion {
           : null,
       })
       .catch(() => undefined); // overlay may not be open; not an error
+  }
+
+  /** Widgets the overlay should draw. Persisted, and pushed on every update. */
+  get overlayWidgets(): OverlayWidgets {
+    return this.widgets;
+  }
+
+  async setOverlayWidgets(widgets: OverlayWidgets): Promise<void> {
+    this.widgets = widgets;
+    await this.setSetting('overlayWidgets', JSON.stringify(widgets));
+    this.pushOverlayState();
+    this.notify();
+  }
+
+  /**
+   * Mission data shaped for the overlay.
+   *
+   * Two constraints drive the shape. Expiry is pre-formatted here because the
+   * overlay is a passive view with no clock of its own, and the row list is
+   * capped because an overlay listing forty missions is unreadable in flight —
+   * the main window is where the full list belongs.
+   */
+  private overlayMissions(): OverlayMissions {
+    const { groups, withoutDestination } = this.missions.byDestination();
+    const summary = this.missions.summary();
+    const top = groups[0] ?? null;
+
+    const rows: OverlayMissionRow[] = this.missions
+      .byExpiry()
+      .slice(0, OVERLAY_MISSION_ROWS)
+      .map((m) => ({
+        id: m.missionId,
+        name: isKnown(m.localisedName) ? m.localisedName : m.name,
+        destination: isKnown(m.destinationSystem)
+          ? isKnown(m.destinationStation)
+            ? `${m.destinationSystem} · ${m.destinationStation}`
+            : m.destinationSystem
+          : null,
+        expiry: isKnown(m.expiry) ? relativeExpiry(m.expiry) : null,
+        cargo:
+          isKnown(m.count) && isKnown(m.commodity)
+            ? `${m.count} t ${isKnown(m.commodityLocalised) ? m.commodityLocalised : ''}`.trim()
+            : null,
+        note: this.widgets.edfmNotes ? explainMission(m) : null,
+      }));
+
+    return {
+      active: summary.active,
+      cargo: summary.totalCargo,
+      expiringSoon: summary.expiringSoon,
+      withoutDestination: withoutDestination.length,
+      nextStop: top
+        ? {
+            system: top.system,
+            station: top.station,
+            missions: top.missionCount,
+            cargo: top.cargoRequired,
+            cargoIncomplete: top.cargoIncomplete,
+            kills: top.killsRequired,
+            expiry: top.earliestExpiry ? relativeExpiry(top.earliestExpiry) : null,
+          }
+        : null,
+      rows,
+      more: Math.max(0, summary.active - rows.length),
+    };
   }
 
   /**

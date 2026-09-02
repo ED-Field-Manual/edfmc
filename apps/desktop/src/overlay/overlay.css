@@ -136,3 +136,54 @@ body,
   border-radius: 4px;
   padding: 0.0625rem 0.375rem;
 }
+
+/* ------------------------------------------------------- missions widget */
+
+.widget { max-width: 26rem; }
+
+.mission-summary {
+  display: flex; flex-wrap: wrap; gap: 0.75rem;
+  font-size: 0.8125rem; color: #c8c8c8;
+  padding-bottom: 0.375rem;
+}
+.mission-summary strong { color: #ededed; font-variant-numeric: tabular-nums; }
+.urgent { color: #e8c44a; }
+
+.next-stop {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding-top: 0.4375rem;
+  margin-bottom: 0.375rem;
+}
+.next-stop-label {
+  font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.07em; color: #a8a8a8;
+}
+.next-stop-where { color: #ff9d5f; font-weight: 600; }
+.next-stop-meta { font-size: 0.75rem; color: #b9b9b9; }
+
+.mission-rows { border-top: 1px solid rgba(255, 255, 255, 0.14); padding-top: 0.375rem; }
+.mission-row { padding: 0.1875rem 0; }
+.mission-row + .mission-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+
+.mission-row-head { display: flex; justify-content: space-between; gap: 0.75rem; }
+.mission-row-name {
+  font-size: 0.8125rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mission-row-exp {
+  font-size: 0.75rem; color: #b9b9b9; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mission-row-meta { font-size: 0.6875rem; color: #a8a8a8; }
+.mission-row-meta .unknown { font-style: italic; color: #9d9d9d; }
+
+.mission-row-note {
+  font-size: 0.6875rem; color: #b0b0b0; line-height: 1.35; margin-top: 0.125rem;
+}
+.note-label {
+  display: inline-block; margin-right: 0.3125rem; padding: 0 0.25rem;
+  border-radius: 3px; background: rgba(255, 125, 32, 0.22); color: #ff9d5f;
+  font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; vertical-align: 1px;
+}
+
+.mission-more { font-size: 0.6875rem; color: #9d9d9d; padding-top: 0.25rem; }

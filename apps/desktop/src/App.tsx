@@ -5,7 +5,7 @@ import { resourceUrl } from '@edfm/context';
 import { explainMission, missionCaveat, type Mission } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-import { companion, travelLabel } from './lib/companion.js';
+import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
   onEditMode,
@@ -527,7 +527,7 @@ function MissionList({
           </div>
           <div className="mission-side">
             {isKnown(m.expiry) ? (
-              <span title={m.expiry}>{formatExpiry(m.expiry)}</span>
+              <span title={m.expiry}>{relativeExpiry(m.expiry)}</span>
             ) : (
               <span className="unknown-inline">No expiry</span>
             )}
@@ -539,19 +539,11 @@ function MissionList({
   );
 }
 
-/** Relative expiry. Returns "Expired" rather than a negative duration. */
-function formatExpiry(iso: string): string {
-  const ms = Date.parse(iso) - Date.now();
-  if (Number.isNaN(ms)) return 'Unknown';
-  if (ms <= 0) return 'Expired';
-  const hours = Math.floor(ms / 3_600_000);
-  const minutes = Math.floor((ms % 3_600_000) / 60_000);
-  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
-
 function OverlayPanel() {
+  const widgets = useSyncExternalStore(
+    (cb) => companion.subscribe(cb),
+    () => companion.overlayWidgets,
+  );
   const [enabled, setEnabled] = useState(false);
   const [editing, setEditing] = useState(false);
   const [hideInactive, setHideInactive] = useState(true);
@@ -715,9 +707,52 @@ function OverlayPanel() {
       <section className="card">
         <h2>Widgets</h2>
         <p className="muted">
-          Phase 2 ships the overlay engine plus a single Current Context widget, on purpose.
-          Building the full widget set against unproven positioning and click-through
-          handling would mean rebuilding it.
+          Each widget is positioned independently in edit mode and remembers where you
+          put it.
+        </p>
+        <div className="controls">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={widgets.context}
+              onChange={(e) => void companion.setOverlayWidgets({ ...widgets, context: e.target.checked })}
+            />
+            <span>
+              Current Context{' '}
+              <span className="muted-inline">— commander, location, and relevant EDFM material</span>
+            </span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={widgets.missions}
+              onChange={(e) => void companion.setOverlayWidgets({ ...widgets, missions: e.target.checked })}
+            />
+            <span>
+              Missions{' '}
+              <span className="muted-inline">
+                — so mission details are readable without leaving the game
+              </span>
+            </span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={widgets.edfmNotes}
+              disabled={!widgets.missions}
+              onChange={(e) => void companion.setOverlayWidgets({ ...widgets, edfmNotes: e.target.checked })}
+            />
+            <span>
+              Show EDFM notes on missions{' '}
+              <span className="muted-inline">— explains what a mission type actually asks</span>
+            </span>
+          </label>
+        </div>
+        <p className="muted">
+          The Missions widget shows the five soonest to expire. The full list, with
+          links, stays in this window.
         </p>
       </section>
     </>

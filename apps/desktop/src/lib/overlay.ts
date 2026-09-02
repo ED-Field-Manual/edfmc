@@ -40,6 +40,52 @@ export interface OverlayContext {
   resources: ReadonlyArray<{ label: string; url: string }>;
 }
 
+/** Which widgets the overlay should render. Owned by the main window, pushed here. */
+export interface OverlayWidgets {
+  context: boolean;
+  missions: boolean;
+  /** Whether mission rows carry EDFM's editorial guidance. */
+  edfmNotes: boolean;
+}
+
+export const DEFAULT_WIDGETS: OverlayWidgets = {
+  context: true,
+  missions: true,
+  edfmNotes: true,
+};
+
+export interface OverlayMissionRow {
+  id: number;
+  name: string;
+  destination: string | null;
+  /** Relative expiry, pre-formatted: the overlay has no clock of its own. */
+  expiry: string | null;
+  cargo: string | null;
+  /** EDFM's editorial note, already filtered by the edfmNotes setting. */
+  note: string | null;
+}
+
+export interface OverlayMissions {
+  active: number;
+  cargo: number;
+  expiringSoon: number;
+  withoutDestination: number;
+  /** The destination with the most missions bound for it, if any. */
+  nextStop: {
+    system: string;
+    station: string | null;
+    missions: number;
+    cargo: number;
+    cargoIncomplete: boolean;
+    kills: number;
+    expiry: string | null;
+  } | null;
+  /** Capped: an overlay that lists forty missions is not readable in flight. */
+  rows: readonly OverlayMissionRow[];
+  /** How many active missions are not in `rows`. */
+  more: number;
+}
+
 export interface OverlayPushState {
   commander: string | null;
   starSystem: string | null;
@@ -53,6 +99,8 @@ export interface OverlayPushState {
   remainingJumps: number | null;
   /** Highest-ranked context only; null when nothing is currently relevant. */
   context: OverlayContext | null;
+  missions: OverlayMissions;
+  widgets: OverlayWidgets;
 }
 
 export const overlayApi = {

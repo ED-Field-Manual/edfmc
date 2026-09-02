@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -7,9 +7,9 @@ import './overlay.css';
 /**
  * Overlay root.
  *
- * Phase 2 deliberately ships the *engine* plus one trivial widget. Building eight
- * widgets against unproven positioning, DPI and click-through handling would just
- * mean rewriting eight widgets.
+ * Phase 2 shipped one widget to prove positioning, DPI and click-through. Those
+ * hold up, so this is now a small widget system: each widget is independently
+ * positioned, independently toggled, and remembers where it was put (§7).
  *
  * State arrives by event from the main window, which owns the single journal
  * engine. Running a second engine here would double every event.
@@ -21,6 +21,39 @@ interface OverlayContext {
   resources: ReadonlyArray<{ label: string; url: string }>;
 }
 
+interface MissionRow {
+  id: number;
+  name: string;
+  destination: string | null;
+  expiry: string | null;
+  cargo: string | null;
+  note: string | null;
+}
+
+interface OverlayMissions {
+  active: number;
+  cargo: number;
+  expiringSoon: number;
+  withoutDestination: number;
+  nextStop: {
+    system: string;
+    station: string | null;
+    missions: number;
+    cargo: number;
+    cargoIncomplete: boolean;
+    kills: number;
+    expiry: string | null;
+  } | null;
+  rows: readonly MissionRow[];
+  more: number;
+}
+
+interface OverlayWidgets {
+  context: boolean;
+  missions: boolean;
+  edfmNotes: boolean;
+}
+
 interface OverlayState {
   commander: string | null;
   starSystem: string | null;
@@ -28,45 +61,57 @@ interface OverlayState {
   body: string | null;
   docking: string | null;
   vehicle: string | null;
-  /** Destination system while travelling; null when not on a route. */
   jumpTarget: string | null;
-  /** Jumps left in the plotted route; null when no route is plotted. */
   remainingJumps: number | null;
   context: OverlayContext | null;
+  missions: OverlayMissions;
+  widgets: OverlayWidgets;
 }
 
-interface WidgetPosition {
+interface Point {
   x: number;
   y: number;
 }
 
-const STORAGE_KEY = 'edfm.overlay.layout.v1';
+type WidgetId = 'context' | 'missions';
+
+const STORAGE_KEY = 'edfm.overlay.layout.v2';
+
+/** Sensible starting corners, so two widgets never open stacked on each other. */
+const DEFAULT_LAYOUT: Record<WidgetId, Point> = {
+  context: { x: 32, y: 32 },
+  missions: { x: 32, y: 260 },
+};
 
 /** Leave edit mode. The backend restores click-through and tells both windows. */
 function exitEditMode(): void {
   void invoke('overlay_set_edit_mode', { editing: false }).catch(() => undefined);
 }
 
-function loadLayout(): WidgetPosition {
+function loadLayout(): Record<WidgetId, Point> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<WidgetPosition>;
-      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        return { x: parsed.x, y: parsed.y };
-      }
+      const parsed = JSON.parse(raw) as Partial<Record<WidgetId, Point>>;
+      return {
+        context: valid(parsed.context) ?? DEFAULT_LAYOUT.context,
+        missions: valid(parsed.missions) ?? DEFAULT_LAYOUT.missions,
+      };
     }
   } catch {
     // Corrupt or unavailable storage must not stop the overlay rendering.
   }
-  return { x: 32, y: 32 };
+  return { ...DEFAULT_LAYOUT };
+}
+
+function valid(p: Point | undefined): Point | null {
+  return p && typeof p.x === 'number' && typeof p.y === 'number' ? p : null;
 }
 
 export default function Overlay() {
   const [state, setState] = useState<OverlayState | null>(null);
   const [editing, setEditing] = useState(false);
-  const [pos, setPos] = useState<WidgetPosition>(loadLayout);
-  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  const [layout, setLayout] = useState<Record<WidgetId, Point>>(loadLayout);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,22 +124,21 @@ export default function Overlay() {
     };
   }, []);
 
-  // Persist position whenever it settles.
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(pos));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
     } catch {
       // Layout persistence is a convenience, not a requirement.
     }
-  }, [pos]);
+  }, [layout]);
 
   /*
    * Escape hatches from edit mode.
    *
    * Edit mode makes a fullscreen, always-on-top window interactive, which puts it
    * in front of the main window's own control. Without a way out from inside the
-   * overlay, the user is locked out of the desktop, so there are two: Escape, and
-   * the Done button in the banner.
+   * overlay the commander is locked out of the desktop, so there are two: Escape,
+   * and the Done button in the banner.
    *
    * A blur handler was tried here and removed: entering edit mode calls set_focus
    * on the overlay, and the focus churn around that fired blur immediately, which
@@ -102,9 +146,7 @@ export default function Overlay() {
    */
   useEffect(() => {
     if (!editing) return;
-
-    // The document must hold focus for keydown to arrive at all.
-    rootRef.current?.focus();
+    rootRef.current?.focus(); // keydown needs the document to hold focus
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') exitEditMode();
@@ -113,24 +155,11 @@ export default function Overlay() {
     return () => window.removeEventListener('keydown', onKey);
   }, [editing]);
 
-  function onPointerDown(e: React.PointerEvent) {
-    if (!editing) return;
-    drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }
+  const move = useCallback((id: WidgetId, point: Point) => {
+    setLayout((prev) => ({ ...prev, [id]: point }));
+  }, []);
 
-  function onPointerMove(e: React.PointerEvent) {
-    if (!drag.current) return;
-    // Clamp so a widget cannot be dragged entirely off the game window and lost.
-    const x = Math.max(0, Math.min(window.innerWidth - 80, e.clientX - drag.current.dx));
-    const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.current.dy));
-    setPos({ x, y });
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    drag.current = null;
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-  }
+  const widgets = state?.widgets;
 
   return (
     <div
@@ -142,7 +171,7 @@ export default function Overlay() {
     >
       {editing && (
         <div className="edit-banner">
-          <span>Edit mode — drag the widget to reposition it.</span>
+          <span>Edit mode — drag widgets to reposition them.</span>
           <button type="button" className="edit-done" onClick={exitEditMode}>
             Done
           </button>
@@ -150,72 +179,192 @@ export default function Overlay() {
         </div>
       )}
 
-      <div
-        className="widget"
-        style={{ left: pos.x, top: pos.y }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      >
-        <div className="widget-title">
-          <span className="dot" aria-hidden="true">
-            ◆
+      {(widgets?.context ?? true) && (
+        <Widget id="context" title="Current Context" pos={layout.context} editing={editing} onMove={move}>
+          {state === null ? (
+            <div className="row muted">Waiting for journal state…</div>
+          ) : (
+            <>
+              <Row label="CMDR" value={state.commander} />
+              <Row label="System" value={state.starSystem} />
+              {/* Body is sent as null when it merely repeats the station. */}
+              {state.body && <Row label="Body" value={state.body} />}
+              <Row label="Station" value={state.station} />
+              {state.jumpTarget && (
+                <Row
+                  label="Next jump"
+                  value={
+                    state.remainingJumps !== null
+                      ? `${state.jumpTarget} · ${state.remainingJumps} left`
+                      : state.jumpTarget
+                  }
+                />
+              )}
+
+              {state.context && (
+                <div className="context">
+                  <div className="context-title">{state.context.title}</div>
+                  {state.context.subtitle && <div className="context-sub">{state.context.subtitle}</div>}
+                  {state.context.resources.length > 0 && (
+                    <div className="context-links">
+                      {/*
+                        Labels only, not clickable. The overlay is click-through in
+                        normal play, so a link here could never be followed — showing
+                        one would promise an interaction that cannot happen.
+                      */}
+                      {state.context.resources.map((r) => (
+                        <span key={r.url} className="context-link">
+                          {r.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </Widget>
+      )}
+
+      {(widgets?.missions ?? true) && state !== null && (
+        <Widget id="missions" title="Missions" pos={layout.missions} editing={editing} onMove={move}>
+          <MissionsWidget missions={state.missions} />
+        </Widget>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- widgets */
+
+function Widget({
+  id,
+  title,
+  pos,
+  editing,
+  onMove,
+  children,
+}: {
+  id: WidgetId;
+  title: string;
+  pos: Point;
+  editing: boolean;
+  onMove: (id: WidgetId, p: Point) => void;
+  children: React.ReactNode;
+}) {
+  const drag = useRef<{ dx: number; dy: number } | null>(null);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!editing) return;
+    drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!drag.current) return;
+    // Clamp so a widget cannot be dragged off the game window and lost.
+    onMove(id, {
+      x: Math.max(0, Math.min(window.innerWidth - 80, e.clientX - drag.current.dx)),
+      y: Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.current.dy)),
+    });
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    drag.current = null;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
+  return (
+    <div
+      className="widget"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <div className="widget-title">
+        <span className="dot" aria-hidden="true">
+          ◆
+        </span>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MissionsWidget({ missions }: { missions: OverlayMissions }) {
+  if (missions.active === 0) {
+    return <div className="row muted">No active missions</div>;
+  }
+
+  return (
+    <>
+      <div className="mission-summary">
+        <span>
+          <strong>{missions.active}</strong> active
+        </span>
+        {missions.cargo > 0 && (
+          <span>
+            <strong>{missions.cargo}</strong> t cargo
           </span>
-          Current Context
-        </div>
-
-        {state === null ? (
-          <div className="row muted">Waiting for journal state…</div>
-        ) : (
-          <>
-            <Row label="CMDR" value={state.commander} />
-            <Row label="System" value={state.starSystem} />
-            {/* Body is sent as null when it merely repeats the station, so an
-                orbital dock shows one line instead of the same name twice. On a
-                surface port or a carrier it is a different place and stays. */}
-            {state.body && <Row label="Body" value={state.body} />}
-            <Row label="Station" value={state.station} />
-            {/* Destination shown only while one is actually targeted. The jump
-                count is separate: it is absent when no multi-jump route is
-                plotted, which is not the same as one jump remaining. */}
-            {state.jumpTarget && (
-              <Row
-                label="Next jump"
-                value={
-                  state.remainingJumps !== null
-                    ? `${state.jumpTarget} · ${state.remainingJumps} left`
-                    : state.jumpTarget
-                }
-              />
-            )}
-
-            {state.context && (
-              <div className="context">
-                <div className="context-title">{state.context.title}</div>
-                {state.context.subtitle && (
-                  <div className="context-sub">{state.context.subtitle}</div>
-                )}
-                {state.context.resources.length > 0 && (
-                  <div className="context-links">
-                    {/*
-                      Labels only, not clickable. The overlay is click-through in
-                      normal play, so a link here could never be followed — showing
-                      one would promise an interaction that cannot happen. The main
-                      window's Context page is where these open.
-                    */}
-                    {state.context.resources.map((r) => (
-                      <span key={r.url} className="context-link">
-                        {r.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
+        )}
+        {missions.expiringSoon > 0 && (
+          <span className="urgent">
+            <strong>{missions.expiringSoon}</strong> expiring
+          </span>
         )}
       </div>
-    </div>
+
+      {missions.nextStop && (
+        <div className="next-stop">
+          <div className="next-stop-label">Most missions at</div>
+          <div className="next-stop-where">
+            {missions.nextStop.system}
+            {missions.nextStop.station ? ` · ${missions.nextStop.station}` : ''}
+          </div>
+          <div className="next-stop-meta">
+            {missions.nextStop.missions} missions
+            {missions.nextStop.cargo > 0 &&
+              ` · ${missions.nextStop.cargo} t${missions.nextStop.cargoIncomplete ? '+' : ''}`}
+            {missions.nextStop.kills > 0 && ` · ${missions.nextStop.kills} kills`}
+            {missions.nextStop.expiry && ` · ${missions.nextStop.expiry}`}
+          </div>
+        </div>
+      )}
+
+      <div className="mission-rows">
+        {missions.rows.map((m) => (
+          <div key={m.id} className="mission-row">
+            <div className="mission-row-head">
+              <span className="mission-row-name">{m.name}</span>
+              <span className={m.expiry === 'Expired' ? 'mission-row-exp urgent' : 'mission-row-exp'}>
+                {m.expiry ?? '—'}
+              </span>
+            </div>
+            <div className="mission-row-meta">
+              {m.destination ?? <span className="unknown">No destination given</span>}
+              {m.cargo && ` · ${m.cargo}`}
+            </div>
+            {/* Labelled here for the same reason as in the main window: everything
+                else on the row came from the journal, this did not. */}
+            {m.note && (
+              <div className="mission-row-note">
+                <span className="note-label">EDFM</span>
+                {m.note}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {missions.more > 0 && <div className="mission-more">+{missions.more} more in the app</div>}
+      {missions.withoutDestination > 0 && (
+        <div className="mission-more">
+          {missions.withoutDestination} with no destination given
+        </div>
+      )}
+    </>
   );
 }
 
