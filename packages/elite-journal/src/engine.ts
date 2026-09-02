@@ -167,10 +167,16 @@ export class JournalEngine {
       }
     }
 
+    let startsMidLine = false;
     if (!target) {
       target = selectActiveJournal(files);
       // No checkpoint: optionally skip history Elite wrote before we launched.
-      offset = target && this.opts.startAtEndWhenFresh ? target.sizeBytes : 0;
+      // The size came from a directory listing, so it is not guaranteed to be a
+      // line boundary — the tailer is told to snap forward to the next newline.
+      if (target && this.opts.startAtEndWhenFresh) {
+        offset = target.sizeBytes;
+        startsMidLine = true;
+      }
     }
 
     if (!target) {
@@ -181,7 +187,7 @@ export class JournalEngine {
 
     const previous = this.activeFile?.fileName ?? null;
     this.activeFile = target;
-    this.tailer = new FileTailer(target.fullPath, offset, this.fs);
+    this.tailer = new FileTailer(target.fullPath, offset, this.fs, startsMidLine);
     this.context = new JournalSessionContext();
     this.stats.filesOpened += 1;
     if (previous && previous !== target.fileName) {

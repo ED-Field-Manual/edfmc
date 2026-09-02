@@ -91,6 +91,41 @@ describe('FileTailer', () => {
     expect(r.lines.map((l) => l.line)).toEqual(['second']);
   });
 
+  it('snaps forward to the next line when told it started mid-line', async () => {
+    // Starting "at the end" uses a size sampled from a directory listing. If Elite
+    // was mid-write, that offset lands inside a line; emitting the tail of it would
+    // surface as a spurious malformed-JSON failure.
+    const f = join(dir, 'a.log');
+    await writeFile(f, 'first\r\nsecond\r\n');
+    const t = new FileTailer(f, 10, undefined, true); // 10 is inside "second"
+    const r = await t.read();
+
+    expect(r.lines).toEqual([]); // the partial "cond" is discarded, not emitted
+
+    await appendFile(f, 'third\r\n');
+    const r2 = await t.read();
+    expect(r2.lines.map((l) => l.line)).toEqual(['third']);
+    expect(r2.lines[0]!.byteOffset).toBe(15);
+  });
+
+  it('stays armed when a mid-line start sees no newline yet', async () => {
+    const f = join(dir, 'a.log');
+    await writeFile(f, 'abcdefgh');
+    const t = new FileTailer(f, 2, undefined, true);
+    expect((await t.read()).lines).toEqual([]);
+
+    await appendFile(f, '\r\nreal\r\n');
+    const r = await t.read();
+    expect(r.lines.map((l) => l.line)).toEqual(['real']);
+  });
+
+  it('treats a zero start offset as a line boundary even when flagged', async () => {
+    const f = join(dir, 'a.log');
+    await writeFile(f, 'first\r\n');
+    const r = await new FileTailer(f, 0, undefined, true).read();
+    expect(r.lines.map((l) => l.line)).toEqual(['first']);
+  });
+
   it('reads an empty file without producing anything', async () => {
     const f = join(dir, 'empty.log');
     await writeFile(f, '');

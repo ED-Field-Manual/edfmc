@@ -57,14 +57,26 @@ export class FileTailer {
   private offset: number;
   private remainder: Uint8Array = new Uint8Array(0);
   private readonly fs: JournalFs;
+  private discardUntilNewline: boolean;
 
   constructor(
     readonly filePath: string,
     startOffset = 0,
     fs?: JournalFs,
+    /**
+     * Treat `startOffset` as an arbitrary byte position rather than a known line
+     * boundary, discarding bytes up to the first newline.
+     *
+     * Needed when starting at the end of a file whose size was sampled from a
+     * directory listing: if Elite was mid-write, that offset lands inside a line,
+     * and the remainder of it would otherwise be emitted as a complete line and
+     * reported as malformed JSON.
+     */
+    startsMidLine = false,
   ) {
     this.offset = startOffset;
     this.fs = fs ?? getDefaultFs();
+    this.discardUntilNewline = startsMidLine && startOffset > 0;
   }
 
   /** Offset that is safe to persist (start of the incomplete trailing line). */
@@ -104,7 +116,31 @@ export class FileTailer {
     }
 
     const chunk = await this.fs.readRange(this.filePath, from, size - from);
-    const combined = concat(this.remainder, chunk);
+    let combined = concat(this.remainder, chunk);
+
+    // Started at an arbitrary byte position: drop the tail of the line we landed
+    // inside, so the first thing emitted is a genuine complete line.
+    //
+    // First check whether we actually landed mid-line. The byte before the start
+    // offset is a newline whenever the offset happens to be a real line boundary,
+    // which is the common case — Elite writes whole lines, so a size sampled
+    // between writes is aligned. Discarding then would eat a legitimate line.
+    if (this.discardUntilNewline) {
+      const prev = await this.fs.readRange(this.filePath, this.offset - 1, 1);
+      if (prev.length === 1 && prev[0] === LF) this.discardUntilNewline = false;
+    }
+
+    if (this.discardUntilNewline) {
+      const firstNl = indexOfByte(combined, LF, 0);
+      if (firstNl === -1) {
+        // No line boundary yet — keep buffering and stay armed.
+        this.remainder = combined.slice(0);
+        return { lines: [], safeOffset: this.offset, truncated, pendingBytes: this.remainder.length };
+      }
+      this.offset += firstNl + 1;
+      combined = combined.slice(firstNl + 1);
+      this.discardUntilNewline = false;
+    }
 
     const lines: TailedLine[] = [];
     let cursor = 0;
@@ -132,8 +168,9 @@ export class FileTailer {
   }
 
   /** Discard buffered state and restart at `offset`. Used on rotation. */
-  reset(offset = 0): void {
+  reset(offset = 0, startsMidLine = false): void {
     this.offset = offset;
     this.remainder = new Uint8Array(0);
+    this.discardUntilNewline = startsMidLine && offset > 0;
   }
 }
