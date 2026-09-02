@@ -412,7 +412,10 @@ pub fn overlay_set_edit_mode(
     if editing {
         let _ = win.set_focus();
     }
-    app.emit_to(OVERLAY_LABEL, "overlay://edit-mode", editing)
+    // Broadcast rather than emit_to(overlay): the main window's control must stay
+    // in sync when the overlay exits edit mode by itself (Escape, Done, or losing
+    // focus), otherwise its checkbox lies about the real state.
+    app.emit("overlay://edit-mode", editing)
         .map_err(|e| e.to_string())?;
     Ok(())
 }

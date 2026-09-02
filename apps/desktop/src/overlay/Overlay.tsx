@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 import './overlay.css';
@@ -70,6 +71,33 @@ export default function Overlay() {
     }
   }, [pos]);
 
+  /*
+   * Escape hatches from edit mode.
+   *
+   * Edit mode makes a fullscreen, always-on-top window interactive, which puts it
+   * in front of the main window's own "Edit mode" control. Without a way out from
+   * inside the overlay itself, the user is locked out of the entire desktop. Three
+   * independent exits, so no single failure can trap anyone:
+   *   1. Escape
+   *   2. the Done button
+   *   3. losing focus (alt-tab), which also restores click-through automatically
+   */
+  useEffect(() => {
+    if (!editing) return;
+
+    const exit = () => void invoke('overlay_set_edit_mode', { editing: false }).catch(() => undefined);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exit();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', exit);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', exit);
+    };
+  }, [editing]);
+
   function onPointerDown(e: React.PointerEvent) {
     if (!editing) return;
     drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
@@ -93,7 +121,14 @@ export default function Overlay() {
     <div className={`overlay-root${editing ? ' editing' : ''}`}>
       {editing && (
         <div className="edit-banner">
-          Overlay edit mode — drag widgets to reposition. Close edit mode in Settings.
+          <span>Edit mode — drag the widget to reposition it.</span>
+          <button
+            type="button"
+            className="edit-done"
+            onClick={() => void invoke('overlay_set_edit_mode', { editing: false })}
+          >
+            Done (Esc)
+          </button>
         </div>
       )}
 

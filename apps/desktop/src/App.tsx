@@ -4,6 +4,7 @@ import { isKnown, type Known } from '@edfm/elite-journal';
 import { companion } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
+  onEditMode,
   onEliteWindow,
   overlayApi,
   type DisplayModeInfo,
@@ -220,7 +221,14 @@ function OverlayPanel() {
   useEffect(() => {
     void overlayApi.displayMode().then(setMode).catch(() => undefined);
     void overlayApi.eliteWindow().then(setWin).catch(() => undefined);
-    return onEliteWindow(setWin);
+    const stopWin = onEliteWindow(setWin);
+    // The overlay can leave edit mode on its own (Escape, Done, or losing focus),
+    // so this control follows the real state rather than assuming it owns it.
+    const stopEdit = onEditMode(setEditing);
+    return () => {
+      stopWin();
+      stopEdit();
+    };
   }, []);
 
   async function toggle(next: boolean) {
@@ -330,7 +338,11 @@ function OverlayPanel() {
               onChange={(e) => void toggleEdit(e.target.checked)}
             />
             <span>
-              Edit mode <span className="muted-inline">— widgets become draggable</span>
+              Edit mode{' '}
+              <span className="muted-inline">
+                — widgets become draggable. Press Esc, click Done, or switch away to
+                leave.
+              </span>
             </span>
           </label>
 

@@ -72,11 +72,29 @@ body,
   top: 0;
   left: 0;
   right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
   padding: 0.5rem;
-  text-align: center;
-  background: rgba(255, 125, 32, 0.92);
+  background: rgba(255, 125, 32, 0.94);
   color: #1a1005;
   font-size: 0.8125rem;
   font-weight: 600;
+  /* The banner itself is inert, but its Done button must be clickable --
+     it is one of the three ways out of edit mode. */
   pointer-events: none;
 }
+
+.edit-done {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.18);
+  color: #1a1005;
+  font: inherit;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 0.125rem 0.625rem;
+}
+.edit-done:hover { background: rgba(0, 0, 0, 0.3); }

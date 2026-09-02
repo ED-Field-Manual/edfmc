@@ -53,11 +53,10 @@ export const overlayApi = {
   pushState: (payload: OverlayPushState) => invoke<void>('overlay_push_state', { payload }),
 };
 
-/** Subscribe to game-window updates emitted by the tracking thread. */
-export function onEliteWindow(fn: (info: EliteWindowInfo) => void): () => void {
+function subscribe<T>(event: string, fn: (payload: T) => void): () => void {
   let stop: (() => void) | null = null;
   let disposed = false;
-  void listen<EliteWindowInfo>('overlay://elite-window', (e) => fn(e.payload)).then((f) => {
+  void listen<T>(event, (e) => fn(e.payload)).then((f) => {
     if (disposed) f();
     else stop = f;
   });
@@ -65,4 +64,19 @@ export function onEliteWindow(fn: (info: EliteWindowInfo) => void): () => void {
     disposed = true;
     stop?.();
   };
+}
+
+/** Subscribe to game-window updates emitted by the tracking thread. */
+export function onEliteWindow(fn: (info: EliteWindowInfo) => void): () => void {
+  return subscribe<EliteWindowInfo>('overlay://elite-window', fn);
+}
+
+/**
+ * Subscribe to edit-mode changes.
+ *
+ * Edit mode can be ended from inside the overlay, so any UI showing it must
+ * follow this rather than tracking its own copy.
+ */
+export function onEditMode(fn: (editing: boolean) => void): () => void {
+  return subscribe<boolean>('overlay://edit-mode', fn);
 }
