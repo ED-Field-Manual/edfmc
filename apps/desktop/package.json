@@ -17,7 +17,8 @@
     "@tauri-apps/plugin-sql": "^2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@edfm/context": "*"
+    "@edfm/context": "*",
+    "@edfm/missions": "*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

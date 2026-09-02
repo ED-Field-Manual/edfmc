@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl } from '@edfm/context';
+import type { Mission } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { companion } from './lib/companion.js';
@@ -44,6 +45,7 @@ type Section = (typeof SECTIONS)[number];
 
 const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Context',
+  'Missions',
   'Dashboard',
   'Overlay',
   'Settings',
@@ -51,7 +53,7 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
 ]);
 
 const PHASE: Partial<Record<Section, string>> = {
-  Missions: 'Phase 4',
+
   Logistics: 'Phase 8',
   Research: 'Phase 6',
   Contributions: 'Phase 5',
@@ -105,6 +107,7 @@ export default function App() {
       <main className="main">
         {section === 'Dashboard' && <Dashboard snap={snap} />}
         {section === 'Context' && <ContextPanel snap={snap} />}
+        {section === 'Missions' && <MissionsPanel snap={snap} />}
         {section === 'Overlay' && <OverlayPanel />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
@@ -287,6 +290,211 @@ function ContextPanel({ snap }: { snap: Snap }) {
       </section>
     </>
   );
+}
+
+type MissionViewMode = 'destination' | 'expiry' | 'type';
+
+function MissionsPanel({ snap }: { snap: Snap }) {
+  const [mode, setMode] = useState<MissionViewMode>('destination');
+  const { summary, groups, withoutDestination, byExpiry } = snap.missions;
+
+  return (
+    <>
+      <header className="page-head">
+        <h1>Missions</h1>
+        <p className="muted">
+          Active missions from the journal. Fields the game did not report are shown as
+          Unknown — around half of accepted missions carry no destination at all.
+        </p>
+      </header>
+
+      <section className="card">
+        <h2>Summary</h2>
+        <div className="grid">
+          <Field label="Active" value={String(summary.active)} />
+          <Field label="Cargo required" value={`${summary.totalCargo} t`} />
+          <Field label="Expiring within an hour" value={String(summary.expiringSoon)} />
+          <Field label="No destination given" value={String(summary.withoutDestination)} />
+        </div>
+        {Object.keys(summary.categories).length > 0 && (
+          <ul className="tags">
+            {Object.entries(summary.categories)
+              .sort((a, b) => b[1] - a[1])
+              .map(([category, n]) => (
+                <li key={category}>
+                  {category} <span className="count">{n}</span>
+                </li>
+              ))}
+          </ul>
+        )}
+      </section>
+
+      {summary.active === 0 ? (
+        <section className="card">
+          <h2>No active missions</h2>
+          <p className="muted">
+            Missions appear here as you accept them, and are remembered across restarts.
+          </p>
+        </section>
+      ) : (
+        <>
+          <div className="tabs" role="tablist" aria-label="Mission grouping">
+            {(['destination', 'expiry', 'type'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                className={mode === m ? 'tab active' : 'tab'}
+                onClick={() => setMode(m)}
+              >
+                By {m}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'destination' && (
+            <>
+              {groups.map((g) => (
+                <section className="card" key={g.key}>
+                  <h2>
+                    {g.system}
+                    {g.station ? ` · ${g.station}` : ''}
+                  </h2>
+                  <div className="grid">
+                    <Field label="Missions" value={String(g.missionCount)} />
+                    <Field
+                      label="Cargo"
+                      // A carrying mission that reported no count must not be
+                      // silently averaged away into a confident total.
+                      value={g.cargoIncomplete ? `${g.cargoRequired} t (incomplete)` : `${g.cargoRequired} t`}
+                    />
+                    <Field label="Kills" value={g.killsRequired > 0 ? String(g.killsRequired) : '—'} />
+                    <Field label="Earliest expiry" value={g.earliestExpiry ?? 'Unknown'} />
+                  </div>
+                  {g.targetFactions.length > 0 && (
+                    <p className="muted">Targets: {g.targetFactions.join(', ')}</p>
+                  )}
+                  <MissionList missions={g.missions} />
+                </section>
+              ))}
+
+              {withoutDestination.length > 0 && (
+                <section className="card">
+                  <h2>No destination given</h2>
+                  <p className="muted">
+                    The journal recorded no destination for these. That is a gap in what
+                    Elite reports, not a lookup failure — they are shown here rather than
+                    guessed at.
+                  </p>
+                  <MissionList missions={withoutDestination} />
+                </section>
+              )}
+            </>
+          )}
+
+          {mode === 'expiry' && (
+            <section className="card">
+              <h2>By expiry</h2>
+              <MissionList missions={byExpiry} showDestination />
+            </section>
+          )}
+
+          {mode === 'type' && <MissionsByType missions={byExpiry} />}
+        </>
+      )}
+    </>
+  );
+}
+
+function MissionsByType({ missions }: { missions: readonly Mission[] }) {
+  const grouped = useMemo(() => {
+    const out = new Map<string, Mission[]>();
+    for (const m of missions) {
+      const bucket = out.get(m.category);
+      if (bucket) bucket.push(m);
+      else out.set(m.category, [m]);
+    }
+    return [...out.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [missions]);
+
+  return (
+    <>
+      {grouped.map(([category, list]) => (
+        <section className="card" key={category}>
+          <h2>
+            {category} ({list.length})
+          </h2>
+          <MissionList missions={list} showDestination />
+        </section>
+      ))}
+    </>
+  );
+}
+
+function MissionList({
+  missions,
+  showDestination,
+}: {
+  missions: readonly Mission[];
+  showDestination?: boolean;
+}) {
+  return (
+    <ul className="missions">
+      {missions.map((m) => (
+        <li key={m.missionId} className="mission">
+          <div className="mission-main">
+            <span className="mission-name">
+              {isKnown(m.localisedName) ? m.localisedName : m.name}
+            </span>
+            <span className="mission-meta">
+              {isKnown(m.faction) ? m.faction : 'Unknown faction'}
+              {m.redirected && <span className="badge">redirected</span>}
+              {/* Kill counts are accepted/completed only — Elite does not journal
+                  incremental progress, so no partial counter is shown (§8). */}
+              {isKnown(m.killCount) && <span className="badge">{m.killCount} kills</span>}
+              {isKnown(m.count) && isKnown(m.commodity) && (
+                <span className="badge">
+                  {m.count} t {isKnown(m.commodityLocalised) ? m.commodityLocalised : ''}
+                </span>
+              )}
+            </span>
+            {showDestination && (
+              <span className="mission-meta">
+                {isKnown(m.destinationSystem) ? (
+                  <>
+                    {m.destinationSystem}
+                    {isKnown(m.destinationStation) ? ` · ${m.destinationStation}` : ''}
+                  </>
+                ) : (
+                  <span className="unknown-inline">No destination given</span>
+                )}
+              </span>
+            )}
+          </div>
+          <div className="mission-side">
+            {isKnown(m.expiry) ? (
+              <span title={m.expiry}>{formatExpiry(m.expiry)}</span>
+            ) : (
+              <span className="unknown-inline">No expiry</span>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Relative expiry. Returns "Expired" rather than a negative duration. */
+function formatExpiry(iso: string): string {
+  const ms = Date.parse(iso) - Date.now();
+  if (Number.isNaN(ms)) return 'Unknown';
+  if (ms <= 0) return 'Expired';
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function OverlayPanel() {

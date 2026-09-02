@@ -236,3 +236,42 @@ input[type='text']:focus { border-color: var(--accent); }
   background: var(--surface-3); border-radius: 4px; padding: 0.0625rem 0.25rem;
   font-family: Consolas, "Cascadia Mono", monospace; font-size: 0.6875rem;
 }
+
+/* ------------------------------------------------------------ missions */
+
+.tabs { display: flex; gap: 0.375rem; margin-bottom: 1rem; }
+.tab {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--muted); font: inherit; cursor: pointer; padding: 0.375rem 0.875rem;
+  text-transform: capitalize;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-3));
+  border-color: var(--accent); color: var(--text);
+}
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.missions { list-style: none; padding: 0; margin: 0.75rem 0 0; }
+.mission {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+  padding: 0.5rem 0; border-top: 1px solid var(--line);
+}
+.mission:first-child { border-top: 0; }
+
+.mission-main { display: flex; flex-direction: column; gap: 0.1875rem; min-width: 0; }
+.mission-name { font-size: 0.9375rem; }
+.mission-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem;
+  font-size: 0.75rem; color: var(--muted);
+}
+.mission-side { font-size: 0.8125rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.badge {
+  background: var(--surface-3); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 0.3125rem; font-size: 0.6875rem; color: var(--text);
+}
+
+/* Matches the Unknown treatment used for fields: worded, italic and dimmed, so a
+   gap in Frontier's data never reads as a value. */
+.unknown-inline { color: var(--muted); font-style: italic; }

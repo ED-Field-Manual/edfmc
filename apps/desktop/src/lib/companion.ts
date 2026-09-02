@@ -30,6 +30,17 @@ import {
   type ActiveContext,
 } from '@edfm/context';
 
+import {
+  MISSION_COLUMNS,
+  MissionStore,
+  fromRow,
+  toRow,
+  type DestinationGroup,
+  type Mission,
+  type MissionRow,
+  type MissionSummary,
+} from '@edfm/missions';
+
 import { logger } from './logger.js';
 import { overlayApi } from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
@@ -69,6 +80,14 @@ export interface CompanionSnapshot {
   readonly contexts: readonly ActiveContext[];
   readonly contextRuleVersion: number;
   readonly contextRuleSource: string;
+  readonly missions: MissionView;
+}
+
+export interface MissionView {
+  readonly summary: MissionSummary;
+  readonly groups: readonly DestinationGroup[];
+  readonly withoutDestination: readonly Mission[];
+  readonly byExpiry: readonly Mission[];
 }
 
 const EMPTY_STATS: IngestStats = {
@@ -91,6 +110,9 @@ export class Companion {
    * (§22). A server-supplied set supersedes it via `setContextRules`.
    */
   private readonly resolver = new ContextResolver(BUNDLED_RULES, { maxActive: 3 });
+  private readonly missions = new MissionStore();
+  /** Set when mission state changed and has not yet been written to disk. */
+  private missionsDirty = false;
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
   private engine: JournalEngine | null = null;
@@ -130,6 +152,7 @@ export class Companion {
         contexts: this.resolver.current(),
         contextRuleVersion: this.resolver.version,
         contextRuleSource: this.resolver.source,
+        missions: this.missionView(),
       };
     }
     return this.cachedSnapshot;
@@ -187,6 +210,7 @@ export class Companion {
     // Load before ingest starts, so a carrier we are already docked at resolves
     // on the first Location/Docked event rather than after it.
     const rememberedCarriers = await this.loadKnownCarriers();
+    await this.loadMissions();
 
     const checkpoint = await this.loadCheckpoint();
     this.engine = new JournalEngine({
@@ -220,7 +244,13 @@ export class Companion {
 
     // Checkpoints are written on a timer rather than per event: at 45k events per
     // session a write per event would be pointless disk churn.
-    setInterval(() => void this.flushCheckpoint(), 3000);
+    setInterval(() => {
+      void this.flushCheckpoint();
+      if (this.missionsDirty) {
+        this.missionsDirty = false;
+        void this.saveMissions();
+      }
+    }, 3000);
     this.notify();
 
     // Deliberately not awaited: this reads historical journals and must never
@@ -239,6 +269,11 @@ export class Companion {
 
   private onEvent(event: NormalizedEvent): void {
     applyEvent(this.state, event);
+
+    if (this.missions.observe(event)) {
+      this.missionsDirty = true;
+      this.notify();
+    }
 
     // Carrier identities are stable reference data: learn once, remember forever.
     if (event.kind === 'carrier-identity') void this.saveCarrierIdentity(event);
@@ -313,6 +348,57 @@ export class Companion {
       source: this.resolver.source,
     });
     this.notify();
+  }
+
+  /* -------------------------------------------------------------- missions */
+
+  private missionView(): MissionView {
+    const { groups, withoutDestination } = this.missions.byDestination();
+    return {
+      summary: this.missions.summary(),
+      groups,
+      withoutDestination,
+      byExpiry: this.missions.byExpiry(),
+    };
+  }
+
+  private async loadMissions(): Promise<void> {
+    if (!this.db) return;
+    try {
+      const rows = await this.db.select<MissionRow[]>('SELECT * FROM missions');
+      this.missions.load(rows.map(fromRow));
+      logger.info('missions', 'Loaded from storage', { count: rows.length });
+    } catch (err) {
+      logger.warn('db', 'Could not load missions', { error: String(err) });
+    }
+  }
+
+  /**
+   * Persist every mission the store currently holds.
+   *
+   * Written wholesale rather than per-change because a single `Missions`
+   * reconciliation can alter many rows at once, and the set is small — the
+   * busiest snapshot in the corpus held 20 active missions.
+   */
+  private async saveMissions(): Promise<void> {
+    if (!this.db) return;
+    const all = this.missions.all();
+    if (all.length === 0) return;
+
+    const columns = MISSION_COLUMNS.join(', ');
+    const placeholders = MISSION_COLUMNS.map((_, i) => `$${i + 1}`).join(', ');
+
+    try {
+      for (const mission of all) {
+        const row = toRow(mission) as unknown as Record<string, unknown>;
+        await this.db.execute(
+          `INSERT OR REPLACE INTO missions (${columns}) VALUES (${placeholders})`,
+          MISSION_COLUMNS.map((c) => row[c] ?? null),
+        );
+      }
+    } catch (err) {
+      logger.warn('db', 'Could not save missions', { error: String(err) });
+    }
   }
 
   /* ------------------------------------------------- carrier identities */

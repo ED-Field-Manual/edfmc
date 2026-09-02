@@ -1,0 +1,112 @@
+# Mission Planner
+
+Tracks active missions, groups them by destination, expiry and type, and persists
+them across restarts.
+
+## What the journal will not tell you
+
+Measured across the corpus (n=270 `MissionAccepted`):
+
+| Field | Presence |
+|---|---|
+| `MissionID`, `Name`, `Faction`, `Influence`, `Reputation`, `Wing` | 100% |
+| `Expiry` | 99.3% |
+| **`DestinationSystem`** | **54.8%** |
+| **`DestinationStation`** | **47.0%** |
+| `Reward` | 48.1% |
+| `Donation` | 44.4% |
+| `TargetFaction` | 30.7% |
+| `Commodity` / `Count` | 22.6% |
+| `KillCount` | 10.0% |
+| `DestinationSettlement` | 4.8% |
+
+**Roughly half of accepted missions carry no destination at all.** Those are shown
+in their own group headed "No destination given" rather than bucketed under a
+placeholder, because "the game did not say where" is a different fact from
+"somewhere unnamed".
+
+**Massacre progress is not journalled.** Only accepted and completed transitions are
+reliable, so no partial kill counter is shown — §8 anticipated this, and the corpus
+confirms it. The accepted `KillCount` is displayed as a requirement, never as
+progress.
+
+## Four traps in the mission events
+
+Each of these would produce silently wrong results, and each has a test.
+
+### 1. The `Missions` snapshot uses different names
+
+The same mission appears under three different names depending on the event:
+
+| Event | Name |
+|---|---|
+| `MissionAccepted` | `Mission_Altruism` |
+| `Missions` snapshot | `Mission_Altruism_name` |
+| Colonisation entry | `$Mission_Colonisation_Initial_Name;` |
+
+Joining on name would silently fail. **Everything joins on `MissionID` only.**
+`missionTypeKey()` folds all three forms — plus Frontier's inconsistent casing
+(`MISSION_Salvage_Illegal` beside `Mission_Courier`) — to one key, used for
+categorising and never for joining.
+
+### 2. `Missions.Expires` has ambiguous units
+
+Normal missions report seconds remaining (85523, 42077). A colonisation entry
+reported `1789699599`, which is only sensible as a Unix timestamp — as a duration it
+would be 56 years.
+
+Rather than guess per-mission which unit applies, **`Expires` is not used for expiry
+at all.** `MissionAccepted.Expiry` (an ISO string, 99.3% present) is the sole source,
+and the snapshot is used solely to reconcile *which* missions exist.
+
+### 3. MissionID can exceed JavaScript's safe integer range
+
+`MissionID` is u64. One real value in the corpus — `18446744073709551615` (2^64-1),
+the colonisation pseudo-mission sentinel, seen 113 times — exceeds `Number.MAX_SAFE_INTEGER`
+and loses precision the moment `JSON.parse` touches it.
+
+That sentinel is excluded rather than tracked, and `Mission.idIsReliable` records the
+distinction so an imprecise id can never be silently joined against a genuine one.
+Real mission ids are around 1e9 and unaffected.
+
+### 4. Cargo cannot be derived from mission category
+
+`Mission_Altruism` and `Mission_AltruismCredits` are both donations, but the first is
+"donate 32 units of Micro Controllers" — 32t of hold — and the second is credits.
+An early implementation gated cargo on category and undercounted, because category is
+itself an inference from a name.
+
+**Cargo is decided by the data**: a mission requires cargo when it reports both a
+`Commodity` and a `Count`. Category is used only to decide whether a *missing*
+commodity is worth flagging, which surfaces as "(incomplete)" on a destination group
+rather than a confident total that happens to be wrong.
+
+## Reconciliation, and the `ended-unknown` status
+
+`Missions` is emitted at session start and is the authoritative list of what is
+actually active. It is the only way to notice missions that ended while the
+application was closed.
+
+When a tracked mission is absent from all three snapshot lists, it gets the status
+**`ended-unknown`**. It ended — completed, failed, abandoned or expired — and the
+journal does not say which. Recording it as "completed" would invent an outcome and
+inflate the commander's record, which matters once Phase 5 starts reporting
+contribution history.
+
+## Not yet built: recommended next destination
+
+§8 permits a routing feature only when reliable coordinate and distance data exists.
+`FSDJump.StarPos` is present at 100%, but only for systems the commander has
+*visited* — a mission destination is frequently somewhere they have never been, and
+its coordinates are simply not in the journal.
+
+Routing therefore waits for the backend's system coordinate data. Claiming an
+"optimised route" over destinations whose positions are unknown would be exactly the
+kind of confident-but-baseless output this project exists to avoid.
+
+## Passenger missions
+
+Passenger fields (`PassengerCount`, `PassengerType`, `PassengerVIPs`,
+`PassengerWanted`) were **not observed anywhere in the corpus**. They are parsed
+defensively because Frontier documents them, but nothing asserts they behave as
+expected — they read UNKNOWN until a real sample proves otherwise.

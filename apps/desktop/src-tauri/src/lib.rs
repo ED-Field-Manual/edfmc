@@ -90,6 +90,57 @@ fn migrations() -> Vec<Migration> {
             );
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 3,
+        description: "missions",
+        sql: r#"
+            -- Explicit columns rather than a JSON blob (§26): missions are a
+            -- first-class entity that later phases group and query.
+            --
+            -- Every optional column is nullable, and NULL means "the game did not
+            -- report this" -- distinct from 0 or ''. Collapsing that distinction
+            -- on the way to disk would destroy it across a restart.
+            CREATE TABLE IF NOT EXISTS missions (
+                mission_id             INTEGER PRIMARY KEY,
+                id_reliable            INTEGER NOT NULL DEFAULT 1,
+                name                   TEXT NOT NULL,
+                type_key               TEXT NOT NULL,
+                category               TEXT NOT NULL,
+                localised_name         TEXT,
+                faction                TEXT,
+                influence              TEXT,
+                reputation             TEXT,
+                wing                   INTEGER,
+                destination_system     TEXT,
+                destination_station    TEXT,
+                destination_settlement TEXT,
+                target_faction         TEXT,
+                target                 TEXT,
+                target_type            TEXT,
+                commodity              TEXT,
+                commodity_localised    TEXT,
+                count                  INTEGER,
+                kill_count             INTEGER,
+                passenger_count        INTEGER,
+                passenger_type         TEXT,
+                passenger_vips         INTEGER,
+                passenger_wanted       INTEGER,
+                reward                 INTEGER,
+                donation               INTEGER,
+                expiry                 TEXT,
+                status                 TEXT NOT NULL,
+                redirected             INTEGER NOT NULL DEFAULT 0,
+                accepted_at            TEXT NOT NULL,
+                source_event_id        TEXT NOT NULL,
+                game_version           TEXT,
+                ended_at               TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
+            CREATE INDEX IF NOT EXISTS idx_missions_expiry ON missions(expiry);
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 
