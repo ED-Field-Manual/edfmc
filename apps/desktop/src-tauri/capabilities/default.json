@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "opener:allow-open-url",
     "sql:default",
     "sql:allow-load",
     "sql:allow-execute",

@@ -34,6 +34,12 @@ export interface DisplayModeInfo {
   detail: string;
 }
 
+export interface OverlayContext {
+  title: string;
+  subtitle: string | null;
+  resources: ReadonlyArray<{ label: string; url: string }>;
+}
+
 export interface OverlayPushState {
   commander: string | null;
   starSystem: string | null;
@@ -41,6 +47,8 @@ export interface OverlayPushState {
   body: string | null;
   docking: string | null;
   vehicle: string | null;
+  /** Highest-ranked context only; null when nothing is currently relevant. */
+  context: OverlayContext | null;
 }
 
 export const overlayApi = {

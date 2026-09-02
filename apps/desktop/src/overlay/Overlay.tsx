@@ -15,6 +15,12 @@ import './overlay.css';
  * engine. Running a second engine here would double every event.
  */
 
+interface OverlayContext {
+  title: string;
+  subtitle: string | null;
+  resources: ReadonlyArray<{ label: string; url: string }>;
+}
+
 interface OverlayState {
   commander: string | null;
   starSystem: string | null;
@@ -22,6 +28,7 @@ interface OverlayState {
   body: string | null;
   docking: string | null;
   vehicle: string | null;
+  context: OverlayContext | null;
 }
 
 interface WidgetPosition {
@@ -161,6 +168,30 @@ export default function Overlay() {
             <Row label="System" value={state.starSystem} />
             <Row label="Body" value={state.body} />
             <Row label="Station" value={state.station} />
+
+            {state.context && (
+              <div className="context">
+                <div className="context-title">{state.context.title}</div>
+                {state.context.subtitle && (
+                  <div className="context-sub">{state.context.subtitle}</div>
+                )}
+                {state.context.resources.length > 0 && (
+                  <div className="context-links">
+                    {/*
+                      Labels only, not clickable. The overlay is click-through in
+                      normal play, so a link here could never be followed — showing
+                      one would promise an interaction that cannot happen. The main
+                      window's Context page is where these open.
+                    */}
+                    {state.context.resources.map((r) => (
+                      <span key={r.url} className="context-link">
+                        {r.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

@@ -20,6 +20,13 @@ import {
   type NormalizedEvent,
 } from '@edfm/elite-journal';
 
+import {
+  BUNDLED_RULES,
+  ContextResolver,
+  resourceUrl,
+  type ActiveContext,
+} from '@edfm/context';
+
 import { logger } from './logger.js';
 import { overlayApi } from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
@@ -56,6 +63,9 @@ export interface CompanionSnapshot {
   readonly directoryDetail: string;
   readonly activeFile: string | null;
   readonly lastError: string | null;
+  readonly contexts: readonly ActiveContext[];
+  readonly contextRuleVersion: number;
+  readonly contextRuleSource: string;
 }
 
 const EMPTY_STATS: IngestStats = {
@@ -73,6 +83,11 @@ const EMPTY_STATS: IngestStats = {
 export class Companion {
   private started = false;
   private overlayEnabled = false;
+  /**
+   * Starts on the bundled rule set so context works offline and on first run
+   * (§22). A server-supplied set supersedes it via `setContextRules`.
+   */
+  private readonly resolver = new ContextResolver(BUNDLED_RULES, { maxActive: 3 });
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
   private engine: JournalEngine | null = null;
@@ -109,6 +124,9 @@ export class Companion {
         directoryDetail: this.directoryDetail,
         activeFile: this.engine?.currentFile ?? null,
         lastError: this.lastError,
+        contexts: this.resolver.current(),
+        contextRuleVersion: this.resolver.version,
+        contextRuleSource: this.resolver.source,
       };
     }
     return this.cachedSnapshot;
@@ -208,7 +226,13 @@ export class Companion {
 
   private onEvent(event: NormalizedEvent): void {
     applyEvent(this.state, event);
-    if (!HIGH_FREQUENCY_NOISE.has(event.source.event)) {
+
+    // Context resolution runs on every event, including the high-frequency ones:
+    // a rule may legitimately key on them, and evaluating a dozen declarative
+    // conditions is far cheaper than a React render.
+    const contextChanged = this.resolver.observe(event, this.state);
+
+    if (contextChanged || !HIGH_FREQUENCY_NOISE.has(event.source.event)) {
       logger.trace('journal', event.source.event, { id: event.source.provenance.eventId });
       this.notify();
       if (this.overlayEnabled) this.pushOverlayState();
@@ -231,6 +255,8 @@ export class Companion {
   pushOverlayState(): void {
     const s = this.state;
     const text = (v: Known<string>): string | null => (isKnown(v) ? v : null);
+    const top = this.resolver.current()[0] ?? null;
+
     void overlayApi
       .pushState({
         commander: text(s.commander),
@@ -239,8 +265,36 @@ export class Companion {
         body: text(s.body),
         docking: s.docking === 'unknown' ? null : s.docking,
         vehicle: s.vehicle === 'unknown' ? null : s.vehicle,
+        // Only the single highest-ranked context reaches the overlay. Space over a
+        // game window is scarce, and §6 is explicit that the commander should not
+        // be handed a wall of links mid-flight.
+        context: top
+          ? {
+              title: top.rule.title,
+              subtitle: top.rule.subtitle ?? null,
+              resources: top.rule.resources
+                .map((r) => ({ label: r.label, url: resourceUrl(r) }))
+                .filter((r): r is { label: string; url: string } => r.url !== null)
+                .slice(0, 3),
+            }
+          : null,
       })
       .catch(() => undefined); // overlay may not be open; not an error
+  }
+
+  /**
+   * Replace the context rules, e.g. from the backend once one exists.
+   *
+   * Kept here rather than inside the resolver so the fetch, caching and version
+   * policy stay in application code where they can be logged and surfaced.
+   */
+  setContextRules(ruleSet: Parameters<ContextResolver['setRuleSet']>[0]): void {
+    this.resolver.setRuleSet(ruleSet);
+    logger.info('context', 'Rule set replaced', {
+      version: this.resolver.version,
+      source: this.resolver.source,
+    });
+    this.notify();
   }
 
   /* ------------------------------------------------------------ persistence */

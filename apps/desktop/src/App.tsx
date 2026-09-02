@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type Known } from '@edfm/elite-journal';
 
+import { resourceUrl } from '@edfm/context';
+import { openUrl } from '@tauri-apps/plugin-opener';
+
 import { companion } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -40,6 +43,7 @@ const SECTIONS = [
 type Section = (typeof SECTIONS)[number];
 
 const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
+  'Context',
   'Dashboard',
   'Overlay',
   'Settings',
@@ -47,7 +51,6 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
 ]);
 
 const PHASE: Partial<Record<Section, string>> = {
-  Context: 'Phase 3',
   Missions: 'Phase 4',
   Logistics: 'Phase 8',
   Research: 'Phase 6',
@@ -101,6 +104,7 @@ export default function App() {
 
       <main className="main">
         {section === 'Dashboard' && <Dashboard snap={snap} />}
+        {section === 'Context' && <ContextPanel snap={snap} />}
         {section === 'Overlay' && <OverlayPanel />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
@@ -205,6 +209,78 @@ function Dashboard({ snap }: { snap: Snap }) {
             <span aria-hidden="true">■</span> A Shutdown event was seen — the game has exited.
           </p>
         )}
+      </section>
+    </>
+  );
+}
+
+function ContextPanel({ snap }: { snap: Snap }) {
+  const contexts = snap.contexts;
+
+  return (
+    <>
+      <header className="page-head">
+        <h1>Context</h1>
+        <p className="muted">
+          EDFM material relevant to what you are doing right now, matched from journal
+          events by fixed rules. Nothing here is inferred by a model — a context appears
+          only when a rule's conditions are literally satisfied.
+        </p>
+      </header>
+
+      {contexts.length === 0 ? (
+        <section className="card">
+          <h2>Nothing active</h2>
+          <p className="muted">
+            No context rule currently matches. Contexts appear when you do something a
+            rule recognises — prospecting an asteroid, docking at an Engineer, sampling
+            biology, delivering to a construction site — and fade once they stop being
+            relevant.
+          </p>
+        </section>
+      ) : (
+        contexts.map((ctx) => (
+          <section className="card" key={ctx.rule.id}>
+            <h2>{ctx.rule.title}</h2>
+            {ctx.rule.subtitle && <p className="muted">{ctx.rule.subtitle}</p>}
+
+            <ul className="resources">
+              {ctx.rule.resources.map((resource) => {
+                const url = resourceUrl(resource);
+                if (!url) return null;
+                return (
+                  <li key={url}>
+                    <button type="button" className="resource" onClick={() => void openUrl(url)}>
+                      <span className="resource-label">{resource.label}</span>
+                      <span className="resource-go" aria-hidden="true">
+                        ↗
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* Provenance: which event caused this, per §27. */}
+            <p className="provenance">
+              Triggered by <code>{ctx.triggerEvent}</code> · rule <code>{ctx.rule.id}</code>
+            </p>
+          </section>
+        ))
+      )}
+
+      <section className="card">
+        <h2>Rule set</h2>
+        <div className="grid">
+          <Field label="Version" value={String(snap.contextRuleVersion)} />
+          <Field label="Source" value={snap.contextRuleSource} />
+          <Field label="Active contexts" value={String(contexts.length)} />
+        </div>
+        <p className="muted">
+          Rules are versioned and will be served by the EDFM backend, so recommendations
+          can change without shipping a new build. This build uses the bundled set, which
+          is also the offline fallback.
+        </p>
       </section>
     </>
   );
