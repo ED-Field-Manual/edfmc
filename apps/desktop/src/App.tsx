@@ -52,9 +52,12 @@ export default function App() {
     () => companion.snapshot(),
   );
 
+  // The Companion is app-scoped, not component-scoped: it must keep ingesting for
+  // the lifetime of the window. Deliberately no cleanup — tearing it down here
+  // would stop the engine during StrictMode's dev remount, and the idempotent
+  // start() would then decline to restart it.
   useEffect(() => {
     void companion.start();
-    return () => companion.stop();
   }, []);
 
   return (

@@ -55,7 +55,21 @@ export interface CompanionSnapshot {
   readonly lastError: string | null;
 }
 
+const EMPTY_STATS: IngestStats = {
+  linesRead: 0,
+  eventsEmitted: 0,
+  malformedJson: 0,
+  notAnObject: 0,
+  missingEventField: 0,
+  unknownEventKinds: {},
+  filesOpened: 0,
+  rotations: 0,
+  emptyFilesSkipped: 0,
+};
+
 export class Companion {
+  private started = false;
+  private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
   private engine: JournalEngine | null = null;
   private state: CommanderState = initialState();
@@ -73,32 +87,49 @@ export class Companion {
     return () => this.listeners.delete(fn);
   }
 
+  /**
+   * Current snapshot.
+   *
+   * MUST return a referentially stable value between changes. React's
+   * `useSyncExternalStore` compares snapshots by identity: returning a fresh
+   * object on every call makes it believe the store changed during render, and
+   * it throws rather than looping forever. The cache is invalidated in `notify`.
+   */
   snapshot(): CompanionSnapshot {
-    return {
-      state: this.state,
-      stats: this.engine?.stats ?? {
-        linesRead: 0, eventsEmitted: 0, malformedJson: 0, notAnObject: 0,
-        missingEventField: 0, unknownEventKinds: {}, filesOpened: 0,
-        rotations: 0, emptyFilesSkipped: 0,
-      },
-      connection: this.connection,
-      directory: this.directory,
-      directoryDetail: this.directoryDetail,
-      activeFile: this.engine?.currentFile ?? null,
-      lastError: this.lastError,
-    };
+    if (!this.cachedSnapshot) {
+      this.cachedSnapshot = {
+        state: { ...this.state },
+        stats: this.engine?.stats ?? EMPTY_STATS,
+        connection: this.connection,
+        directory: this.directory,
+        directoryDetail: this.directoryDetail,
+        activeFile: this.engine?.currentFile ?? null,
+        lastError: this.lastError,
+      };
+    }
+    return this.cachedSnapshot;
   }
 
   private notify(): void {
+    // Invalidate immediately: a listener may read the snapshot before the
+    // scheduled flush runs, and must not be handed a stale one.
+    this.cachedSnapshot = null;
     if (this.notifyScheduled) return;
     this.notifyScheduled = true;
     queueMicrotask(() => {
       this.notifyScheduled = false;
+      this.cachedSnapshot = null;
       for (const fn of this.listeners) fn();
     });
   }
 
   async start(): Promise<void> {
+    // Idempotent: React StrictMode intentionally mounts effects twice in
+    // development, and starting two engines against one journal would double
+    // every event.
+    if (this.started) return;
+    this.started = true;
+
     try {
       this.db = await Database.load('sqlite:edfm-companion.db');
       logger.info('db', 'Local database ready');
