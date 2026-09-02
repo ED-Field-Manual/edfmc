@@ -30,7 +30,7 @@ class ErrorBoundary extends React.Component<
     return (
       <div style={panel}>
         <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.125rem' }}>EDFM Companion failed to start</h1>
-        <p style={{ color: '#8b98a5', margin: '0 0 1rem' }}>
+        <p style={{ color: '#9d9d9d', margin: '0 0 1rem' }}>
           The interface could not render. The message below is the cause.
         </p>
         <pre style={pre}>{this.state.error.stack ?? String(this.state.error)}</pre>
@@ -42,14 +42,14 @@ class ErrorBoundary extends React.Component<
 const panel: React.CSSProperties = {
   padding: '1.5rem',
   fontFamily: '"Segoe UI", system-ui, sans-serif',
-  color: '#e6edf3',
-  background: '#0d1117',
+  color: '#ededed',
+  background: '#121212',
   minHeight: '100vh',
 };
 
 const pre: React.CSSProperties = {
-  background: '#161b22',
-  border: '1px solid #2a3441',
+  background: '#212121',
+  border: '1px solid #353535',
   borderRadius: 6,
   padding: '0.75rem',
   overflow: 'auto',
@@ -61,9 +61,9 @@ function showFatal(title: string, detail: string) {
   const root = document.getElementById('root');
   if (!root) return;
   root.innerHTML =
-    `<div style="padding:1.5rem;font-family:Segoe UI,system-ui,sans-serif;color:#e6edf3">` +
+    `<div style="padding:1.5rem;font-family:Segoe UI,system-ui,sans-serif;color:#ededed">` +
     `<h1 style="font-size:1.125rem;margin:0 0 .5rem">${title}</h1>` +
-    `<pre style="background:#161b22;border:1px solid #2a3441;border-radius:6px;` +
+    `<pre style="background:#212121;border:1px solid #353535;border-radius:6px;` +
     `padding:.75rem;white-space:pre-wrap;font-size:.75rem">${
       detail.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))
     }</pre></div>`;
