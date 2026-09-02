@@ -1,0 +1,152 @@
+/** HTTP surface. */
+
+import { createHash } from 'node:crypto';
+import Fastify, { type FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
+import type { Config } from './config.js';
+import type { Db } from './lib/db.js';
+import { hashIdentity } from './lib/identity.js';
+import { getStation, getStations } from './lib/reference.js';
+import { deriveStationFindings } from './lib/derive.js';
+import { recordSubmission } from './lib/store.js';
+import type { Notifier } from './lib/discord.js';
+import { lookupSchema, submissionSchema } from './schema.js';
+
+export interface AppOptions {
+  readonly config: Config;
+  readonly db: Db;
+  readonly notifier: Notifier;
+}
+
+export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
+  const { config, db, notifier } = options;
+
+  const app = Fastify({
+    logger: config.env !== 'test',
+    // A station observation is a few hundred bytes. Anything approaching this
+    // is not a submission.
+    bodyLimit: 64 * 1024,
+    trustProxy: true,
+  });
+
+  await app.register(rateLimit, {
+    max: config.rateLimitPerMinute,
+    timeWindow: '1 minute',
+  });
+
+  app.get('/v1/health', async () => {
+    await db.query('SELECT 1');
+    return { ok: true, version: '0.1.0' };
+  });
+
+  /* ------------------------------------------------------------ reference */
+
+  app.get<{ Params: { marketId: string } }>('/v1/reference/stations/:marketId', async (req, reply) => {
+    if (!/^\d{1,20}$/.test(req.params.marketId)) {
+      return reply.code(400).send({ error: 'marketId must be a positive integer id' });
+    }
+    const station = await getStation(db, req.params.marketId);
+    // 404 means "no observation of this station", not "no such station".
+    // The client must not turn an absence into a finding.
+    if (!station) return reply.code(404).send({ error: 'not observed' });
+    return station;
+  });
+
+  app.post('/v1/reference/stations/lookup', async (req, reply) => {
+    const parsed = lookupSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid request', detail: parsed.error.issues });
+    }
+    const stations = await getStations(db, parsed.data.marketIds);
+    return { stations, requested: parsed.data.marketIds.length, returned: stations.length };
+  });
+
+  /* -------------------------------------------------------- submission */
+
+  app.post('/v1/discrepancies', async (req, reply) => {
+    const parsed = submissionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid request', detail: parsed.error.issues });
+    }
+    const { observation, identity, clientVersion, claimed } = parsed.data;
+
+    const reference = await getStation(db, observation.marketId);
+    const derived = deriveStationFindings(
+      {
+        ...observation,
+        companionVersion: clientVersion ?? 'unknown',
+        // The comparison never sees the identifiers; only the hashes are
+        // stored, and provenance on a server-derived observation is the
+        // submission row, not the commander.
+        commander: null,
+        commanderFid: null,
+      },
+      reference,
+    );
+
+    const result = await recordSubmission(
+      db,
+      {
+        identity: hashIdentity(config.identitySalt, {
+          mode: identity.mode,
+          fid: identity.fid ?? undefined,
+          commanderName: identity.commanderName ?? undefined,
+          journalFile: identity.journalFile ?? undefined,
+        }),
+        entityType: 'station',
+        entityId: observation.marketId,
+        clientVersion,
+        gameVersion: observation.gameVersion,
+        gameBuild: observation.gameBuild,
+        observation,
+        claimed,
+        sourceHash: hashSource(req.ip, config.identitySalt),
+      },
+      derived.findings,
+    );
+
+    // Delivery is deliberately outside the transaction and not awaited by the
+    // response: the submission is already durable, and a slow webhook must not
+    // become the commander's latency.
+    for (const pending of result.notifications) {
+      void notifier.send(pending).catch(() => {});
+    }
+
+    return reply.code(202).send({
+      accepted: true,
+      submissionId: result.submissionId,
+      // Says what the server derived, so a client whose local comparison
+      // disagrees can be debugged instead of quietly diverging.
+      findings: result.discrepancies.length,
+      skipped: derived.skipped,
+    });
+  });
+
+  /* -------------------------------------------------------------- stats */
+
+  app.get('/v1/stats', async () => {
+    const { rows } = await db.query<Record<string, string>>(`
+      SELECT (SELECT count(*) FROM stations)::text          AS stations,
+             (SELECT count(*) FROM market_latest)::text     AS market_rows,
+             (SELECT count(*) FROM submissions)::text       AS submissions,
+             (SELECT count(*) FROM discrepancies)::text     AS discrepancies,
+             (SELECT count(*) FROM discrepancies
+               WHERE independent_count >= 2)::text          AS confirmed`);
+    // Aggregates only. A per-discrepancy list here would need spoiler gating;
+    // a total cannot identify a location.
+    return rows[0];
+  });
+
+  return app;
+}
+
+/**
+ * Coarse client fingerprint for abuse tracing.
+ *
+ * Keyed and truncated: enough to notice one source flooding the endpoint,
+ * not enough to be a stored IP address.
+ */
+function hashSource(ip: string | undefined, salt: string): string | null {
+  if (!ip) return null;
+  return createHash('sha256').update(`${salt}:ip:${ip}`).digest('hex').slice(0, 16);
+}

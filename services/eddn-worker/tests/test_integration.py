@@ -8,7 +8,7 @@ database proves it works.
 Skipped automatically when no database is configured, so CI and other machines
 stay green:
 
-    set EDFM_TEST_DSN=postgresql://postgres:edfmdev@localhost/edfm_dev
+    set EDFM_TEST_DSN=postgresql://postgres:edfmdev@localhost/edfm_test
     python -m pytest tests/test_integration.py
 """
 
@@ -37,16 +37,18 @@ psycopg = pytest.importorskip("psycopg")
 def _assert_disposable(dsn: str) -> None:
     """Refuse to run against a database that is not obviously disposable.
 
-    The fixture below opens with TRUNCATE. Pointed at a real database by a
-    stray environment variable, this suite would destroy it silently, and the
-    author would find out from the data being gone. The database name has to
-    say out loud that it is safe to erase.
+    The fixture below opens with TRUNCATE. This is not hypothetical: pointed
+    at the development database while the EDDN worker was ingesting into it,
+    this suite wiped the stations table mid-run. Only a database named for
+    testing is accepted.
     """
     name = urlsplit(dsn).path.lstrip("/").split("?")[0]
-    if not re.search(r"(^|[_-])(test|dev)($|[_-])", name):
+    if not re.search(r"(^|[_-])test($|[_-])", name):
         raise RuntimeError(
             f"EDFM_TEST_DSN points at database {name!r}, which is not named as a "
-            "test or dev database. This suite TRUNCATEs tables; refusing to run."
+            "test database. This suite TRUNCATEs tables; refusing to run. "
+            "Use a database dedicated to tests (edfm_test), not the one the EDDN "
+            "worker ingests into -- truncating that mid-ingest destroys real data."
         )
 
 
