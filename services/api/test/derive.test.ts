@@ -118,3 +118,83 @@ describe('deriveStationFindings', () => {
     expect(deriveStationFindings(observation(), reference({ stationType: null })).findings).toEqual([]);
   });
 });
+
+describe('bulk service differences', () => {
+  // A station with a large service list, as real ones have.
+  const large = reference({
+    serviceIds: [
+      'dock', 'autodock', 'blackmarket', 'commodities', 'contacts', 'exploration',
+      'missions', 'outfitting', 'crewlounge', 'rearm', 'refuel', 'repair',
+      'shipyard', 'tuning', 'engineer', 'facilitator', 'stationmenu', 'shop',
+      'livery', 'socialspace',
+    ],
+  });
+
+  it('reports one aggregate finding rather than one per missing service', () => {
+    // The case that prompted this: a real submission against Jaques Station
+    // produced 32 findings, which would have been 32 Discord alerts.
+    const result = deriveStationFindings(
+      observation({ servicesRaw: ['Dock', 'Commodities', 'Refuel'] }),
+      large,
+    );
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.kind).toBe('normalization_conflict');
+    expect(result.skipped).toBe('bulk-service-difference');
+  });
+
+  it('rates the aggregate low, because the likeliest cause is a partial reading', () => {
+    const result = deriveStationFindings(
+      observation({ servicesRaw: ['Dock', 'Commodities', 'Refuel'] }),
+      large,
+    );
+    // Not a confident claim that the station changed. A direct semi-static
+    // observation would otherwise be medium, which would let a probable
+    // misreading reach a reviewer weighted like a finding we believe.
+    expect(result.findings[0]!.observation.confidence).toBe('low');
+    expect(result.findings[0]!.observation.field).toBe('services');
+    expect(result.findings[0]!.observation.expectedValue).toContain('shipyard');
+  });
+
+  it('still reports a small number of differences individually', () => {
+    // Four missing out of twenty is a finding, not a partial reading.
+    const result = deriveStationFindings(
+      observation({
+        servicesRaw: [
+          'Dock', 'autodock', 'blackmarket', 'Commodities', 'contacts', 'exploration',
+          'missions', 'outfitting', 'crewlounge', 'rearm', 'refuel', 'repair',
+          'shipyard', 'tuning', 'engineer', 'facilitator',
+        ],
+      }),
+      large,
+    );
+    expect(result.findings).toHaveLength(4);
+    expect(result.findings.every((f) => f.kind === 'missing_in_game')).toBe(true);
+  });
+
+  it('treats a majority difference at a small station as partial too', () => {
+    // Five of six missing is plainly a partial reading, even though five is a
+    // small number in absolute terms.
+    const small = reference({ serviceIds: ['dock', 'refuel', 'repair', 'rearm', 'shipyard', 'outfitting'] });
+    const result = deriveStationFindings(observation({ servicesRaw: ['Dock'] }), small);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.kind).toBe('normalization_conflict');
+  });
+
+  it('aggregates a bulk difference in the other direction as well', () => {
+    // A station gaining twelve services at once is equally implausible.
+    const result = deriveStationFindings(
+      observation({
+        servicesRaw: [
+          'dock', 'autodock', 'blackmarket', 'commodities', 'contacts', 'exploration',
+          'missions', 'outfitting', 'crewlounge', 'rearm', 'refuel', 'repair',
+          'shipyard', 'tuning', 'engineer', 'facilitator', 'stationmenu', 'shop',
+          'livery', 'socialspace', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8',
+          'x9', 'x10', 'x11', 'x12',
+        ],
+      }),
+      large,
+    );
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.kind).toBe('normalization_conflict');
+  });
+});

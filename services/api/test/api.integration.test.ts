@@ -9,7 +9,7 @@
  */
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { notificationStrings } from '@edfm/verification';
 import { buildApp } from '../src/app.js';
 import { createPool, migrate, type Db } from '../src/lib/db.js';
@@ -83,7 +83,7 @@ function submission(over: Overrides = {}) {
   };
 }
 
-const post = (body: unknown) =>
+const post = (body: object): Promise<LightMyRequestResponse> =>
   app.inject({ method: 'POST', url: '/v1/discrepancies', payload: body });
 
 const notifier = { async send(p: PendingNotification) { sent.push(p); } };
