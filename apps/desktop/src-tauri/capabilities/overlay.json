@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Overlay window. Receives state by event and needs no filesystem, database or shell access of its own.",
+  "windows": ["overlay"],
+  "permissions": [
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default"
+  ]
+}

@@ -1,32 +1,30 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { resolve } from 'node:path';
 
-// @ts-expect-error process is a nodejs global
-const host = process.env.TAURI_DEV_HOST;
+const host = process.env['TAURI_DEV_HOST'];
 
-// https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
+  build: {
+    rollupOptions: {
+      // The overlay is a genuinely separate window with its own document, not a
+      // route in the main app: it must be transparent, click-through and sized to
+      // the game window, none of which can be toggled per-route.
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        overlay: resolve(__dirname, 'overlay.html'),
+      },
+    },
+  },
+
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+    hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
+    watch: { ignored: ['**/src-tauri/**'] },
   },
 }));

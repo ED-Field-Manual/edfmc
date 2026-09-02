@@ -6,6 +6,7 @@
 //! the identical pipeline (see docs/ARCHITECTURE.md §2.2).
 
 mod journal;
+mod overlay;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -85,6 +86,7 @@ pub fn run() {
                 .build(),
         )
         .manage(journal::WatcherState::default())
+        .manage(overlay::OverlayState::default())
         .invoke_handler(tauri::generate_handler![
             journal::saved_games_dir,
             journal::journal_read_dir,
@@ -93,6 +95,12 @@ pub fn run() {
             journal::journal_read_range,
             journal::journal_watch,
             journal::journal_unwatch,
+            overlay::elite_window_info,
+            overlay::elite_display_mode,
+            overlay::overlay_start,
+            overlay::overlay_stop,
+            overlay::overlay_set_edit_mode,
+            overlay::overlay_push_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running EDFM Companion");

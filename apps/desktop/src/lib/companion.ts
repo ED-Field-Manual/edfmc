@@ -12,13 +12,16 @@ import {
   initialState,
   resolveJournalDirectory,
   setDefaultFs,
+  isKnown,
   type CommanderState,
+  type Known,
   type IngestStats,
   type JournalCheckpoint,
   type NormalizedEvent,
 } from '@edfm/elite-journal';
 
 import { logger } from './logger.js';
+import { overlayApi } from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
 
 /**
@@ -69,6 +72,7 @@ const EMPTY_STATS: IngestStats = {
 
 export class Companion {
   private started = false;
+  private overlayEnabled = false;
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
   private engine: JournalEngine | null = null;
@@ -207,7 +211,36 @@ export class Companion {
     if (!HIGH_FREQUENCY_NOISE.has(event.source.event)) {
       logger.trace('journal', event.source.event, { id: event.source.provenance.eventId });
       this.notify();
+      if (this.overlayEnabled) this.pushOverlayState();
     }
+  }
+
+  /* --------------------------------------------------------------- overlay */
+
+  setOverlayEnabled(enabled: boolean): void {
+    this.overlayEnabled = enabled;
+    if (enabled) this.pushOverlayState();
+  }
+
+  /**
+   * Send the overlay a flattened view of current state.
+   *
+   * Only the handful of fields the widget renders — not the whole state object —
+   * so the overlay never holds commander data it has no use for.
+   */
+  pushOverlayState(): void {
+    const s = this.state;
+    const text = (v: Known<string>): string | null => (isKnown(v) ? v : null);
+    void overlayApi
+      .pushState({
+        commander: text(s.commander),
+        starSystem: text(s.starSystem),
+        station: text(s.stationName),
+        body: text(s.body),
+        docking: s.docking === 'unknown' ? null : s.docking,
+        vehicle: s.vehicle === 'unknown' ? null : s.vehicle,
+      })
+      .catch(() => undefined); // overlay may not be open; not an error
   }
 
   /* ------------------------------------------------------------ persistence */

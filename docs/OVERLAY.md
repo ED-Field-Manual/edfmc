@@ -32,6 +32,51 @@ Position is tracked against the Elite Dangerous window via Win32, so the overlay
 follows the game as it moves and resizes. DPI is handled per-monitor: a window
 dragged between displays of different scaling must not shift or blur.
 
+## Detecting the game window (verified against a live client)
+
+Measured against a running Elite Dangerous 4.4.0.3 client:
+
+| Property | Value |
+|---|---|
+| Window class | `FrontierDevelopmentsAppWinClass` |
+| Window title | `Elite - Dangerous (CLIENT)` |
+| Process | `EliteDangerous64.exe` |
+| Style | `0x94020000` = `WS_POPUP \| WS_VISIBLE \| WS_CLIPSIBLINGS \| WS_MINIMIZEBOX` |
+| ExStyle | `0x00000000` |
+| Window rect | `0,0 → 3840,2160`, client rect identical |
+| Reported DPI | 96 |
+
+We match on the **class name**, not the title: the title is localised, the class is
+not. `ExStyle` carries no `WS_EX_TOPMOST`, which is why an always-on-top overlay can
+sit above the game at all.
+
+Window rect and client rect being identical, with no caption or thick-frame style,
+is the geometric signature of borderless. Positions are handled in **physical
+pixels** throughout (Win32 rects and Tauri's `PhysicalPosition`/`PhysicalSize`),
+which sidesteps DPI scaling arithmetic entirely rather than trying to get it right.
+
+## Reading the display mode instead of guessing
+
+Elite records its own display mode in
+`%LOCALAPPDATA%\Frontier Developments\Elite Dangerous\Options\Graphics\DisplaySettings.xml`:
+
+```xml
+<FullScreen>2</FullScreen>
+```
+
+This matters because **window geometry cannot distinguish borderless from exclusive
+fullscreen** — both cover the monitor exactly. Reading Frontier's own setting answers
+the question directly, so the application can warn accurately instead of guessing.
+
+- `2` = **Borderless — confirmed empirically.** Observed alongside the window
+  properties in the table above.
+- `0` = Windowed and `1` = Fullscreen follow the ordering of Frontier's settings UI
+  and are **not yet directly confirmed here**. Unrecognised values degrade to
+  "unknown" and say so, rather than being coerced into a guess.
+
+Note that `<ScreenWidth>` in the same file read `4096` while the actual window was
+`3840` wide. **Do not use it for positioning** — the window rect is authoritative.
+
 ## The exclusive-fullscreen limitation
 
 **We expect this not to work, and we will not claim otherwise until it is

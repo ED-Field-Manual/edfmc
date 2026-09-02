@@ -3,6 +3,12 @@ import { isKnown, type Known } from '@edfm/elite-journal';
 
 import { companion } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
+import {
+  onEliteWindow,
+  overlayApi,
+  type DisplayModeInfo,
+  type EliteWindowInfo,
+} from './lib/overlay.js';
 import './App.css';
 
 /**
@@ -32,8 +38,12 @@ const SECTIONS = [
 ] as const;
 type Section = (typeof SECTIONS)[number];
 
-/** Phase 1 ships Dashboard, Settings and Diagnostics; the rest are placeholders. */
-const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>(['Dashboard', 'Settings', 'Diagnostics']);
+const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
+  'Dashboard',
+  'Overlay',
+  'Settings',
+  'Diagnostics',
+]);
 
 const PHASE: Partial<Record<Section, string>> = {
   Context: 'Phase 3',
@@ -41,7 +51,6 @@ const PHASE: Partial<Record<Section, string>> = {
   Logistics: 'Phase 8',
   Research: 'Phase 6',
   Contributions: 'Phase 5',
-  Overlay: 'Phase 2',
 };
 
 export default function App() {
@@ -91,6 +100,7 @@ export default function App() {
 
       <main className="main">
         {section === 'Dashboard' && <Dashboard snap={snap} />}
+        {section === 'Overlay' && <OverlayPanel />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
         {!IMPLEMENTED.has(section) && <Placeholder section={section} />}
@@ -194,6 +204,169 @@ function Dashboard({ snap }: { snap: Snap }) {
             <span aria-hidden="true">■</span> A Shutdown event was seen — the game has exited.
           </p>
         )}
+      </section>
+    </>
+  );
+}
+
+function OverlayPanel() {
+  const [enabled, setEnabled] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [hideInactive, setHideInactive] = useState(true);
+  const [mode, setMode] = useState<DisplayModeInfo | null>(null);
+  const [win, setWin] = useState<EliteWindowInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void overlayApi.displayMode().then(setMode).catch(() => undefined);
+    void overlayApi.eliteWindow().then(setWin).catch(() => undefined);
+    return onEliteWindow(setWin);
+  }, []);
+
+  async function toggle(next: boolean) {
+    setError(null);
+    try {
+      if (next) {
+        await overlayApi.start(hideInactive);
+        companion.setOverlayEnabled(true);
+      } else {
+        if (editing) {
+          await overlayApi.setEditMode(false);
+          setEditing(false);
+        }
+        await overlayApi.stop();
+        companion.setOverlayEnabled(false);
+      }
+      setEnabled(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function toggleEdit(next: boolean) {
+    setError(null);
+    try {
+      await overlayApi.setEditMode(next);
+      setEditing(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  // §29: the warning is carried by glyph and wording, not by colour alone.
+  const unsupported = mode?.overlay_supported === false;
+  const unknownSupport = mode?.overlay_supported === null;
+
+  return (
+    <>
+      <header className="page-head">
+        <h1>Overlay</h1>
+        <p className="muted">
+          An external, transparent window aligned to the Elite Dangerous window. It never
+          injects code into the game, reads its memory, or sends it input.
+        </p>
+      </header>
+
+      <section className="card">
+        <h2>Elite Dangerous display mode</h2>
+        {mode === null ? (
+          <p className="muted">Checking…</p>
+        ) : (
+          <>
+            <div className="grid">
+              <Field label="Mode" value={mode.mode === 'unknown' ? 'Unknown' : mode.mode} />
+              <Field label="Raw setting" value={mode.raw === null ? 'Unknown' : String(mode.raw)} />
+              <Field
+                label="Overlay supported"
+                value={
+                  mode.overlay_supported === null
+                    ? 'Unknown'
+                    : mode.overlay_supported
+                      ? 'Yes'
+                      : 'No'
+                }
+              />
+            </div>
+            <p className={unsupported || unknownSupport ? 'note' : 'muted'}>
+              {(unsupported || unknownSupport) && <span aria-hidden="true">▲ </span>}
+              {mode.detail}
+            </p>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Game window</h2>
+        {win?.found ? (
+          <div className="grid">
+            <Field label="Position" value={`${win.x}, ${win.y}`} />
+            <Field label="Size" value={`${win.width} x ${win.height}`} />
+            <Field label="Monitor" value={`${win.monitor_width} x ${win.monitor_height}`} />
+            <Field label="Reported DPI" value={String(win.dpi)} />
+            <Field label="Focused" value={win.is_foreground ? 'Yes' : 'No'} />
+            <Field label="Covers monitor" value={win.covers_monitor ? 'Yes' : 'No'} />
+          </div>
+        ) : (
+          <p className="muted">
+            Elite Dangerous is not running, or its window has not been found. The overlay
+            will appear automatically once the game window exists.
+          </p>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Controls</h2>
+        <div className="controls">
+          <label className="check">
+            <input type="checkbox" checked={enabled} onChange={(e) => void toggle(e.target.checked)} />
+            <span>Enable overlay</span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={editing}
+              disabled={!enabled}
+              onChange={(e) => void toggleEdit(e.target.checked)}
+            />
+            <span>
+              Edit mode <span className="muted-inline">— widgets become draggable</span>
+            </span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={hideInactive}
+              onChange={(e) => {
+                setHideInactive(e.target.checked);
+                if (enabled) void overlayApi.start(e.target.checked);
+              }}
+            />
+            <span>Hide while Elite is not the active window</span>
+          </label>
+        </div>
+
+        <p className="muted">
+          In normal mode the overlay is click-through: mouse input passes straight to the
+          game. Edit mode makes it interactive so widgets can be positioned, and positions
+          are remembered.
+        </p>
+        {error && (
+          <p className="note">
+            <span aria-hidden="true">✕ </span>
+            {error}
+          </p>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Widgets</h2>
+        <p className="muted">
+          Phase 2 ships the overlay engine plus a single Current Context widget, on purpose.
+          Building the full widget set against unproven positioning and click-through
+          handling would mean rebuilding it.
+        </p>
       </section>
     </>
   );
