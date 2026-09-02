@@ -265,8 +265,29 @@ pub struct OverlayState {
     pub running: Arc<AtomicBool>,
     /// Whether the overlay hides while Elite is not the foreground window.
     pub hide_when_inactive: Arc<AtomicBool>,
+    /// Edit mode makes the overlay interactive. Tracked here so the tracking
+    /// thread and `overlay_start` never re-arm click-through mid-edit.
+    pub editing: Arc<AtomicBool>,
     /// Last applied geometry, so the window is only moved when it actually moved.
     last: Arc<Mutex<Option<Geometry>>>,
+    /// Last applied visibility, so show/hide is not called 10 times a second.
+    last_visible: Arc<Mutex<Option<bool>>>,
+}
+
+/// Make the overlay ignore the mouse entirely, or accept it.
+///
+/// This is the single most important call in the module. The overlay window is
+/// sized to the whole game window, so without `ignore_cursor_events(true)` it
+/// swallows every click on that area — including clicks meant for the desktop when
+/// the overlay is configured to stay visible while Elite is not focused.
+///
+/// CSS `pointer-events: none` is NOT sufficient: it governs hit-testing inside the
+/// webview's DOM, not whether the OS routes the click to the window in the first
+/// place.
+fn apply_click_through(app: &AppHandle, interactive: bool) {
+    if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
+        let _ = win.set_ignore_cursor_events(!interactive);
+    }
 }
 
 /// Start following the Elite window.
@@ -284,6 +305,12 @@ pub fn overlay_start(
         .hide_when_inactive
         .store(hide_when_inactive, Ordering::Relaxed);
 
+    // Always start click-through. Skipped while editing so that changing another
+    // setting mid-edit does not silently make the overlay uninteractive.
+    if !state.editing.load(Ordering::Relaxed) {
+        apply_click_through(&app, false);
+    }
+
     if state.running.swap(true, Ordering::SeqCst) {
         return Ok(()); // already running
     }
@@ -291,6 +318,7 @@ pub fn overlay_start(
     let running = state.running.clone();
     let hide_inactive = state.hide_when_inactive.clone();
     let last = state.last.clone();
+    let last_visible = state.last_visible.clone();
 
     std::thread::spawn(move || {
         while running.load(Ordering::Relaxed) {
@@ -322,9 +350,19 @@ pub fn overlay_start(
                             info.height.max(1) as u32,
                         ));
                     }
-                    let _ = win.show();
-                } else {
-                    let _ = win.hide();
+                }
+
+                // Only call show/hide on an actual transition. Calling show() ten
+                // times a second is pointless work and risks fighting the
+                // compositor for z-order.
+                let mut guard = last_visible.lock().unwrap_or_else(|e| e.into_inner());
+                if *guard != Some(should_show) {
+                    *guard = Some(should_show);
+                    if should_show {
+                        let _ = win.show();
+                    } else {
+                        let _ = win.hide();
+                    }
                 }
             }
 
@@ -342,6 +380,13 @@ pub fn overlay_stop(
     state: tauri::State<'_, OverlayState>,
 ) -> Result<(), String> {
     state.running.store(false, Ordering::SeqCst);
+    state.editing.store(false, Ordering::SeqCst);
+    *state.last_visible.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+    // Restore click-through before hiding, so the window can never be left both
+    // hidden and interactive — a state that would swallow clicks if anything
+    // showed it again.
+    apply_click_through(&app, false);
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.hide();
     }
@@ -353,11 +398,16 @@ pub fn overlay_stop(
 /// Normal mode is click-through so the overlay cannot intercept a single mouse
 /// event meant for the game. Edit mode accepts input so widgets can be arranged.
 #[tauri::command]
-pub fn overlay_set_edit_mode(app: AppHandle, editing: bool) -> Result<(), String> {
+pub fn overlay_set_edit_mode(
+    app: AppHandle,
+    state: tauri::State<'_, OverlayState>,
+    editing: bool,
+) -> Result<(), String> {
     let win = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or_else(|| "overlay window not found".to_string())?;
 
+    state.editing.store(editing, Ordering::SeqCst);
     win.set_ignore_cursor_events(!editing).map_err(|e| e.to_string())?;
     if editing {
         let _ = win.set_focus();

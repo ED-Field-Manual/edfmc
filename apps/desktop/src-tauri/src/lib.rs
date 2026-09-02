@@ -87,6 +87,16 @@ pub fn run() {
         )
         .manage(journal::WatcherState::default())
         .manage(overlay::OverlayState::default())
+        .setup(|app| {
+            // Arm click-through at creation, before the overlay can ever be shown.
+            // The overlay is sized to the whole game window, so an interactive one
+            // swallows every click in that area.
+            use tauri::Manager;
+            if let Some(win) = app.get_webview_window(overlay::OVERLAY_LABEL) {
+                let _ = win.set_ignore_cursor_events(true);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             journal::saved_games_dir,
             journal::journal_read_dir,
