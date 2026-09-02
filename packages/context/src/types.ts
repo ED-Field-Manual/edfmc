@@ -63,7 +63,33 @@ export interface ContextResource {
   /** Absolute URL, for resources that are not EDFM wiki pages. */
   readonly url?: string;
   readonly note?: string;
+  /**
+   * What the commander must have discovered before this resource may be shown.
+   *
+   * Omitted means public, which is right for guides and mechanics. It matters
+   * for anything that names a specific discovery: offering a "Stratum
+   * Tectonicas" link to a commander who has not identified the species tells
+   * them what is on the planet, and the label alone is the spoiler — the link
+   * need never be clicked.
+   *
+   * The *resolver* still matches these rules; only the projection to the UI
+   * filters them. Verify aggressively, reveal conservatively.
+   */
+  readonly requires?: ResourceGate;
 }
+
+/**
+ * Discovery requirement for a context resource.
+ *
+ * Deliberately declarative and serialisable: rules are server-driven, so a gate
+ * has to survive JSON. The client resolves `genus`/`species` against the
+ * current body from local discovery state.
+ */
+export type ResourceGate =
+  | { readonly kind: 'genus'; readonly genus: string }
+  | { readonly kind: 'species'; readonly species: string }
+  | { readonly kind: 'body-scanned' }
+  | { readonly kind: 'signals-known' };
 
 export interface ContextRule {
   readonly id: string;

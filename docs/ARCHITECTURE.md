@@ -31,6 +31,28 @@ Everything else is modelled as optional.
 
 ---
 
+## 1a. Project principles
+
+Three rules that outrank convenience anywhere they apply.
+
+> **If the game did not report it, do not guess.**
+
+A value the journal did not provide is `Unknown`, never a plausible default.
+Field presence is measured, not assumed (§1).
+
+> **Verify aggressively. Reveal conservatively.**
+
+The verification engine may compare anything against EDFM's data, including
+places this commander has never been. The player-facing application may show only
+what this commander's own game has told them. These are different questions,
+answered in different places.
+
+> **If this commander's game has not revealed it, the Companion must not reveal it.**
+
+The stricter form of the first rule, for exploration and exobiology. A commander
+who enjoys exploring must never have a discovery spoiled because EDFM already
+knows the answer. Enforced structurally — see [SPOILERS.md](SPOILERS.md).
+
 ## 2. Technology decisions
 
 ### 2.1 Desktop: Tauri 2 + TypeScript

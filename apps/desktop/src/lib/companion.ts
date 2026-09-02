@@ -44,7 +44,15 @@ import {
   type MissionSummary,
 } from '@edfm/missions';
 
+import {
+  DiscoveryState,
+  VerificationEngine,
+  createStationProvider,
+  EMPTY_REFERENCE,
+} from '@edfm/verification';
+
 import { logger } from './logger.js';
+import { policyFor, projectResources } from './spoiler.js';
 import {
   DEFAULT_WIDGETS,
   overlayApi,
@@ -108,6 +116,9 @@ export function travelLabel(travel: CommanderState['travel']): string {
  */
 const OVERLAY_MISSION_ROWS = 5;
 
+/** Stamped onto every observation so a report can be traced to a build. */
+const COMPANION_VERSION = '0.1.0';
+
 /** Relative expiry for display. "Expired" rather than a negative duration. */
 export function relativeExpiry(iso: string): string {
   const ms = Date.parse(iso) - Date.now();
@@ -149,6 +160,16 @@ export interface CompanionSnapshot {
   readonly contextRuleVersion: number;
   readonly contextRuleSource: string;
   readonly missions: MissionView;
+  readonly verification: VerificationStats;
+}
+
+/** Aggregate verification counters for the Contributions screen (§15). */
+export interface VerificationStats {
+  readonly checked: number;
+  readonly matched: number;
+  readonly discrepancies: number;
+  readonly independentlyConfirmed: number;
+  readonly conflicting: number;
 }
 
 export interface MissionView {
@@ -181,6 +202,32 @@ export class Companion {
   private readonly missions = new MissionStore();
   /** Set when mission state changed and has not yet been written to disk. */
   private missionsDirty = false;
+
+  /**
+   * What this commander's own game has revealed. The sole basis for spoiler
+   * gating — EDFM's data is deliberately not an input.
+   */
+  private discovery = new DiscoveryState(null);
+  private discoveryDirty = false;
+  /** FID the current discovery state belongs to, for switch detection. */
+  private discoveryFid: string | null = null;
+
+  /**
+   * Runs with an empty reference for now: EDFM has no station dataset, so every
+   * station is reported as `unknown_edfm_entity` and nothing is claimed to be
+   * wrong. That is useful — it is the seed list — and it is honest.
+   */
+  private readonly verification = new VerificationEngine({
+    onNotify: (n) =>
+      logger.info('verification', `discrepancy ${n.reason}`, {
+        // Never the values: this log can be attached to a bug report, and a
+        // discrepancy may describe something the commander has not discovered.
+        entityType: n.discrepancy.entityType,
+        field: n.discrepancy.field,
+        confirmations: n.discrepancy.independentConfirmations,
+      }),
+  });
+  private verificationDirty = false;
   private widgets: OverlayWidgets = { ...DEFAULT_WIDGETS };
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
@@ -194,6 +241,19 @@ export class Companion {
   /** Coalesces renders: the UI does not need one per journal line. */
   private notifyScheduled = false;
   private dirtyCheckpoint: JournalCheckpoint | null = null;
+
+  constructor() {
+    // One provider today. Adding body or settlement verification later is a
+    // register() call, not a change to the engine.
+    this.verification.register(
+      createStationProvider({
+        companionVersion: COMPANION_VERSION,
+        // Left off while EDFM has no station coverage: a sparse reference would
+        // make every real service look like a finding.
+        reportExtras: false,
+      }),
+    );
+  }
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -218,13 +278,33 @@ export class Companion {
         directoryDetail: this.directoryDetail,
         activeFile: this.engine?.currentFile ?? null,
         lastError: this.lastError,
-        contexts: this.resolver.current(),
+        contexts: this.projectedContexts(),
         contextRuleVersion: this.resolver.version,
         contextRuleSource: this.resolver.source,
         missions: this.missionView(),
+        verification: this.verification.stats(),
       };
     }
     return this.cachedSnapshot;
+  }
+
+  /**
+   * Active contexts with their resources filtered to what this commander may see.
+   *
+   * The resolver matched these rules against everything it knows; this is where
+   * anything naming an undiscovered species or body is removed. Nothing else in
+   * the app is permitted to read `resolver.current()` directly — that is the
+   * point of doing it here rather than in each component.
+   */
+  private projectedContexts(): readonly ActiveContext[] {
+    const policy = policyFor(this.discovery);
+    return this.resolver.current().map((ctx) => ({
+      ...ctx,
+      rule: {
+        ...ctx.rule,
+        resources: projectResources(ctx.rule.resources, this.state, policy),
+      },
+    }));
   }
 
   private notify(): void {
@@ -330,6 +410,14 @@ export class Companion {
         this.missionsDirty = false;
         void this.saveMissions();
       }
+      if (this.discoveryDirty) {
+        this.discoveryDirty = false;
+        void this.saveDiscovery();
+      }
+      if (this.verificationDirty) {
+        this.verificationDirty = false;
+        void this.saveVerificationQueue();
+      }
     }, 3000);
     this.notify();
 
@@ -349,6 +437,25 @@ export class Companion {
 
   private onEvent(event: NormalizedEvent): void {
     applyEvent(this.state, event);
+
+    // A commander switch must not inherit the previous commander's discoveries.
+    // Checked before anything is recorded against the new state.
+    const fid = isKnown(this.state.fid) ? this.state.fid : null;
+    if (fid !== null && fid !== this.discoveryFid) {
+      void this.swapDiscoveryCommander(fid);
+    }
+
+    if (this.discovery.observe(event)) {
+      this.discoveryDirty = true;
+      // A new discovery can un-hide context resources, so the UI must re-project.
+      this.notify();
+    }
+
+    // Verification runs regardless of what the commander can see: verify
+    // aggressively, reveal conservatively.
+    if (this.verification.observe(event, EMPTY_REFERENCE).length > 0) {
+      this.verificationDirty = true;
+    }
 
     if (this.missions.observe(event)) {
       this.missionsDirty = true;
@@ -507,6 +614,115 @@ export class Companion {
       source: this.resolver.source,
     });
     this.notify();
+  }
+
+  /* ------------------------------------------------------- verification */
+
+  /**
+   * Persist pending discrepancies locally.
+   *
+   * Queued rather than submitted immediately: §22 requires an offline session to
+   * lose nothing, and §14/§21 make submission an opt-in act separate from
+   * detection. Nothing leaves the machine until a backend exists and the
+   * commander has enabled contribution.
+   *
+   * The visibility gate is stored alongside so redaction is decided by the
+   * record, not by whichever code path later renders or notifies.
+   */
+  private async saveVerificationQueue(): Promise<void> {
+    if (!this.db) return;
+    const pending = this.verification.all();
+    if (pending.length === 0) return;
+
+    try {
+      for (const d of pending) {
+        await this.db.execute(
+          `INSERT INTO verification_queue (
+             key, entity_type, entity_id, field, kind, status, volatility, visibility,
+             expected_value, observed_value, observations, independent,
+             first_seen_at, last_seen_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           ON CONFLICT(key) DO UPDATE SET
+             status = excluded.status,
+             observations = excluded.observations,
+             independent = excluded.independent,
+             last_seen_at = excluded.last_seen_at`,
+          [
+            d.key,
+            d.entityType,
+            d.entityId,
+            d.field,
+            d.kind,
+            d.status,
+            d.volatility,
+            JSON.stringify(d.visibility),
+            d.expectedValue,
+            d.observedValue,
+            JSON.stringify(d.observations),
+            d.independentConfirmations,
+            d.firstObservedAt,
+            d.lastObservedAt,
+          ],
+        );
+      }
+    } catch (err) {
+      logger.warn('db', 'Could not save verification queue', { error: String(err) });
+    }
+  }
+
+  /* ------------------------------------------------ discovery / spoilers */
+
+  /**
+   * Switch to a different commander's discovery state.
+   *
+   * Flushes the outgoing commander's state first, then loads the incoming one —
+   * or starts empty. Never carries anything across: inheriting discoveries would
+   * reveal to one commander what another had found, which is exactly the leak
+   * the whole model exists to prevent.
+   */
+  private async swapDiscoveryCommander(fid: string): Promise<void> {
+    const previous = this.discoveryFid;
+    if (previous !== null && this.discoveryDirty) await this.saveDiscovery();
+
+    this.discoveryFid = fid;
+    this.discovery = await this.loadDiscovery(fid);
+    this.discoveryDirty = false;
+
+    logger.info('discovery', 'Commander changed; discovery state swapped', {
+      // FIDs identify a person's account; only whether one was present is logged.
+      hadPrevious: previous !== null,
+    });
+    this.notify();
+  }
+
+  private async loadDiscovery(fid: string): Promise<DiscoveryState> {
+    if (!this.db) return new DiscoveryState(fid);
+    try {
+      const rows = await this.db.select<Array<{ state: string }>>(
+        'SELECT state FROM discovery_state WHERE commander_fid = $1',
+        [fid],
+      );
+      const raw = rows[0]?.state;
+      if (!raw) return new DiscoveryState(fid);
+      // fromJSON re-checks the FID rather than trusting the row.
+      return DiscoveryState.fromJSON(JSON.parse(raw), fid);
+    } catch {
+      // Failing to load means the commander sees less, never more.
+      return new DiscoveryState(fid);
+    }
+  }
+
+  private async saveDiscovery(): Promise<void> {
+    if (!this.db || this.discoveryFid === null) return;
+    try {
+      await this.db.execute(
+        `INSERT INTO discovery_state (commander_fid, state, updated_at) VALUES ($1, $2, $3)
+         ON CONFLICT(commander_fid) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+        [this.discoveryFid, JSON.stringify(this.discovery), new Date().toISOString()],
+      );
+    } catch (err) {
+      logger.warn('db', 'Could not save discovery state', { error: String(err) });
+    }
   }
 
   /* -------------------------------------------------------------- missions */

@@ -14,7 +14,7 @@
 
 import { isKnown } from '@edfm/elite-journal';
 
-import type { Discrepancy, StationObservation, StationReference } from './types.js';
+import type { StationDiscrepancy, StationObservation, StationReference } from './types.js';
 
 /**
  * Service ids that must never generate a discrepancy.
@@ -46,7 +46,7 @@ export function compareStation(
   observation: StationObservation,
   reference: StationReference,
   options: CompareOptions = {},
-): readonly Discrepancy[] {
+): readonly StationDiscrepancy[] {
   // A carrier's services are its owner's business, not a fact to verify.
   if (isKnown(observation.stationType) && VOLATILE_STATION_TYPES.has(observation.stationType)) {
     return [];
@@ -54,7 +54,7 @@ export function compareStation(
   // Identity must match, or we are comparing two different places.
   if (observation.marketId !== reference.marketId) return [];
 
-  const out: Discrepancy[] = [];
+  const out: StationDiscrepancy[] = [];
   const observed = new Map(observation.services.map((s) => [s.id, s.raw]));
   const referenced = new Set(reference.serviceIds.map((id) => id.toLowerCase()));
 

@@ -1,6 +1,93 @@
-# Station Verification
+# EDFM Verification Engine
 
-Status: **observation capture built; comparison built but unfed.**
+Status: **engine, evidence model and spoiler gating built; station provider
+registered; reference data still absent.**
+
+## Shape
+
+Generic, not station-specific. A provider answers one question — "does this event
+disagree with EDFM, and how?" — and the engine owns everything else:
+accumulation, deduplication, independence, conflict, and when to notify.
+
+```
+journal event -> provider -> finding -> engine -> discrepancy -> queue -> backend -> Discord
+                                          |
+                                    visibility gate
+                                          |
+                                    player-safe view
+```
+
+Adding body, settlement, system or engineer verification later is a
+`engine.register(provider)` call. Nothing in the engine knows what a station is.
+
+## Evidence
+
+| Type | Meaning | May correct EDFM? |
+|---|---|---|
+| `direct` | The game explicitly reported it | Yes |
+| `derived` | Deterministically computed from direct values, by a documented rule | Yes |
+| `inferred` | The Companion believes it from context; Elite never said it | **No** |
+
+`canRaiseDiscrepancy()` enforces this, and the engine drops inferred findings
+before they can become a discrepancy. Inference has somewhere to live that is
+clearly *not* evidence.
+
+## Static vs dynamic
+
+Wording follows volatility, not severity:
+
+| Volatility | Examples | Phrasing |
+|---|---|---|
+| `static` | station type, body properties | "EDFM value appears incorrect" |
+| `semi-static` | station services | "EDFM value may need review" |
+| `dynamic` | controlling faction, market, Powerplay | "EDFM value may be outdated" |
+
+A dynamic field never rates above `low` confidence however directly it was
+observed — the observation being accurate says nothing about EDFM having been
+wrong when it was recorded. Telling a maintainer that EDFM is "wrong" about a
+faction that flipped last Thursday is untrue, and erodes trust in every other
+report.
+
+## Discrepancy kinds
+
+Not a single "wrong" bucket:
+
+`missing_in_game` · `missing_in_edfm` · `value_mismatch` · `unknown_edfm_entity` ·
+`unknown_game_token` · `stale_dynamic_value` · `normalization_conflict`
+
+Both directions are detected: EDFM having a service the game does not report, and
+the game reporting one EDFM lacks.
+
+## Lifecycle and deduplication
+
+`new → under_review → confirmed / rejected / resolved / superseded`, plus
+`conflicting`.
+
+Identity is `entityType|entityId|field|expected|observed|gameVersion`. Game
+version is part of it because the same field changing across an update is a
+different finding, not the same one recurring.
+
+- **First report** → create, notify.
+- **First genuinely independent confirmation** → notify once more.
+- **Everything after** → accumulate silently. Thirty users hitting one wrong
+  service is one finding.
+- **A contradicting observation** → status becomes `conflicting`; **neither**
+  observation is discarded.
+
+Independence requires a different commander FID, a different commander name, and
+a different journal file. Conservative on purpose: over-counting duplicates only
+slows confirmation, while under-counting manufactures confidence that was never
+earned.
+
+## Spoiler safety
+
+Every observation carries a `visibility` gate, so redaction is decided by the
+data rather than by whichever code path renders or notifies. See
+[SPOILERS.md](SPOILERS.md) for the model, the reveal ladder, and the known gaps.
+
+---
+
+## The finding that shaped this phase
 
 ## The finding that shapes this phase
 

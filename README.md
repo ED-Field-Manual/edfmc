@@ -33,6 +33,10 @@ Everything is local. Nothing is uploaded, and there is no analytics.
 
 These are constraints, not aspirations:
 
+- **Verify aggressively. Reveal conservatively.** The verification engine may compare
+  anything against EDFM's data; the app shows only what this commander's own game has
+  reported. A commander who enjoys exploring is never spoiled because EDFM already
+  knows the answer. See [docs/SPOILERS.md](docs/SPOILERS.md).
 - **Never guess.** A value the journal did not provide is rendered `Unknown`. Field
   presence was measured across a 197,164-line corpus; anything below 100% is typed
   optional. See [docs/JOURNAL.md](docs/JOURNAL.md).
@@ -100,6 +104,8 @@ without a journal folder.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Stack decisions and why, component boundaries, risks |
 | [JOURNAL.md](docs/JOURNAL.md) | Measured journal behaviour, field presence rates, edge cases |
 | [PRIVACY.md](docs/PRIVACY.md) | What is stored, what is sent, what never leaves the machine |
+| [SPOILERS.md](docs/SPOILERS.md) | Discovery gating and how spoiler safety is enforced |
+| [VERIFICATION.md](docs/VERIFICATION.md) | Verification engine, evidence model, discrepancy lifecycle |
 
 Overlay, API, EDDN, research, verification and logistics documents arrive with
 their respective phases.

@@ -154,6 +154,52 @@ fn migrations() -> Vec<Migration> {
             ALTER TABLE missions ADD COLUMN collected INTEGER;
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 5,
+        description: "discovery state and verification",
+        sql: r#"
+            -- What THIS commander's game has revealed to them. The sole basis
+            -- for spoiler gating: EDFM's data is never a discovery source.
+            --
+            -- Keyed by commander FID so two commanders sharing a PC cannot
+            -- inherit each other's discoveries. Persisted so that restarting
+            -- the Companion neither loses legitimate discoveries nor reveals
+            -- anything merely because server data exists.
+            CREATE TABLE IF NOT EXISTS discovery_state (
+                commander_fid TEXT PRIMARY KEY,
+                state         TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            );
+
+            -- Discrepancies awaiting submission. Held locally so an offline
+            -- session loses nothing (§22), and so submission is a separate,
+            -- opt-in act from detection.
+            CREATE TABLE IF NOT EXISTS verification_queue (
+                key            TEXT PRIMARY KEY,
+                entity_type    TEXT NOT NULL,
+                entity_id      TEXT NOT NULL,
+                field          TEXT NOT NULL,
+                kind           TEXT NOT NULL,
+                status         TEXT NOT NULL,
+                volatility     TEXT NOT NULL,
+                -- Serialised visibility gate. Travels with the record so
+                -- redaction is decided by the data rather than by whichever
+                -- code path happens to render or notify.
+                visibility     TEXT NOT NULL,
+                expected_value TEXT,
+                observed_value TEXT,
+                observations   TEXT NOT NULL,
+                independent    INTEGER NOT NULL DEFAULT 1,
+                first_seen_at  TEXT NOT NULL,
+                last_seen_at   TEXT NOT NULL,
+                submitted_at   TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_verification_pending
+                ON verification_queue (submitted_at) WHERE submitted_at IS NULL;
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

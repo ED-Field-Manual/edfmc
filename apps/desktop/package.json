@@ -18,7 +18,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@edfm/context": "*",
-    "@edfm/missions": "*"
+    "@edfm/missions": "*",
+    "@edfm/verification": "*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

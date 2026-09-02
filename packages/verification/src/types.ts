@@ -96,10 +96,17 @@ export interface StationReference {
   readonly updatedAt: string | null;
 }
 
-export type DiscrepancyKind = 'service-missing' | 'service-extra' | 'name-differs';
+/**
+ * Legacy station-specific discrepancy shape.
+ *
+ * Superseded by the generic model in discrepancy.ts, which is what the engine
+ * and providers use. Kept because compareStation() still returns it and is
+ * still tested; new code should not reach for it.
+ */
+export type StationDiscrepancyKind = 'service-missing' | 'service-extra' | 'name-differs';
 
-export interface Discrepancy {
-  readonly kind: DiscrepancyKind;
+export interface StationDiscrepancy {
+  readonly kind: StationDiscrepancyKind;
   readonly marketId: number;
   readonly stationName: string;
   /** Service id, or the field name for non-service discrepancies. */
