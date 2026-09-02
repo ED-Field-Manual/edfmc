@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { isKnown, type Known } from '@edfm/elite-journal';
+import { isKnown, type CommanderState, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl } from '@edfm/context';
 import type { Mission } from '@edfm/missions';
@@ -151,10 +151,37 @@ function Field({ label, value, wide }: { label: string; value: string; wide?: bo
   );
 }
 
+/**
+ * True when the journal's Body and StationName describe the same place.
+ *
+ * Orbital and station-type docks report BodyType "Station" with Body equal to the
+ * station name, so showing both is pure repetition. Surface ports and fleet
+ * carriers report Planet or Star, where the body is genuinely separate
+ * information worth keeping while flying and landing.
+ */
+function bodyDuplicatesStation(s: CommanderState): boolean {
+  return isKnown(s.bodyType) && s.bodyType === 'Station';
+}
+
+/**
+ * How to label the station.
+ *
+ * A carrier gets "Name (CALLSIGN)" on one line: the name is what the commander
+ * calls it, the callsign is what the game shows on the dock, and separating them
+ * across two rows made the pair harder to read rather than easier.
+ */
+function stationDisplay(s: CommanderState): string {
+  if (!isKnown(s.stationName)) return 'Unknown';
+  if (isKnown(s.carrierName)) return `${s.carrierName} (${s.stationName})`;
+  return s.stationName;
+}
+
 function Dashboard({ snap }: { snap: Snap }) {
   const s = snap.state;
   const pos = isKnown(s.starPos) ? s.starPos.map((n) => n.toFixed(2)).join(' / ') : 'Unknown';
   const services = isKnown(s.stationServices) ? String(s.stationServices.length) : 'Unknown';
+  const bodyIsStation = bodyDuplicatesStation(s);
+  const stationLabel = stationDisplay(s);
 
   return (
     <>
@@ -181,12 +208,13 @@ function Dashboard({ snap }: { snap: Snap }) {
         <div className="grid">
           <Field label="System" value={show(s.starSystem)} />
           <Field label="System address" value={show(s.systemAddress)} />
-          <Field label="Body" value={show(s.body)} />
+          {/* BodyType "Station" means Body IS the station — the journal reports
+              Body='Elder Hub' next to StationName='Elder Hub'. Showing both would
+              just repeat it. A carrier is always Planet or Star, so its body stays
+              a separate, useful line. */}
+          {!bodyIsStation && <Field label="Body" value={show(s.body)} />}
           <Field label="Coordinates" value={pos} wide />
-          {/* At a carrier, show the name and keep the callsign alongside it —
-              the callsign is what the journal actually reported. */}
-          <Field label="Station" value={show(isKnown(s.carrierName) ? s.carrierName : s.stationName)} />
-          {isKnown(s.carrierName) && <Field label="Callsign" value={show(s.stationName)} />}
+          <Field label="Station" value={stationLabel} />
           <Field label="Market ID" value={show(s.marketId)} />
           <Field label="Docking" value={s.docking === 'unknown' ? 'Unknown' : s.docking} />
           <Field label="Services reported" value={services} />

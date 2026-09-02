@@ -148,6 +148,31 @@ describe('CommanderState', () => {
       expect(Object.keys(s.knownCarriers)).toEqual([]);
     });
 
+    it('records BodyType so the UI can tell a station from a real body', () => {
+      // A carrier reports BodyType Planet or Star with a genuinely different
+      // Body; an orbital station reports BodyType Station with Body equal to the
+      // station name. That difference is what decides whether both are shown.
+      let s = initialState();
+      s = feed(s, CARRIER_STATS);
+      s = feed(
+        s,
+        '{ "timestamp":"2026-09-02T01:00:00Z", "event":"Location", "Docked":true, "StationName":"HBN-TXN", "StationType":"FleetCarrier", "MarketID":3703420416, "StationServices":[ "dock" ], "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "StarPos":[1.0,2.0,3.0], "Body":"Wregoe JO-G c24-27 A 5", "BodyID":8, "BodyType":"Planet", "Population":0, "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$x;", "SystemSecurity_Localised":"Anarchy" }',
+      );
+      expect(s.bodyType).toBe('Planet');
+      expect(s.body).toBe('Wregoe JO-G c24-27 A 5');
+      expect(s.carrierName).toBe('PFC Atlas Unbound');
+    });
+
+    it('reports BodyType Station when Body just repeats the station name', () => {
+      let s = initialState();
+      s = feed(
+        s,
+        '{ "timestamp":"2026-09-02T01:00:00Z", "event":"Location", "Docked":true, "StationName":"Elder Hub", "StationType":"Coriolis", "MarketID":128, "StationServices":[ "dock" ], "StarSystem":"Mundii", "SystemAddress":99, "StarPos":[1.0,2.0,3.0], "Body":"Elder Hub", "BodyID":1, "BodyType":"Station", "Population":0, "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$x;", "SystemSecurity_Localised":"Low" }',
+      );
+      expect(s.bodyType).toBe('Station');
+      expect(s.body).toBe(s.stationName);
+    });
+
     it('does not attach a carrier name to a normal station', () => {
       let s = initialState();
       s = feed(s, CARRIER_STATS);

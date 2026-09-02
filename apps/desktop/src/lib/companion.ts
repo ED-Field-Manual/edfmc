@@ -312,10 +312,18 @@ export class Companion {
       .pushState({
         commander: text(s.commander),
         starSystem: text(s.starSystem),
-        // Prefer the carrier's name over its callsign; fall back when unknown.
-        station: text(isKnown(s.carrierName) ? s.carrierName : s.stationName),
-        callsign: isKnown(s.carrierName) ? text(s.stationName) : null,
-        body: text(s.body),
+        // Carrier name and callsign go on one line: two rows for one place wasted
+        // scarce overlay space and read as two separate things.
+        station: isKnown(s.stationName)
+          ? isKnown(s.carrierName)
+            ? `${s.carrierName} (${s.stationName})`
+            : s.stationName
+          : null,
+        // Body is omitted when it merely repeats the station. BodyType "Station"
+        // means the journal reported Body='Elder Hub' next to
+        // StationName='Elder Hub'; a carrier is Planet or Star, so its body is
+        // genuinely different information and stays.
+        body: isKnown(s.bodyType) && s.bodyType === 'Station' ? null : text(s.body),
         docking: s.docking === 'unknown' ? null : s.docking,
         vehicle: s.vehicle === 'unknown' ? null : s.vehicle,
         // Only the single highest-ranked context reaches the overlay. Space over a

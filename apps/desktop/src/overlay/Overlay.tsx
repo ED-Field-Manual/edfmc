@@ -25,8 +25,6 @@ interface OverlayState {
   commander: string | null;
   starSystem: string | null;
   station: string | null;
-  /** Carrier callsign, when `station` holds the carrier's name. */
-  callsign: string | null;
   body: string | null;
   docking: string | null;
   vehicle: string | null;
@@ -168,11 +166,11 @@ export default function Overlay() {
           <>
             <Row label="CMDR" value={state.commander} />
             <Row label="System" value={state.starSystem} />
-            <Row label="Body" value={state.body} />
+            {/* Body is sent as null when it merely repeats the station, so an
+                orbital dock shows one line instead of the same name twice. On a
+                surface port or a carrier it is a different place and stays. */}
+            {state.body && <Row label="Body" value={state.body} />}
             <Row label="Station" value={state.station} />
-            {/* Callsign only when the row above is showing a carrier's name, so
-                the identifier the game displays is still available at a glance. */}
-            {state.callsign && <Row label="Callsign" value={state.callsign} />}
 
             {state.context && (
               <div className="context">

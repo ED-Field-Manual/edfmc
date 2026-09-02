@@ -34,6 +34,16 @@ export interface CommanderState {
   starPos: Known<readonly [number, number, number]>;
 
   body: Known<string>;
+  /**
+   * "Planet", "Star", or "Station".
+   *
+   * "Station" means Body and StationName are the same thing: the journal reports
+   * Body='Elder Hub' alongside StationName='Elder Hub' (89 of 169 docked Location
+   * events). Anything else means Body is a real celestial body the station sits on
+   * or orbits — a fleet carrier is always Planet or Star — and the two are
+   * genuinely different places worth showing separately.
+   */
+  bodyType: Known<string>;
   bodyId: Known<number>;
   latitude: Known<number>;
   longitude: Known<number>;
@@ -86,6 +96,7 @@ export function initialState(): CommanderState {
     systemAddress: UNKNOWN,
     starPos: UNKNOWN,
     body: UNKNOWN,
+    bodyType: UNKNOWN,
     bodyId: UNKNOWN,
     latitude: UNKNOWN,
     longitude: UNKNOWN,
@@ -201,6 +212,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       state.systemAddress = set(state.systemAddress, d.systemAddress);
       state.starPos = set(state.starPos, d.starPos);
       state.body = set(state.body, d.body);
+      state.bodyType = set(state.bodyType, d.bodyType);
       state.bodyId = set(state.bodyId, d.bodyId);
       // Jumping always leaves any station and any planetary surface behind.
       state.docking = 'undocked';
@@ -287,8 +299,9 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
     }
 
     case 'supercruise-exit': {
-      const d = event.data as { body: Known<string> };
+      const d = event.data as { body: Known<string>; bodyType: Known<string> };
       state.body = set(state.body, d.body);
+      state.bodyType = set(state.bodyType, d.bodyType);
       break;
     }
 
@@ -316,6 +329,7 @@ function applyLocationLike(state: CommanderState, d: LocationData): void {
   state.systemAddress = set(state.systemAddress, d.systemAddress);
   state.starPos = set(state.starPos, d.starPos);
   state.body = set(state.body, d.body);
+  state.bodyType = set(state.bodyType, d.bodyType);
   state.bodyId = set(state.bodyId, d.bodyId);
   state.latitude = set(state.latitude, d.latitude);
   state.longitude = set(state.longitude, d.longitude);

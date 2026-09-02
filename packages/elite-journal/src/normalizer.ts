@@ -139,6 +139,8 @@ export interface FsdJumpData {
   readonly fuelLevel: Known<number>;
   readonly body: Known<string>;
   readonly bodyId: Known<number>;
+  /** 100% present on FSDJump (n=3837). */
+  readonly bodyType: Known<string>;
 }
 
 export interface ApproachSettlementData {
@@ -216,6 +218,7 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
       fuelLevel: num(r, 'FuelLevel'),
       body: str(r, 'Body'),
       bodyId: num(r, 'BodyID'),
+      bodyType: str(r, 'BodyType'),
     }),
   },
   CarrierJump: { kind: 'carrier-jump', fn: (r): LocationData => locationLike(r) },
