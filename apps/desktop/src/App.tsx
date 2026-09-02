@@ -508,8 +508,16 @@ function MissionList({
             )}
 
             {/* Frontier's own mission titles assume the mechanic is already
-                understood: "Source and return" never says you buy the cargo. */}
-            {explanation && <span className="mission-explain">{explanation}</span>}
+                understood: "Source and return" never says you buy the cargo.
+                Labelled, because this is EDFM's editorial guidance rather than
+                something read out of the journal — everything else on this row
+                came from the game, and the difference should be visible. */}
+            {explanation && (
+              <span className="mission-explain">
+                <span className="mission-explain-label">EDFM note</span>
+                {explanation}
+              </span>
+            )}
             {caveat && (
               <span className="mission-caveat">
                 <span aria-hidden="true">▲ </span>

@@ -112,9 +112,16 @@ Donations split on **data** rather than category: `Mission_Altruism` and
 source and the other wants money. The presence of a `Commodity` decides which
 explanation appears.
 
+These lines are labelled **EDFM note** in the UI. Everything else on a mission row
+was read out of the journal; this was not. Marking it keeps the provenance visible
+rather than letting editorial guidance blend into reported fact — the same instinct
+behind showing Unknown instead of a plausible default.
+
 A separate `missionCaveat()` carries statements about *the Companion's* limits rather
 than the mission's requirements — currently that Elite does not journal kill progress.
-Keeping the two apart matters: one is about the game, the other is about us.
+It is deliberately **not** labelled "EDFM note": it is not EDFM's guidance, it is our
+own admission of a gap. Keeping the two apart matters: one is about the game, the
+other is about us.
 
 ## Reconciliation, and the `ended-unknown` status
 

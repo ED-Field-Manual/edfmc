@@ -284,6 +284,20 @@ input[type='text']:focus { border-color: var(--accent); }
   max-width: 68ch;
   line-height: 1.45;
 }
+.mission-explain-label {
+  display: inline-block;
+  margin-right: 0.4375rem;
+  padding: 0 0.3125rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-3));
+  color: var(--accent);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
 .mission-caveat {
   font-size: 0.75rem;
   color: var(--warn);
