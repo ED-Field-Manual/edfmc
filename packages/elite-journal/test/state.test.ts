@@ -64,6 +64,75 @@ describe('CommanderState', () => {
     expect(s.starPos).toEqual([487.96875, 90.375, -10.5625]);
   });
 
+  describe('fleet carrier names', () => {
+    // Docked reports only the callsign; the name lives in CarrierStats and joins
+    // on CarrierID === MarketID. Both were 3703420416 for this carrier.
+    const CARRIER_STATS =
+      '{ "timestamp":"2026-09-01T13:54:48Z", "event":"CarrierStats", "CarrierID":3703420416, "CarrierType":"FleetCarrier", "Callsign":"HBN-TXN", "Name":"PFC Atlas Unbound", "DockingAccess":"all", "AllowNotorious":true, "FuelLevel":709 }';
+    const DOCKED_CARRIER =
+      '{ "timestamp":"2026-09-01T17:07:40Z", "event":"Docked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "Taxi":false, "Multicrew":false, "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "MarketID":3703420416, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationServices":[ "dock" ], "StationEconomy":"$economy_Carrier;", "StationEconomies":[], "DistFromStarLS":794.7, "LandingPads":{ "Small":4, "Medium":4, "Large":8 } }';
+
+    it('resolves the name when stats were seen before docking', () => {
+      let s = initialState();
+      s = feed(s, CARRIER_STATS);
+      s = feed(s, DOCKED_CARRIER);
+      expect(s.stationName).toBe('HBN-TXN'); // raw journal value preserved
+      expect(s.carrierName).toBe('PFC Atlas Unbound');
+    });
+
+    it('resolves the name when stats arrive after docking', () => {
+      // The real ordering at session start: Location (docked) precedes CarrierStats.
+      let s = initialState();
+      s = feed(s, DOCKED_CARRIER);
+      expect(s.carrierName).toBe(UNKNOWN);
+
+      s = feed(s, CARRIER_STATS);
+      expect(s.carrierName).toBe('PFC Atlas Unbound');
+    });
+
+    it('picks up a rename while docked', () => {
+      let s = initialState();
+      s = feed(s, CARRIER_STATS);
+      s = feed(s, DOCKED_CARRIER);
+      s = feed(
+        s,
+        // Real payload, including Frontier's malformed empty-string key.
+        '{ "timestamp":"2026-08-28T04:18:51Z", "event":"CarrierNameChange", "CarrierID":3703420416, "":"FleetCarrier", "Name":"PFC Renamed", "Callsign":"HBN-TXN" }',
+      );
+      expect(s.carrierName).toBe('PFC Renamed');
+    });
+
+    it("leaves another commander's carrier UNKNOWN rather than guessing", () => {
+      // No CarrierStats is emitted for someone else's carrier, so the journal
+      // genuinely does not contain its name.
+      let s = initialState();
+      s = feed(s, CARRIER_STATS); // our own carrier
+      s = feed(
+        s,
+        '{ "timestamp":"2026-09-01T17:07:40Z", "event":"Docked", "StationName":"XYZ-99Z", "StationType":"FleetCarrier", "Taxi":false, "Multicrew":false, "StarSystem":"Sol", "SystemAddress":1, "MarketID":9999999999, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationServices":[ "dock" ], "StationEconomy":"$economy_Carrier;", "StationEconomies":[], "DistFromStarLS":1.0, "LandingPads":{ "Small":4, "Medium":4, "Large":8 } }',
+      );
+      expect(s.stationName).toBe('XYZ-99Z');
+      expect(s.carrierName).toBe(UNKNOWN);
+    });
+
+    it('clears the carrier name on undock', () => {
+      let s = initialState();
+      s = feed(s, CARRIER_STATS);
+      s = feed(s, DOCKED_CARRIER);
+      s = feed(s, '{ "timestamp":"2026-09-01T18:00:00Z", "event":"Undocked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "MarketID":3703420416, "Taxi":false, "Multicrew":false }');
+      expect(s.carrierName).toBe(UNKNOWN);
+      // The identity itself is remembered for next time.
+      expect(s.knownCarriers[3703420416]).toBe('PFC Atlas Unbound');
+    });
+
+    it('does not attach a carrier name to a normal station', () => {
+      let s = initialState();
+      s = feed(s, CARRIER_STATS);
+      s = feed(s, DOCKED);
+      expect(s.carrierName).toBe(UNKNOWN);
+    });
+  });
+
   it('clears station context on undock', () => {
     let s = initialState();
     s = feed(s, DOCKED);

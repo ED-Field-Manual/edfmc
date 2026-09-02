@@ -261,7 +261,9 @@ export class Companion {
       .pushState({
         commander: text(s.commander),
         starSystem: text(s.starSystem),
-        station: text(s.stationName),
+        // Prefer the carrier's name over its callsign; fall back when unknown.
+        station: text(isKnown(s.carrierName) ? s.carrierName : s.stationName),
+        callsign: isKnown(s.carrierName) ? text(s.stationName) : null,
         body: text(s.body),
         docking: s.docking === 'unknown' ? null : s.docking,
         vehicle: s.vehicle === 'unknown' ? null : s.vehicle,

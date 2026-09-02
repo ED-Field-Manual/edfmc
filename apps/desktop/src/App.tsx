@@ -180,7 +180,10 @@ function Dashboard({ snap }: { snap: Snap }) {
           <Field label="System address" value={show(s.systemAddress)} />
           <Field label="Body" value={show(s.body)} />
           <Field label="Coordinates" value={pos} wide />
-          <Field label="Station" value={show(s.stationName)} />
+          {/* At a carrier, show the name and keep the callsign alongside it —
+              the callsign is what the journal actually reported. */}
+          <Field label="Station" value={show(isKnown(s.carrierName) ? s.carrierName : s.stationName)} />
+          {isKnown(s.carrierName) && <Field label="Callsign" value={show(s.stationName)} />}
           <Field label="Market ID" value={show(s.marketId)} />
           <Field label="Docking" value={s.docking === 'unknown' ? 'Unknown' : s.docking} />
           <Field label="Services reported" value={services} />

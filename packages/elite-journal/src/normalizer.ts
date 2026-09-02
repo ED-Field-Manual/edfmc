@@ -303,6 +303,48 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
       hasInventory: Array.isArray(r['Inventory']),
     }),
   },
+  /*
+   * Fleet carrier identity.
+   *
+   * `Docked` at a carrier reports only the callsign (e.g. `HBN-TXN`) as
+   * StationName; the human-readable name appears nowhere in that event. It comes
+   * from `CarrierStats` / `CarrierNameChange`, which carry `CarrierID` — and that
+   * id equals the `MarketID` on the corresponding Docked event, which is what
+   * lets the two be joined.
+   *
+   * This therefore only resolves the *commander's own* carrier. Docking at
+   * someone else's produces no CarrierStats, so their name is genuinely not in
+   * the journal and the callsign is all we can honestly show.
+   *
+   * Note: real CarrierNameChange payloads contain a malformed empty-string key
+   * (`"":"FleetCarrier"`). It is ignored, and parsing is unaffected.
+   */
+  CarrierStats: {
+    kind: 'carrier-identity',
+    fn: (r) => ({
+      carrierId: num(r, 'CarrierID'),
+      callsign: str(r, 'Callsign'),
+      name: str(r, 'Name'),
+    }),
+  },
+  CarrierNameChange: {
+    kind: 'carrier-identity',
+    fn: (r) => ({
+      carrierId: num(r, 'CarrierID'),
+      callsign: str(r, 'Callsign'),
+      name: str(r, 'Name'),
+    }),
+  },
+  CarrierBuy: {
+    kind: 'carrier-identity',
+    fn: (r) => ({
+      carrierId: num(r, 'CarrierID'),
+      callsign: str(r, 'Callsign'),
+      // A newly bought carrier has no name yet.
+      name: UNKNOWN as Known<string>,
+    }),
+  },
+
   Shutdown: { kind: 'shutdown', fn: () => ({}) },
   Embark: { kind: 'embark', fn: (r) => onFootTransition(r) },
   Disembark: { kind: 'disembark', fn: (r) => onFootTransition(r) },

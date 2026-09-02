@@ -44,6 +44,8 @@ export interface OverlayPushState {
   commander: string | null;
   starSystem: string | null;
   station: string | null;
+  /** Carrier callsign, when `station` is showing a carrier name instead. */
+  callsign: string | null;
   body: string | null;
   docking: string | null;
   vehicle: string | null;

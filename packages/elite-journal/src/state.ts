@@ -38,11 +38,24 @@ export interface CommanderState {
   latitude: Known<number>;
   longitude: Known<number>;
 
+  /** Exactly what the journal reported. For a carrier this is the callsign. */
   stationName: Known<string>;
   stationType: Known<string>;
   marketId: Known<number>;
   stationServices: Known<readonly StationService[]>;
   docking: DockingState;
+
+  /**
+   * Human-readable name of the carrier currently docked at, when known.
+   *
+   * Only resolvable for the commander's own carrier: `Docked` carries just the
+   * callsign, and the name has to be joined from CarrierStats by CarrierID. At
+   * someone else's carrier this stays UNKNOWN, because the journal genuinely does
+   * not say — it is not a lookup failure to paper over.
+   */
+  carrierName: Known<string>;
+  /** CarrierID -> name, accumulated from CarrierStats / CarrierNameChange. */
+  knownCarriers: Record<number, string>;
 
   vehicle: VehicleState;
   ship: Known<string>;
@@ -80,6 +93,8 @@ export function initialState(): CommanderState {
     stationType: UNKNOWN,
     marketId: UNKNOWN,
     stationServices: UNKNOWN,
+    carrierName: UNKNOWN,
+    knownCarriers: {},
     docking: 'unknown',
     vehicle: 'unknown',
     ship: UNKNOWN,
@@ -99,11 +114,26 @@ function set<T>(current: Known<T>, incoming: Known<T>): Known<T> {
   return isKnown(incoming) ? incoming : current;
 }
 
+/**
+ * Join the docked station to a known carrier name.
+ *
+ * The link is `Docked.MarketID === CarrierStats.CarrierID`; both were observed as
+ * 3703420416 for the same carrier. Leaves `carrierName` UNKNOWN when no identity
+ * has been seen, which is the honest answer for another commander's carrier.
+ */
+function resolveCarrierName(s: CommanderState): void {
+  if (!isKnown(s.stationType) || s.stationType !== 'FleetCarrier') return;
+  if (!isKnown(s.marketId)) return;
+  const name = s.knownCarriers[s.marketId];
+  if (name) s.carrierName = name;
+}
+
 function clearLocation(s: CommanderState): void {
   s.stationName = UNKNOWN;
   s.stationType = UNKNOWN;
   s.marketId = UNKNOWN;
   s.stationServices = UNKNOWN;
+  s.carrierName = UNKNOWN;
 }
 
 /**
@@ -168,6 +198,21 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       break;
     }
 
+    case 'carrier-identity': {
+      const d = event.data as {
+        carrierId: Known<number>;
+        name: Known<string>;
+      };
+      if (isKnown(d.carrierId) && isKnown(d.name) && d.name.length > 0) {
+        state.knownCarriers[d.carrierId] = d.name;
+        // A rename while docked should take effect immediately.
+        if (isKnown(state.marketId) && state.marketId === d.carrierId) {
+          state.carrierName = d.name;
+        }
+      }
+      break;
+    }
+
     case 'docked': {
       const d = event.data as DockedData;
       state.docking = 'docked';
@@ -177,6 +222,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       state.starSystem = set(state.starSystem, d.starSystem);
       state.systemAddress = set(state.systemAddress, d.systemAddress);
       if (d.services !== UNKNOWN) state.stationServices = d.services;
+      resolveCarrierName(state);
       break;
     }
 
@@ -273,6 +319,8 @@ function applyLocationLike(state: CommanderState, d: LocationData): void {
       state.stationType = set(state.stationType, d.stationType);
       state.marketId = set(state.marketId, d.marketId);
       if (d.services !== UNKNOWN) state.stationServices = d.services as readonly StationService[];
+      // Covers starting the session already docked, and CarrierJump.
+      resolveCarrierName(state);
     } else {
       clearLocation(state);
     }

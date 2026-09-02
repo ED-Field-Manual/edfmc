@@ -25,6 +25,8 @@ interface OverlayState {
   commander: string | null;
   starSystem: string | null;
   station: string | null;
+  /** Carrier callsign, when `station` holds the carrier's name. */
+  callsign: string | null;
   body: string | null;
   docking: string | null;
   vehicle: string | null;
@@ -168,6 +170,9 @@ export default function Overlay() {
             <Row label="System" value={state.starSystem} />
             <Row label="Body" value={state.body} />
             <Row label="Station" value={state.station} />
+            {/* Callsign only when the row above is showing a carrier's name, so
+                the identifier the game displays is still available at a glance. */}
+            {state.callsign && <Row label="Callsign" value={state.callsign} />}
 
             {state.context && (
               <div className="context">
