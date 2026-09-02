@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type CommanderState, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl } from '@edfm/context';
-import { explainMission, missionCaveat, type Mission } from '@edfm/missions';
+import {
+  explainMission,
+  hasDeliveryProgress,
+  missionCaveat,
+  remainingCargo,
+  type Mission,
+} from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
@@ -488,10 +494,21 @@ function MissionList({
               {/* Kill counts are accepted/completed only — Elite does not journal
                   incremental progress, so no partial counter is shown (§8). */}
               {isKnown(m.killCount) && <span className="badge">{m.killCount} kills</span>}
-              {isKnown(m.count) && isKnown(m.commodity) && (
-                <span className="badge">
-                  {m.count} t {isKnown(m.commodityLocalised) ? m.commodityLocalised : ''}
+              {/* Real progress, from CargoDepot — the one kind Elite journals.
+                  Shows what is still owed, since that is the number the next run
+                  is planned around. */}
+              {hasDeliveryProgress(m) ? (
+                <span className="badge progress">
+                  {remainingCargo(m)} t left of {m.totalToDeliver as number}
+                  {isKnown(m.commodityLocalised) ? ` ${m.commodityLocalised}` : ''}
                 </span>
+              ) : (
+                isKnown(m.count) &&
+                isKnown(m.commodity) && (
+                  <span className="badge">
+                    {m.count} t {isKnown(m.commodityLocalised) ? m.commodityLocalised : ''}
+                  </span>
+                )
               )}
             </span>
             {showDestination && (

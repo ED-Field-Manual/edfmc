@@ -35,6 +35,8 @@ import {
   MissionStore,
   explainMission,
   fromRow,
+  hasDeliveryProgress,
+  remainingCargo,
   toRow,
   type DestinationGroup,
   type Mission,
@@ -116,6 +118,21 @@ export function relativeExpiry(iso: string): string {
   if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+/**
+ * Cargo line for a mission row.
+ *
+ * Leads with what is still owed when the journal has told us, because that is the
+ * number the next run is planned around — after handing in 1,236 of 1,386, "150
+ * left" is useful and "1386 t" is actively misleading.
+ */
+function cargoLabel(m: Mission): string | null {
+  const commodity = isKnown(m.commodityLocalised) ? ` ${m.commodityLocalised}` : '';
+  if (hasDeliveryProgress(m)) {
+    return `${remainingCargo(m)} t left of ${m.totalToDeliver as number}${commodity}`;
+  }
+  return isKnown(m.count) && isKnown(m.commodity) ? `${m.count} t${commodity}`.trim() : null;
 }
 
 export type ConnectionState = 'starting' | 'watching' | 'no-directory' | 'stopped' | 'error';
@@ -452,10 +469,7 @@ export class Companion {
             : m.destinationSystem
           : null,
         expiry: isKnown(m.expiry) ? relativeExpiry(m.expiry) : null,
-        cargo:
-          isKnown(m.count) && isKnown(m.commodity)
-            ? `${m.count} t ${isKnown(m.commodityLocalised) ? m.commodityLocalised : ''}`.trim()
-            : null,
+        cargo: cargoLabel(m),
         note: this.widgets.edfmNotes ? explainMission(m) : null,
       }));
 

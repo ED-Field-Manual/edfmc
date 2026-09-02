@@ -141,6 +141,19 @@ fn migrations() -> Vec<Migration> {
             CREATE INDEX IF NOT EXISTS idx_missions_expiry ON missions(expiry);
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 4,
+        description: "cargo delivery progress",
+        sql: r#"
+            -- From CargoDepot, which is the one kind of mission progress Elite
+            -- genuinely journals. NULL means no depot event has been seen for the
+            -- mission -- not that nothing has been delivered.
+            ALTER TABLE missions ADD COLUMN delivered INTEGER;
+            ALTER TABLE missions ADD COLUMN total_to_deliver INTEGER;
+            ALTER TABLE missions ADD COLUMN collected INTEGER;
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

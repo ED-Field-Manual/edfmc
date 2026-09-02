@@ -30,6 +30,43 @@ reliable, so no partial kill counter is shown — §8 anticipated this, and the 
 confirms it. The accepted `KillCount` is displayed as a requirement, never as
 progress.
 
+## Delivery progress IS journalled, and is exact
+
+The one exception, and worth being precise about because §8's "do not fake
+incremental progress" is easy to over-apply. `CargoDepot` (n=45) carries real
+numbers, all at 100% presence:
+
+| Field | Meaning |
+|---|---|
+| `ItemsDelivered` | **Cumulative** total delivered so far |
+| `TotalItemsToDeliver` | The requirement |
+| `ItemsCollected` | Collected from a start market, for depot-sourced missions |
+| `Count` | This delivery's amount |
+
+Remaining is `TotalItemsToDeliver - ItemsDelivered`. That is measured, not inferred,
+so showing "150 t left of 1386" is reporting what the game said rather than guessing.
+
+Three details that would each produce wrong numbers:
+
+- **`ItemsDelivered` is cumulative**, observed going 540 → 1512 across two events for
+  one mission. Accumulating instead of assigning would report 2052 delivered against
+  a 1512 requirement, and replaying a journal would inflate it without bound.
+- **`Progress` is unusable.** It read `0.000000` on 43 of 45 occurrences, including
+  while 540 of 1512 were delivered. Trusting it would report no progress at all.
+- **UNKNOWN is not zero.** No `CargoDepot` event means either the mission is not a
+  depot mission or nothing has been delivered yet — the display falls back to the
+  accepted count rather than claiming "0 delivered".
+
+Destination groups and the cargo summary count **remaining**, not the accepted total.
+After handing in 1,236 of 1,386, the number the next run is planned around is 150;
+showing 1,386 there would be actively misleading.
+
+`MissionAccepted.Count` matched `TotalItemsToDeliver` in every case checked, so the
+depot event also fills in a count for missions where acceptance did not report one.
+
+Observed on `Mission_Collect*`, `Mission_Mining`, `Mission_Delivery_*` and
+`Mission_DeliveryWing`. `UpdateType` was "Deliver" (43) or "Collect" (2).
+
 ## Four traps in the mission events
 
 Each of these would produce silently wrong results, and each has a test.

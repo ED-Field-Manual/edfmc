@@ -91,6 +91,25 @@ function carriesCargo(m: Mission): boolean {
 }
 
 /**
+ * Cargo still owed on a mission, or null when it does not carry cargo.
+ *
+ * Prefers real delivery progress over the original requirement. Having handed in
+ * 1,236 of 1,386, what the commander needs to know is 150 — the accepted total is
+ * the wrong number to plan the next run around.
+ */
+export function remainingCargo(m: Mission): number | null {
+  if (isKnown(m.totalToDeliver) && isKnown(m.delivered)) {
+    return Math.max(0, m.totalToDeliver - m.delivered);
+  }
+  return carriesCargo(m) ? (m.count as number) : null;
+}
+
+/** True once any delivery has been recorded against this mission. */
+export function hasDeliveryProgress(m: Mission): boolean {
+  return isKnown(m.totalToDeliver) && isKnown(m.delivered);
+}
+
+/**
  * Categories that normally involve cargo. Used only to decide whether a *missing*
  * commodity/count is worth flagging, never to count cargo.
  */
@@ -162,6 +181,9 @@ export class MissionStore {
       case 'MissionRedirected':
         return this.redirect(raw);
 
+      case 'CargoDepot':
+        return this.depot(raw);
+
       case 'Missions':
         return this.reconcile(raw);
 
@@ -203,6 +225,10 @@ export class MissionStore {
       passengerType: str(raw, 'PassengerType'),
       passengerVips: bool(raw, 'PassengerVIPs'),
       passengerWanted: bool(raw, 'PassengerWanted'),
+      // Populated by CargoDepot, not by acceptance.
+      delivered: UNKNOWN,
+      totalToDeliver: UNKNOWN,
+      collected: UNKNOWN,
       reward: num(raw, 'Reward'),
       donation: num(raw, 'Donation'),
       expiry: str(raw, 'Expiry'),
@@ -264,6 +290,47 @@ export class MissionStore {
       destinationSystem: str(raw, 'NewDestinationSystem'),
       destinationStation: str(raw, 'NewDestinationStation'),
       redirected: true,
+    });
+  }
+
+  /**
+   * Record delivery progress from a CargoDepot event.
+   *
+   * `ItemsDelivered` is cumulative, so it is assigned rather than accumulated —
+   * adding successive events would double-count, and replaying a journal would
+   * inflate it without bound.
+   *
+   * Deliberately ignores `Progress`, which read 0.000000 on 43 of 45 observed
+   * events and therefore carries no information.
+   */
+  private depot(raw: Readonly<Record<string, unknown>>): boolean {
+    const id = raw['MissionID'];
+    if (typeof id !== 'number') return false;
+
+    const existing = this.missions.get(id);
+    if (!existing) return false; // depot update for a mission we never saw accepted
+
+    const delivered = num(raw, 'ItemsDelivered');
+    const total = num(raw, 'TotalItemsToDeliver');
+    const collected = num(raw, 'ItemsCollected');
+
+    if (
+      existing.delivered === delivered &&
+      existing.totalToDeliver === total &&
+      existing.collected === collected
+    ) {
+      return false;
+    }
+
+    return this.replace(id, {
+      ...existing,
+      delivered,
+      totalToDeliver: total,
+      collected,
+      // TotalItemsToDeliver matched MissionAccepted.Count in every case checked,
+      // but the depot event is the more authoritative statement of the
+      // requirement, so it fills a count we never learned.
+      count: isKnown(existing.count) ? existing.count : total,
     });
   }
 
@@ -331,7 +398,10 @@ export class MissionStore {
         continue;
       }
       const station = isKnown(mission.destinationStation) ? mission.destinationStation : null;
-      const key = `${mission.destinationSystem} ${station ?? ''}`;
+      // JSON rather than a delimiter string: station names contain spaces,
+      // punctuation and colons, so any separator risks two different
+      // system/station pairs colliding into one group.
+      const key = JSON.stringify([mission.destinationSystem, station]);
       const bucket = groups.get(key);
       if (bucket) bucket.push(mission);
       else groups.set(key, [mission]);
@@ -350,7 +420,10 @@ export class MissionStore {
       let earliest: string | null = null;
 
       for (const m of missions) {
-        if (carriesCargo(m)) cargo += m.count as number;
+        // Remaining, not the accepted total: after handing in 1,236 of 1,386 the
+        // number that matters for the next run is 150.
+        const owed = remainingCargo(m);
+        if (owed !== null) cargo += owed;
         else if (mightCarryCargo(m)) cargoIncomplete = true;
         if (isKnown(m.killCount)) kills += m.killCount;
         if (isKnown(m.targetFaction)) factions.add(m.targetFaction);
@@ -411,7 +484,8 @@ export class MissionStore {
       categories[m.category] = (categories[m.category] ?? 0) + 1;
       if (!isKnown(m.destinationSystem)) withoutDestination += 1;
       if (isKnown(m.expiry) && m.expiry <= soon) expiringSoon += 1;
-      if (carriesCargo(m)) cargo += m.count as number;
+      const owed = remainingCargo(m);
+      if (owed !== null) cargo += owed;
     }
 
     return {
@@ -469,6 +543,9 @@ function emptyMission(
     passengerType: UNKNOWN,
     passengerVips: UNKNOWN,
     passengerWanted: UNKNOWN,
+    delivered: UNKNOWN,
+    totalToDeliver: UNKNOWN,
+    collected: UNKNOWN,
     reward: UNKNOWN,
     donation: UNKNOWN,
     expiry: UNKNOWN,

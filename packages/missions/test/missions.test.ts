@@ -10,6 +10,8 @@ import {
 import {
   MissionStore,
   explainMission,
+  hasDeliveryProgress,
+  remainingCargo,
   missionCaveat,
   missionCategory,
   missionTypeKey,
@@ -236,6 +238,90 @@ describe('reconciliation against the Missions snapshot', () => {
   it('does nothing for a snapshot with no arrays at all', () => {
     const s = new MissionStore();
     expect(s.observe(ev('{ "timestamp":"2026-07-25T18:00:00Z", "event":"Missions" }'))).toBe(false);
+  });
+});
+
+describe('cargo delivery progress', () => {
+  /** Verbatim: ItemsDelivered is cumulative, 540 then 1512 of 1512. */
+  const DEPOT_1 =
+    '{ "timestamp":"2026-07-25T17:53:01Z", "event":"CargoDepot", "MissionID":700, "UpdateType":"Deliver", "CargoType":"InsulatingMembrane", "CargoType_Localised":"Insulating Membrane", "Count":540, "StartMarketID":0, "EndMarketID":4379214083, "ItemsCollected":0, "ItemsDelivered":540, "TotalItemsToDeliver":1512, "Progress":0.000000 }';
+  const DEPOT_2 =
+    '{ "timestamp":"2026-07-25T19:17:51Z", "event":"CargoDepot", "MissionID":700, "UpdateType":"Deliver", "CargoType":"InsulatingMembrane", "Count":972, "StartMarketID":0, "EndMarketID":4379214083, "ItemsCollected":0, "ItemsDelivered":1512, "TotalItemsToDeliver":1512, "Progress":0.000000 }';
+
+  const ACCEPTED_DEPOT =
+    '{ "timestamp":"2026-07-25T04:44:38Z", "event":"MissionAccepted", "Faction":"F", "Name":"Mission_Collect_Industrial", "LocalisedName":"Source and return 1512 units of Insulating Membrane", "Commodity":"$InsulatingMembrane_Name;", "Commodity_Localised":"Insulating Membrane", "Count":1512, "DestinationSystem":"Sol", "DestinationStation":"Abraham Lincoln", "Expiry":"2026-07-26T16:47:04Z", "Wing":false, "Influence":"+", "Reputation":"+", "MissionID":700 }';
+
+  function loaded() {
+    const s = new MissionStore();
+    s.observe(ev(ACCEPTED_DEPOT));
+    return s;
+  }
+
+  it('reports what is still owed after a partial delivery', () => {
+    const s = loaded();
+    expect(s.observe(ev(DEPOT_1))).toBe(true);
+
+    const m = s.get(700)!;
+    expect(m.delivered).toBe(540);
+    expect(m.totalToDeliver).toBe(1512);
+    expect(remainingCargo(m)).toBe(972);
+    expect(hasDeliveryProgress(m)).toBe(true);
+  });
+
+  it('treats ItemsDelivered as cumulative, not incremental', () => {
+    // 540 then 1512 is the real sequence. Adding them would give 2052 delivered
+    // against a 1512 requirement, and replaying a journal would inflate without
+    // bound.
+    const s = loaded();
+    s.observe(ev(DEPOT_1));
+    s.observe(ev(DEPOT_2));
+
+    const m = s.get(700)!;
+    expect(m.delivered).toBe(1512);
+    expect(remainingCargo(m)).toBe(0);
+  });
+
+  it('ignores the Progress field, which reads 0 on 43 of 45 events', () => {
+    const s = loaded();
+    s.observe(ev(DEPOT_1));
+    // Progress said 0.000000 while 540 of 1512 were delivered. Trusting it would
+    // report no progress at all.
+    expect(remainingCargo(s.get(700)!)).toBe(972);
+  });
+
+  it('counts remaining cargo, not the accepted total, in destination groups', () => {
+    const s = loaded();
+    s.observe(ev(DEPOT_1));
+    const group = s.byDestination().groups[0]!;
+    expect(group.cargoRequired).toBe(972);
+    expect(s.summary().totalCargo).toBe(972);
+  });
+
+  it('falls back to the accepted count before any delivery', () => {
+    const m = loaded().get(700)!;
+    expect(hasDeliveryProgress(m)).toBe(false);
+    expect(remainingCargo(m)).toBe(1512);
+  });
+
+  it('never reports negative remaining cargo', () => {
+    const s = loaded();
+    s.observe(
+      ev(
+        '{ "timestamp":"2026-07-25T20:00:00Z", "event":"CargoDepot", "MissionID":700, "UpdateType":"Deliver", "CargoType":"X", "Count":10, "StartMarketID":0, "EndMarketID":1, "ItemsCollected":0, "ItemsDelivered":2000, "TotalItemsToDeliver":1512, "Progress":0.0 }',
+      ),
+    );
+    expect(remainingCargo(s.get(700)!)).toBe(0);
+  });
+
+  it('ignores a depot update for a mission it never saw accepted', () => {
+    const s = new MissionStore();
+    expect(s.observe(ev(DEPOT_1))).toBe(false);
+  });
+
+  it('is idempotent when the same depot event is replayed', () => {
+    const s = loaded();
+    expect(s.observe(ev(DEPOT_1))).toBe(true);
+    expect(s.observe(ev(DEPOT_1))).toBe(false);
   });
 });
 

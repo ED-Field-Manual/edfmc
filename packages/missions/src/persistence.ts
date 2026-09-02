@@ -38,6 +38,9 @@ export interface MissionRow {
   commodity_localised: string | null;
   count: number | null;
   kill_count: number | null;
+  delivered: number | null;
+  total_to_deliver: number | null;
+  collected: number | null;
   passenger_count: number | null;
   passenger_type: string | null;
   passenger_vips: number | null;
@@ -83,6 +86,9 @@ export function toRow(m: Mission): MissionRow {
     commodity_localised: s(m.commodityLocalised),
     count: n(m.count),
     kill_count: n(m.killCount),
+    delivered: n(m.delivered),
+    total_to_deliver: n(m.totalToDeliver),
+    collected: n(m.collected),
     passenger_count: n(m.passengerCount),
     passenger_type: s(m.passengerType),
     passenger_vips: b(m.passengerVips),
@@ -124,6 +130,9 @@ export function fromRow(row: MissionRow): Mission {
     commodityLocalised: rs(row.commodity_localised),
     count: rn(row.count),
     killCount: rn(row.kill_count),
+    delivered: rn(row.delivered),
+    totalToDeliver: rn(row.total_to_deliver),
+    collected: rn(row.collected),
     passengerCount: rn(row.passenger_count),
     passengerType: rs(row.passenger_type),
     passengerVips: rb(row.passenger_vips),
@@ -145,7 +154,7 @@ export const MISSION_COLUMNS: readonly (keyof MissionRow)[] = [
   'mission_id', 'id_reliable', 'name', 'type_key', 'category', 'localised_name',
   'faction', 'influence', 'reputation', 'wing', 'destination_system',
   'destination_station', 'destination_settlement', 'target_faction', 'target',
-  'target_type', 'commodity', 'commodity_localised', 'count', 'kill_count',
+  'target_type', 'commodity', 'commodity_localised', 'count', 'kill_count', 'delivered', 'total_to_deliver', 'collected',
   'passenger_count', 'passenger_type', 'passenger_vips', 'passenger_wanted',
   'reward', 'donation', 'expiry', 'status', 'redirected', 'accepted_at',
   'source_event_id', 'game_version', 'ended_at',

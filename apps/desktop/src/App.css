@@ -304,3 +304,10 @@ input[type='text']:focus { border-color: var(--accent); }
   max-width: 68ch;
   line-height: 1.45;
 }
+
+/* Delivery progress is real journalled data, not an estimate, so it is allowed to
+   stand out from the plain requirement badges. */
+.badge.progress {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
+}

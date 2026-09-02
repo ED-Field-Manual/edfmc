@@ -74,6 +74,26 @@ export interface Mission {
   readonly killCount: Known<number>;
 
   /**
+   * Delivery progress, from `CargoDepot`.
+   *
+   * This is the one kind of mission progress Elite genuinely journals, and it is
+   * exact rather than inferred: `ItemsDelivered` is cumulative (observed going
+   * 540 -> 1512 across two events for one mission) and `TotalItemsToDeliver` is
+   * the requirement. Both are 100% present on CargoDepot (n=45).
+   *
+   * `Progress` on that event is NOT used: it reads 0.000000 on 43 of 45
+   * occurrences, so it says nothing.
+   *
+   * UNKNOWN means no CargoDepot event has been seen for this mission — either it
+   * is not a depot mission, or nothing has been delivered yet. It does not mean
+   * zero delivered.
+   */
+  readonly delivered: Known<number>;
+  readonly totalToDeliver: Known<number>;
+  /** `ItemsCollected`, for missions that source from a start market. */
+  readonly collected: Known<number>;
+
+  /**
    * Passenger fields were NOT observed in the validation corpus. They are parsed
    * defensively because Frontier documents them, but nothing here asserts they
    * behave as expected — they will read UNKNOWN until a real sample proves
