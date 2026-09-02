@@ -108,13 +108,34 @@ export const BUNDLED_RULES: ContextRuleSet = {
     {
       id: 'engineering-activity',
       title: 'Engineering',
-      subtitle: 'Working with an Engineer',
+      subtitle: 'Recent engineering activity',
       when: {
-        kind: 'event',
-        name: ['EngineerCraft', 'EngineerProgress', 'EngineerContribution'],
+        kind: 'any',
+        of: [
+          // Unambiguous: only emitted when something is actually being modified.
+          { kind: 'event', name: 'EngineerCraft' },
+          { kind: 'event', name: 'EngineerContribution' },
+          /*
+           * EngineerProgress has two shapes, and only one of them means anything
+           * happened. 277 of 338 occurrences in the corpus carry an `Engineers`
+           * array — a full progress summary emitted at startup and periodically
+           * through a session, regardless of what the commander is doing. Keying
+           * on the event name alone made "Engineering" appear while parked on a
+           * Fleet Carrier.
+           *
+           * The remaining 61 omit that array and describe a single real change.
+           */
+          {
+            kind: 'all',
+            of: [
+              { kind: 'event', name: 'EngineerProgress' },
+              { kind: 'not', of: { kind: 'field', path: 'Engineers', op: 'exists' } },
+            ],
+          },
+        ],
       },
       priority: 75,
-      ttlSeconds: 1800,
+      ttlSeconds: 900,
       resources: [
         { label: 'Engineering', page: 'Engineering' },
         { label: 'Engineering Blueprints', page: 'Engineering Blueprints' },
@@ -208,18 +229,23 @@ export const BUNDLED_RULES: ContextRuleSet = {
       resources: [{ label: 'Powerplay', page: 'Powerplay' }],
     },
 
-    /* -------------------------------------------------------- outfitting */
-    {
-      id: 'station-outfitting',
-      title: 'Outfitting available',
-      when: { kind: 'service', id: 'outfitting' },
-      // Lowest priority: useful, but never what the commander most needs to see.
-      priority: 25,
-      ttlSeconds: 1800,
-      resources: [
-        { label: 'Ship Modules', page: 'Ship Modules' },
-        { label: 'Ships and Equipment', page: 'Ships and Equipment' },
-      ],
-    },
+    /*
+     * There is deliberately no `outfitting` rule.
+     *
+     * That service is present at 167 of 266 distinct stations (62.8%). A context
+     * that fires at two-thirds of stations tells the commander nothing they cannot
+     * already see in the station menu, and crowds out contexts that do.
+     *
+     * Prevalence measured across the corpus, and the bar every service rule here
+     * has to clear:
+     *   engineer         227/242 (93.8%)  rejected - says nothing
+     *   outfitting       167/266 (62.8%)  rejected - low value
+     *   shipyard         148/266 (55.6%)  not used
+     *   vistagenomics    137/266 (51.5%)  used
+     *   tuning           103/266 (38.7%)  rejected - meaning unverified
+     *   pioneersupplies  101/266 (38.0%)  used
+     *   carriermanagement 44/266 (16.5%)  used
+     *   materialtrader    37/266 (13.9%)  used
+     */
   ],
 };

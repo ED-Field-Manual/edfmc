@@ -92,14 +92,30 @@ Measured across the corpus (242 distinct stations docked at):
 
 | Token | Distinct stations | Verdict |
 |---|---|---|
-| `engineer` | **227 / 242**, including all 17 Fleet Carriers | Useless as an "at an Engineer" signal |
-| `tuning` | 103 / 266, including Lave Station and Hutton Orbital | Not engineer-specific either; meaning unverified |
-| `vistagenomics` | 129 / 266 | Genuine — carriers can install it, and do |
-| `materialtrader` | 37 / 266 | Genuine |
+| `engineer` | **227 / 242 (93.8%)**, including all 17 Fleet Carriers | Rejected — says nothing |
+| `outfitting` | 167 / 266 (62.8%) | Rejected — fires at two-thirds of stations |
+| `shipyard` | 148 / 266 (55.6%) | Not used |
+| `vistagenomics` | 137 / 266 (51.5%) | Used — carriers can install it, and do |
+| `tuning` | 103 / 266 (38.7%), incl. Lave and Hutton Orbital | Rejected — meaning unverified |
+| `pioneersupplies` | 101 / 266 (38.0%) | Used |
+| `carriermanagement` | 44 / 266 (16.5%) | Used |
+| `materialtrader` | 37 / 266 (13.9%) | Used |
 
-Engineering is therefore triggered by **activity** (`EngineerCraft`,
-`EngineerProgress`, `EngineerContribution`), which is unambiguous, rather than by a
-station service.
+**Prevalence is the bar a service rule has to clear.** A token present at most
+stations cannot be telling the commander anything specific, however suggestive its
+name is.
+
+Engineering is therefore triggered by **activity** rather than by a station service.
+
+That needed a second correction. Keying on the `EngineerProgress` event *name* was
+also wrong: **277 of its 338 occurrences carry an `Engineers` array** — a full
+progress summary emitted at startup and periodically through a session, regardless of
+what the commander is doing. Only the 61 occurrences *without* that array describe a
+real change. The rule now requires `EngineerCraft`, `EngineerContribution`, or an
+`EngineerProgress` that has no `Engineers` array.
+
+The same trap is worth checking for on any event that has both a summary and a
+delta form — `Missions`, `Powerplay` and `Cargo` are all shaped this way.
 
 **No service token reliably identifies an Engineer base.** Recognising one requires a
 station-identity list — reference data that belongs server-side, since EDFM already

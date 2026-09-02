@@ -49,6 +49,14 @@ const MUSIC = '{ "timestamp":"2026-09-01T13:28:26Z", "event":"Music", "MusicTrac
 const DOCKED_FLEET_CARRIER =
   '{ "timestamp":"2026-09-01T20:00:00Z", "event":"Docked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "Taxi":false, "Multicrew":false, "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "MarketID":3703420416, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationServices":[ "dock", "autodock", "commodities", "contacts", "crewlounge", "rearm", "refuel", "repair", "engineer", "flightcontroller", "stationoperations", "stationMenu", "carriermanagement", "carrierfuel", "socialspace", "exploration", "vistagenomics", "voucherredemption" ], "StationEconomy":"$economy_Carrier;", "StationEconomies":[], "DistFromStarLS":1000.0, "LandingPads":{ "Small":4, "Medium":4, "Large":8 } }';
 
+/** The periodic full-summary form — 277 of 338 in the corpus. Means nothing happened. */
+const ENGINEER_PROGRESS_SUMMARY =
+  '{ "timestamp":"2026-09-01T18:59:53Z", "event":"EngineerProgress", "Engineers":[ { "Engineer":"The Sarge", "EngineerID":300040, "Progress":"Invited" }, { "Engineer":"Professor Palin", "EngineerID":300220, "Progress":"Unlocked", "RankProgress":0, "Rank":5 } ] }';
+
+/** The single-change form — a real progress change. */
+const ENGINEER_PROGRESS_CHANGE =
+  '{ "timestamp":"2026-08-10T12:00:00Z", "event":"EngineerProgress", "Engineer":"Felicity Farseer", "EngineerID":300100, "Progress":"Unlocked", "RankProgress":0, "Rank":1 }';
+
 const ENGINEER_CRAFT =
   '{ "timestamp":"2026-08-15T10:00:00Z", "event":"EngineerCraft", "Slot":"PowerPlant", "Module":"int_powerplant_size6_class5", "Ingredients":[ { "Name":"iron", "Count":1 } ], "Engineer":"Felicity Farseer", "EngineerID":300100, "BlueprintID":128673738, "BlueprintName":"PowerPlant_Armoured", "Level":1, "Quality":0.412000 }';
 
@@ -166,6 +174,23 @@ describe('ContextResolver', () => {
   it('activates engineering from actual engineering activity', () => {
     const r = resolver(() => 1000);
     r.observe(ev(ENGINEER_CRAFT), initialState());
+    expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
+  });
+
+  it('ignores the periodic EngineerProgress summary', () => {
+    // Regression. 277 of 338 EngineerProgress events in the corpus carry an
+    // `Engineers` array: a full progress summary emitted at startup and
+    // periodically through a session, regardless of what the commander is doing.
+    // Keying on the event name alone made "Engineering" appear while parked on a
+    // Fleet Carrier.
+    const r = resolver(() => 1000);
+    r.observe(ev(ENGINEER_PROGRESS_SUMMARY), stateWith(DOCKED_FLEET_CARRIER));
+    expect(r.current().map((a) => a.rule.id)).not.toContain('engineering-activity');
+  });
+
+  it('accepts a single real EngineerProgress change', () => {
+    const r = resolver(() => 1000);
+    r.observe(ev(ENGINEER_PROGRESS_CHANGE), initialState());
     expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
   });
 
