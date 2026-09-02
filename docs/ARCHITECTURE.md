@@ -264,6 +264,23 @@ The checkpoint table is the mechanism behind "restart does not duplicate state".
 
 ---
 
+## 8a. Host wiring
+
+The engine's I/O sits behind a `JournalFs` port with two adapters:
+
+| Host | Adapter | Installed by |
+|---|---|---|
+| Node (tests, replay, tooling) | `@edfm/elite-journal/node` | side-effecting import |
+| Tauri webview | `apps/desktop/src/lib/tauriFs.ts` | `setDefaultFs(tauriFs)` |
+
+The core package contains **no `node:` imports**. That is deliberate: when it did,
+Vite externalised `node:fs` into the desktop bundle, shipping a stub whose only
+possible behaviour was to fail confusingly at runtime. Hosts now wire their adapter
+explicitly, so there is no platform guess to get wrong.
+
+The Tauri adapter is backed by four narrow read-only commands rather than a broad
+filesystem permission, so a renderer compromise cannot reach arbitrary user files.
+
 ## 9. Known technical risks
 
 | # | Risk | Mitigation |
