@@ -63,6 +63,7 @@ packages/
   context            Deterministic context rules
   missions           Mission tracking and delivery progress
   verification       Evidence model, spoiler gating, comparison engine
+  research           Research framework and the settlement-materials project
 services/
   api                Backend API: reference data, submissions, notification
   eddn-worker        EDDN ingestion, Python
@@ -128,6 +129,7 @@ without a journal folder.
 | [API.md](docs/API.md) | Backend endpoints, identity hashing, notification rules |
 | [DISCORD.md](docs/DISCORD.md) | Forum reporting, duplicate policy, tag configuration |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | How the API and EDDN worker are hosted and updated |
+| [RESEARCH.md](docs/RESEARCH.md) | Research framework, session model, data-quality rules |
 | [EDDN.md](docs/EDDN.md) | EDDN ingestion, schemas, normalization decisions |
 | [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
 | [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |
