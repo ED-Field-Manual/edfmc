@@ -6,6 +6,8 @@ Every fixture below is a real message captured from the live EDDN stream on
 
 from __future__ import annotations
 
+import copy
+
 from edfm_eddn.normalize import (
     is_fleet_carrier,
     is_planetary,
@@ -257,3 +259,27 @@ class TestUnknownTypeReporting:
     def test_reports_nothing_for_known_types(self):
         s = station_from(JOURNAL_DOCKED)
         assert known_station_types([s]) == set()  # type: ignore[list-item]
+
+
+class TestEmptyServices:
+    """An empty StationServices is silence, not a claim of having none."""
+
+    def test_empty_list_is_treated_as_not_reported(self):
+        # Found in production: a station was stored with service_ids = [],
+        # which asserts it offers nothing. Every dockable station has at least
+        # a pad, and as a reference that makes every observed service look
+        # like a discrepancy.
+        envelope = copy.deepcopy(JOURNAL_DOCKED)
+        envelope["message"]["StationServices"] = []
+        record = station_from(envelope)
+        assert record.services is None
+        assert record.services_raw is None
+
+    def test_a_real_list_still_survives(self):
+        record = station_from(JOURNAL_DOCKED)
+        assert record.services == ("dock", "commodities", "stationmenu", "techbroker")
+
+    def test_absent_key_is_also_none(self):
+        envelope = copy.deepcopy(JOURNAL_DOCKED)
+        del envelope["message"]["StationServices"]
+        assert station_from(envelope).services is None

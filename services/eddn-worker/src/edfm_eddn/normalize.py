@@ -205,6 +205,16 @@ def _services(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     if not isinstance(value, list):
         return None
     raw = tuple(v for v in value if isinstance(v, str))
+    if not raw:
+        # An empty list is treated as "not reported", not as "has no services".
+        #
+        # Recording [] asserts the station offers nothing, which is a far
+        # stronger claim than silence -- and a false one: every dockable
+        # station has at least a landing pad. Uploaders do send empty arrays.
+        # Stored as [], it also becomes a reference of zero services, against
+        # which every real service a commander observes looks like a
+        # discrepancy.
+        return None
     return tuple(v.lower() for v in raw), raw
 
 
@@ -270,8 +280,8 @@ def station_from(envelope: dict[str, Any]) -> StationRecord | None:
         system_name=_str(pick(message, "StarSystem", "systemName")),
         system_address=_int(pick(message, "SystemAddress", "systemAddress")),
         star_pos=_star_pos(message.get("StarPos")),
-        services=services[0] if services else None,
-        services_raw=services[1] if services else None,
+        services=services[0] if services is not None else None,
+        services_raw=services[1] if services is not None else None,
         economies=_economies(pick(message, "StationEconomies", "economies")),
         dist_from_star_ls=_float(pick(message, "DistFromStarLS", "distFromStarLS")),
         landing_pads=_landing_pads(message.get("LandingPads")),
