@@ -13,10 +13,21 @@ export interface Config {
   readonly databaseUrl: string;
   /** HMAC key for identity hashing. Secret, and rotating it re-anonymises. */
   readonly identitySalt: string;
-  /** Server-side only. Absent means notifications are recorded but not posted. */
+  /** Server-side only. Absent means reporting is inert. Never leaves this process. */
   readonly discordWebhook: string | undefined;
-  /** Redact spoiler-sensitive findings before posting. Default on. */
-  readonly discordRedactSpoilers: boolean;
+  readonly discordEnabled: boolean;
+  /** What to do with a finding that may name an undiscovered thing. */
+  readonly discordSpoilerPolicy: 'suppress' | 'redact';
+  readonly discordPostResolutions: boolean;
+  readonly discordIncludeCommander: boolean;
+  /** Forum tag ids, by category name. Ids are per-channel, so they are config. */
+  readonly discordTagsRaw: string | undefined;
+  /**
+   * Guards the administrative endpoints, which can post to a live Discord
+   * channel. Absent means those endpoints do not exist at all -- a deployment
+   * that forgot to set it exposes nothing rather than exposing an open one.
+   */
+  readonly adminToken: string | undefined;
   readonly rateLimitPerMinute: number;
   readonly env: 'development' | 'production' | 'test';
 }
@@ -61,6 +72,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (webhook && !webhook.startsWith('https://')) {
     throw new ConfigError('EDFM_DISCORD_WEBHOOK must be an https URL.');
   }
+  if (webhook && !/\/api\/webhooks\/\d+\//.test(webhook)) {
+    // Caught at boot rather than as a 404 on the first real report.
+    throw new ConfigError(
+      'EDFM_DISCORD_WEBHOOK does not look like a Discord webhook URL ' +
+        '(expected .../api/webhooks/<id>/<token>).',
+    );
+  }
+
+  const spoilerPolicy = env.EDFM_DISCORD_SPOILER_POLICY ?? 'suppress';
+  if (spoilerPolicy !== 'suppress' && spoilerPolicy !== 'redact') {
+    throw new ConfigError(
+      "EDFM_DISCORD_SPOILER_POLICY must be 'suppress' or 'redact'.",
+    );
+  }
 
   return {
     port: Number(env.EDFM_PORT ?? 8787),
@@ -68,9 +93,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl,
     identitySalt,
     discordWebhook: webhook,
-    // Opt-out rather than opt-in: forgetting to configure redaction must not
-    // be the thing that posts an unvisited system into a searchable channel.
-    discordRedactSpoilers: env.EDFM_DISCORD_REDACT_SPOILERS !== 'false',
+    // Off unless switched on AND given a webhook, so a half-configured
+    // deployment posts nothing rather than posting somewhere unintended.
+    discordEnabled: env.EDFM_DISCORD_ENABLED === 'true' && webhook !== undefined,
+    // A Forum post is public, permanent and searchable -- weaker containment
+    // than the admin channel redaction was designed for. Default to not
+    // posting spoiler-sensitive findings at all.
+    discordSpoilerPolicy: spoilerPolicy,
+    discordPostResolutions: env.EDFM_DISCORD_POST_RESOLUTIONS !== 'false',
+    // Off by default: a name in a public moderation thread is a different
+    // decision from being credited on a contribution list (§20).
+    discordIncludeCommander: env.EDFM_DISCORD_INCLUDE_COMMANDER === 'true',
+    discordTagsRaw: env.EDFM_DISCORD_FORUM_TAGS,
+    adminToken: env.EDFM_ADMIN_TOKEN,
     rateLimitPerMinute: Number(env.EDFM_RATE_LIMIT_PER_MINUTE ?? 60),
     env: mode,
   };

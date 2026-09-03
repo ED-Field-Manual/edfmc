@@ -25,9 +25,42 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, EDFM_DISCORD_WEBHOOK: 'http://x' })).toThrow(/https/);
   });
 
-  it('redacts spoilers unless explicitly disabled', () => {
-    expect(loadConfig(base).discordRedactSpoilers).toBe(true);
-    expect(loadConfig({ ...base, EDFM_DISCORD_REDACT_SPOILERS: 'no' }).discordRedactSpoilers).toBe(true);
-    expect(loadConfig({ ...base, EDFM_DISCORD_REDACT_SPOILERS: 'false' }).discordRedactSpoilers).toBe(false);
+  it('refuses something that is not a Discord webhook URL', () => {
+    // Caught at boot rather than as a 404 on the first real report.
+    expect(() =>
+      loadConfig({ ...base, EDFM_DISCORD_WEBHOOK: 'https://example.com/hook' }),
+    ).toThrow(/does not look like a Discord webhook/);
+  });
+
+  it('suppresses spoiler-sensitive findings unless told otherwise', () => {
+    // A Forum post is public and permanent -- weaker containment than the
+    // admin channel redaction was designed for.
+    expect(loadConfig(base).discordSpoilerPolicy).toBe('suppress');
+    expect(
+      loadConfig({ ...base, EDFM_DISCORD_SPOILER_POLICY: 'redact' }).discordSpoilerPolicy,
+    ).toBe('redact');
+  });
+
+  it('refuses an unrecognised spoiler policy rather than guessing', () => {
+    expect(() =>
+      loadConfig({ ...base, EDFM_DISCORD_SPOILER_POLICY: 'off' }),
+    ).toThrow(/suppress/);
+  });
+
+  it('stays off unless explicitly enabled and given a webhook', () => {
+    const webhook = 'https://discord.com/api/webhooks/1/abc';
+    // A half-configured deployment must post nothing, not post somewhere
+    // unintended.
+    expect(loadConfig(base).discordEnabled).toBe(false);
+    expect(loadConfig({ ...base, EDFM_DISCORD_ENABLED: 'true' }).discordEnabled).toBe(false);
+    expect(loadConfig({ ...base, EDFM_DISCORD_WEBHOOK: webhook }).discordEnabled).toBe(false);
+    expect(
+      loadConfig({ ...base, EDFM_DISCORD_ENABLED: 'true', EDFM_DISCORD_WEBHOOK: webhook })
+        .discordEnabled,
+    ).toBe(true);
+  });
+
+  it('does not name the commander unless asked to', () => {
+    expect(loadConfig(base).discordIncludeCommander).toBe(false);
   });
 });

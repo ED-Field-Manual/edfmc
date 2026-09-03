@@ -126,6 +126,7 @@ without a journal folder.
 | [SPOILERS.md](docs/SPOILERS.md) | Discovery gating and how spoiler safety is enforced |
 | [VERIFICATION.md](docs/VERIFICATION.md) | Verification engine, evidence model, discrepancy lifecycle |
 | [API.md](docs/API.md) | Backend endpoints, identity hashing, notification rules |
+| [DISCORD.md](docs/DISCORD.md) | Forum reporting, duplicate policy, tag configuration |
 | [EDDN.md](docs/EDDN.md) | EDDN ingestion, schemas, normalization decisions |
 | [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
 | [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |

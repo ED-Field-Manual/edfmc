@@ -107,9 +107,12 @@ desktop app that stops at the network boundary is not a privacy policy.
   the hashes — never the identifiers.
 - **Discrepancies** are aggregated across reporters. Thirty commanders reporting one
   wrong service is one finding, not thirty.
-- **Discord notifications** carry an opaque reference, never the discrepancy key —
-  that key contains both values, so posting it would restore everything redaction
-  removes. Spoiler-sensitive findings are redacted by default.
+- **Discord reports** are posted to a moderation Forum as one thread per issue.
+  They carry an opaque reference, never the discrepancy key — that key contains
+  both values, so posting it would restore everything redaction removes.
+  Spoiler-sensitive findings are **not posted at all** by default, because a
+  Forum post is public and permanent. Your commander name is not included unless
+  the server operator explicitly enables it. See [DISCORD.md](DISCORD.md).
 
 ## Offline behaviour
 

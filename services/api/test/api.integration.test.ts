@@ -10,11 +10,9 @@
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { notificationStrings } from '@edfm/verification';
 import { buildApp } from '../src/app.js';
 import { createPool, migrate, type Db } from '../src/lib/db.js';
 import type { PendingNotification } from '../src/lib/store.js';
-import { loadPayload } from '../src/lib/discord.js';
 
 const DSN = process.env.EDFM_TEST_DSN;
 const run = DSN ? describe : describe.skip;
@@ -39,7 +37,12 @@ const config = {
   databaseUrl: DSN ?? '',
   identitySalt: SALT,
   discordWebhook: undefined,
-  discordRedactSpoilers: true,
+  discordEnabled: false,
+  discordSpoilerPolicy: 'suppress',
+  discordPostResolutions: true,
+  discordIncludeCommander: false,
+  discordTagsRaw: undefined,
+  adminToken: undefined,
   rateLimitPerMinute: 100000,
   env: 'test',
 } as const;
@@ -92,6 +95,10 @@ run('API', () => {
   beforeEach(async () => {
     db ??= createPool(DSN!);
     await migrate(db, ['../eddn-worker/migrations', './migrations']);
+    // CASCADE reaches further than it looks: it also empties every table with
+    // a foreign key to these, which includes discord_reports. That is fine
+    // here -- but it is why vitest.config.ts disables file parallelism, since
+    // running alongside the reporter suite would wipe its rows mid-test.
     await db.query(
       'TRUNCATE submissions, discrepancies, discrepancy_reports, discrepancy_notifications,' +
         ' stations, systems RESTART IDENTITY CASCADE',
@@ -220,29 +227,6 @@ run('API', () => {
     app = await buildApp({ config, db, notifier });
     await post(submission());
     expect(sent).toHaveLength(before);
-  });
-
-  it('builds a Discord payload that never carries the dedupe key', async () => {
-    await post(submission());
-    const { rows } = await db.query<{ id: string; dedupe_key: string }>(
-      "SELECT id::text, dedupe_key FROM discrepancies WHERE field = 'service:refuel'",
-    );
-    const payload = await loadPayload(
-      db,
-      {
-        discrepancyId: rows[0]!.id,
-        reason: 'created',
-        key: rows[0]!.dedupe_key,
-        spoilerSensitive: false,
-      },
-      false,
-    );
-    expect(payload).not.toBeNull();
-    // The key is entityType|entityId|field|expected|observed|version. Posting
-    // it as the reference would restore everything redaction removes.
-    const strings = notificationStrings(payload!).join(' ');
-    expect(strings).not.toContain(rows[0]!.dedupe_key);
-    expect(payload!.reference).toMatch(/^EDFM-/);
   });
 
   it('rejects a submission that is not shaped like an observation', async () => {

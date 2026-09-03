@@ -9,17 +9,21 @@ import { hashIdentity } from './lib/identity.js';
 import { getStation, getStations } from './lib/reference.js';
 import { deriveStationFindings } from './lib/derive.js';
 import { recordSubmission } from './lib/store.js';
-import type { Notifier } from './lib/discord.js';
+import type { Notifier } from './lib/discord/notifier.js';
+import type { DiscordReporter } from './lib/discord/reporter.js';
+import { secretEquals } from './lib/identity.js';
 import { lookupSchema, submissionSchema } from './schema.js';
 
 export interface AppOptions {
   readonly config: Config;
   readonly db: Db;
   readonly notifier: Notifier;
+  /** Optional: administrative Discord actions are unavailable without it. */
+  readonly reporter?: DiscordReporter;
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
-  const { config, db, notifier } = options;
+  const { config, db, notifier, reporter } = options;
 
   const app = Fastify({
     logger: config.env !== 'test',
@@ -121,6 +125,38 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       skipped: derived.skipped,
     });
   });
+
+  /* -------------------------------------------------------------- admin */
+
+  /**
+   * Administrative actions.
+   *
+   * Registered only when a token is configured, so an unconfigured deployment
+   * has no such route rather than an unprotected one. These can post to a live
+   * Discord channel, which is why they are not reachable from the desktop
+   * client: the client is untrusted and must never hold a credential that can
+   * write to the channel (§19).
+   */
+  if (config.adminToken !== undefined && reporter !== undefined) {
+    const token = config.adminToken;
+
+    app.addHook('onRequest', async (req, reply) => {
+      if (!req.url.startsWith('/v1/admin/')) return;
+      const header = req.headers['x-edfm-admin-token'];
+      // Constant-time: a length-or-prefix comparison here is a guessing oracle.
+      if (typeof header !== 'string' || !secretEquals(header, token)) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+    });
+
+    app.post('/v1/admin/discord/test', async () => {
+      const outcome = await reporter.test();
+      // The outcome kind only; a detail string could carry a URL.
+      return { outcome: outcome.kind };
+    });
+
+    app.post('/v1/admin/discord/flush', async () => reporter.processQueue(25));
+  }
 
   /* -------------------------------------------------------------- stats */
 

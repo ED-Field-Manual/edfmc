@@ -28,6 +28,8 @@ shapes the corpus.
 | `POST` | `/v1/reference/stations/lookup` | Up to 200 at once |
 | `POST` | `/v1/discrepancies` | Submit an observation |
 | `GET` | `/v1/stats` | Public aggregate counters |
+| `POST` | `/v1/admin/discord/test` | Post a webhook test (admin token) |
+| `POST` | `/v1/admin/discord/flush` | Drain the report queue (admin token) |
 
 `404` from a reference lookup means **not observed**, not *nonexistent*. The
 client must never turn that absence into a finding.
@@ -108,9 +110,10 @@ missing services array is not an empty one.
 never returned by an endpoint, never logged, and never shipped to the client — a
 client that could post to the channel could post anything to the channel.
 
-Redaction of spoiler-sensitive findings is **opt-out**, not opt-in. Forgetting
-to configure it must not be the thing that posts an unvisited system into a
-permanent, searchable channel.
+Spoiler-sensitive findings are **suppressed** from Discord by default rather
+than redacted: a Forum post is public and permanent, which is weaker containment
+than the admin channel redaction was designed for. Reporting is off unless
+explicitly enabled *and* given a webhook. See [DISCORD.md](DISCORD.md).
 
 ## Configuration
 
@@ -118,8 +121,13 @@ permanent, searchable channel.
 |---|---|---|
 | `EDFM_DATABASE_URL` | yes | — |
 | `EDFM_IDENTITY_SALT` | yes | — (min 32 chars) |
-| `EDFM_DISCORD_WEBHOOK` | no | none; notifications recorded, not posted |
-| `EDFM_DISCORD_REDACT_SPOILERS` | no | `true` |
+| `EDFM_DISCORD_ENABLED` | no | `false` |
+| `EDFM_DISCORD_WEBHOOK` | no | none; reporting inert |
+| `EDFM_DISCORD_FORUM_TAGS` | no | none; reports post untagged |
+| `EDFM_DISCORD_SPOILER_POLICY` | no | `suppress` |
+| `EDFM_DISCORD_POST_RESOLUTIONS` | no | `true` |
+| `EDFM_DISCORD_INCLUDE_COMMANDER` | no | `false` |
+| `EDFM_ADMIN_TOKEN` | no | none; `/v1/admin/*` not registered |
 | `EDFM_RATE_LIMIT_PER_MINUTE` | no | `60` |
 | `EDFM_PORT` / `EDFM_HOST` | no | `8787` / `127.0.0.1` |
 
