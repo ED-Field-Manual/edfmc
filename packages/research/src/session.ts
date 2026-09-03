@@ -17,7 +17,6 @@ import { evaluate, type Condition } from '@edfm/context';
 import type { CommanderState, NormalizedEvent } from '@edfm/elite-journal';
 import type {
   Completeness,
-  ContextRule,
   FieldSource,
   Observation,
   ObservationRule,

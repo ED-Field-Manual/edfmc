@@ -52,6 +52,18 @@ import {
   createStationProvider,
   type ReferenceClient,
 } from '@edfm/verification';
+import {
+  SessionTracker,
+  SETTLEMENT_MATERIALS,
+  summarise,
+  groupBy,
+  itemTally,
+  type ObservedSession,
+  type Completeness,
+  type QualitySummary,
+  type GroupSummary,
+  type ItemSummary,
+} from '@edfm/research';
 
 import { logger } from './logger.js';
 import { policyFor, projectResources } from './spoiler.js';
@@ -177,6 +189,25 @@ export interface CompanionSnapshot {
   readonly verification: VerificationStats;
   /** Whether the commander has opted in to verification (§21). */
   readonly verificationEnabled: boolean;
+  readonly research: ResearchView;
+}
+
+/**
+ * Research state for the UI.
+ *
+ * Carries the §13 quality summary alongside the counts, so a screen cannot
+ * render a rate without also having been told whether the sample supports one.
+ */
+export interface ResearchView {
+  readonly projectTitle: string;
+  readonly projectVersion: number;
+  readonly sessions: readonly ObservedSession[];
+  readonly active: ObservedSession | null;
+  readonly quality: QualitySummary;
+  readonly byEconomy: readonly GroupSummary[];
+  readonly items: readonly ItemSummary[];
+  /** Fields §12 asked for that the game does not expose. */
+  readonly unavailableFields: readonly string[];
 }
 
 /** Aggregate verification counters for the Contributions screen (§15). */
@@ -275,6 +306,31 @@ export class Companion {
       }),
   });
   private verificationDirty = false;
+
+  /**
+   * Field research (§12).
+   *
+   * Runs unconditionally and entirely locally: recording an observed session is
+   * not a contribution, and nothing is uploaded. Whether to submit is a
+   * separate, later decision -- which is why `submitted_at` is its own column.
+   */
+  private readonly research = new SessionTracker({
+    project: SETTLEMENT_MATERIALS,
+    companionVersion: COMPANION_VERSION,
+    onSessionClosed: (session) => {
+      this.researchDirty = true;
+      logger.info('research', 'Observed session recorded', {
+        project: session.projectId,
+        // Never the settlement or what was found: this log can be attached to
+        // a bug report.
+        outcome: session.outcome,
+        observations: session.observations.length,
+        durationSeconds: session.durationSeconds,
+      });
+      this.notify();
+    },
+  });
+  private researchDirty = false;
   private widgets: OverlayWidgets = { ...DEFAULT_WIDGETS };
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
@@ -331,6 +387,7 @@ export class Companion {
         missions: this.missionView(),
         verification: this.verification.stats(),
         verificationEnabled: this.verificationEnabled,
+        research: this.researchView(),
       };
     }
     return this.cachedSnapshot;
@@ -385,6 +442,10 @@ export class Companion {
 
     // Opt-in, and read before ingest starts so no lookup can happen first.
     this.verificationEnabled = (await this.getSetting('verificationEnabled')) === 'true';
+
+    // Loaded before ingest starts, so a restart continues the record rather
+    // than beginning a second one.
+    await this.loadResearch();
 
     const storedWidgets = await this.getSetting('overlayWidgets');
     if (storedWidgets) {
@@ -469,6 +530,10 @@ export class Companion {
         this.verificationDirty = false;
         void this.saveVerificationQueue();
       }
+      if (this.researchDirty) {
+        this.researchDirty = false;
+        void this.saveResearch();
+      }
     }, 3000);
     this.notify();
 
@@ -482,6 +547,11 @@ export class Companion {
   stop(): void {
     this.engine?.stop();
     this.connection = 'stopped';
+    // An open session whose end was never observed is recorded as interrupted
+    // rather than silently closed: "the app shut down" is different evidence
+    // from "the commander left", and §13 wants incomplete sessions counted.
+    this.research.finish();
+    void this.saveResearch();
     void this.flushCheckpoint();
     this.notify();
   }
@@ -508,6 +578,10 @@ export class Companion {
       this.verificationDirty = true;
     }
     this.rememberForRecheck(event);
+
+    // Research is local-only and runs regardless of contribution settings:
+    // recording what happened is not the same as offering it to anyone.
+    this.research.observe(event, this.state);
 
     if (this.missions.observe(event)) {
       this.missionsDirty = true;
@@ -981,6 +1055,96 @@ export class Companion {
     } catch (err) {
       // A re-check is best effort. It must never take down ingest.
       logger.warn('verification', 'Re-check failed', { error: String(err) });
+    }
+  }
+
+  /* --------------------------------------------------------------- research */
+
+  private researchView(): ResearchView {
+    const sessions = this.research.sessions();
+    return {
+      projectTitle: SETTLEMENT_MATERIALS.title,
+      projectVersion: SETTLEMENT_MATERIALS.version,
+      sessions: [...sessions].reverse().slice(0, 50),
+      active: this.research.openSession,
+      quality: summarise(sessions, SETTLEMENT_MATERIALS),
+      byEconomy: groupBy(sessions, SETTLEMENT_MATERIALS, 'economy'),
+      items: itemTally(sessions, SETTLEMENT_MATERIALS).slice(0, 20),
+      unavailableFields: SETTLEMENT_MATERIALS.unavailableFields ?? [],
+    };
+  }
+
+  /** §12: the commander may mark a session, but is never prompted to. */
+  async markSessionCompleteness(id: string, completeness: Completeness): Promise<void> {
+    if (!this.research.markCompleteness(id, completeness)) return;
+    this.researchDirty = true;
+    this.notify();
+    await this.saveResearch();
+  }
+
+  private async saveResearch(): Promise<void> {
+    if (!this.db) return;
+    try {
+      for (const s of this.research.sessions()) {
+        await this.db.execute(
+          `INSERT INTO research_sessions
+             (id, project_id, project_version, started_at, ended_at, duration_s,
+              context, observations, outcome, end_event, completeness,
+              commander, commander_fid, game_version, game_build,
+              companion_version, session_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           ON CONFLICT(id) DO UPDATE SET
+             ended_at = excluded.ended_at,
+             duration_s = excluded.duration_s,
+             observations = excluded.observations,
+             outcome = excluded.outcome,
+             end_event = excluded.end_event,
+             completeness = excluded.completeness`,
+          [
+            s.id, s.projectId, s.projectVersion, s.startedAt, s.endedAt, s.durationSeconds,
+            JSON.stringify(s.context), JSON.stringify(s.observations),
+            s.outcome, s.endEvent, s.completeness,
+            s.commander, s.commanderFid, s.gameVersion, s.gameBuild,
+            s.companionVersion, s.sessionKey,
+          ],
+        );
+      }
+    } catch (err) {
+      logger.warn('db', 'Could not save research sessions', { error: String(err) });
+    }
+  }
+
+  private async loadResearch(): Promise<void> {
+    if (!this.db) return;
+    try {
+      const rows = await this.db.select<Array<Record<string, unknown>>>(
+        `SELECT * FROM research_sessions WHERE project_id = $1
+          ORDER BY started_at DESC LIMIT 500`,
+        [SETTLEMENT_MATERIALS.id],
+      );
+      const sessions = rows.map((r) => ({
+        id: String(r.id),
+        projectId: String(r.project_id),
+        projectVersion: Number(r.project_version),
+        startedAt: String(r.started_at),
+        endedAt: r.ended_at === null ? null : String(r.ended_at),
+        durationSeconds: r.duration_s === null ? null : Number(r.duration_s),
+        context: JSON.parse(String(r.context)) as Record<string, string | null>,
+        observations: JSON.parse(String(r.observations)) as ObservedSession['observations'],
+        outcome: String(r.outcome) as ObservedSession['outcome'],
+        endEvent: r.end_event === null ? null : String(r.end_event),
+        completeness: String(r.completeness) as Completeness,
+        commander: r.commander === null ? null : String(r.commander),
+        commanderFid: r.commander_fid === null ? null : String(r.commander_fid),
+        gameVersion: r.game_version === null ? null : String(r.game_version),
+        gameBuild: r.game_build === null ? null : String(r.game_build),
+        companionVersion: String(r.companion_version),
+        sessionKey: String(r.session_key),
+      })) satisfies ObservedSession[];
+      // Oldest first, matching the order the tracker would have produced.
+      this.research.load(sessions.reverse());
+    } catch (err) {
+      logger.warn('db', 'Could not load research sessions', { error: String(err) });
     }
   }
 

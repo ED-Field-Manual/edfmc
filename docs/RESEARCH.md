@@ -1,7 +1,12 @@
 # EDFM Field Research
 
-Status: **framework and first project built and validated against the real
-journal corpus.** Client persistence and UI are the remaining work.
+Status: **built.** Framework, first project, client persistence and the
+Research screen all work; validated against the real journal corpus.
+
+Contribution to the server is deliberately not built yet: recording an observed
+session is local and unconditional, offering it to anyone is a separate decision
+(`research_sessions.submitted_at` exists for exactly that reason and is never
+set by the client today).
 
 §12 asks for "a general research framework capable of supporting multiple EDFM
 research projects", not a settlement loot tracker. So `@edfm/research` contains

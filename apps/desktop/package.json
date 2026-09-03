@@ -11,15 +11,16 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@edfm/context": "*",
     "@edfm/elite-journal": "*",
+    "@edfm/missions": "*",
+    "@edfm/research": "*",
+    "@edfm/verification": "*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "@edfm/context": "*",
-    "@edfm/missions": "*",
-    "@edfm/verification": "*"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

@@ -11,6 +11,7 @@ import {
 } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
+import { Research } from './Research';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -54,6 +55,7 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Missions',
   'Dashboard',
   'Overlay',
+  'Research',
   'Settings',
   'Diagnostics',
 ]);
@@ -115,6 +117,7 @@ export default function App() {
         {section === 'Context' && <ContextPanel snap={snap} />}
         {section === 'Missions' && <MissionsPanel snap={snap} />}
         {section === 'Overlay' && <OverlayPanel />}
+        {section === 'Research' && <Research snap={snap} />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
         {!IMPLEMENTED.has(section) && <Placeholder section={section} />}

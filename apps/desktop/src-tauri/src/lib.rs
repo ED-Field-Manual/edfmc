@@ -200,6 +200,58 @@ fn migrations() -> Vec<Migration> {
                 ON verification_queue (submitted_at) WHERE submitted_at IS NULL;
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 6,
+        description: "field research sessions",
+        sql: r#"
+            -- Observed research sessions (§12). Deliberately NOT called loot
+            -- runs: the app cannot know whether every container was searched,
+            -- whether someone looted first, or whether areas were skipped, so
+            -- completeness defaults to 'unknown' and is only ever set by the
+            -- commander.
+            CREATE TABLE IF NOT EXISTS research_sessions (
+                id              TEXT PRIMARY KEY,
+                project_id      TEXT NOT NULL,
+                -- Recorded per session so methodology changes can be separated
+                -- rather than silently mixed into one dataset.
+                project_version INTEGER NOT NULL,
+
+                started_at      TEXT NOT NULL,
+                ended_at        TEXT,
+                duration_s      INTEGER,
+
+                -- Project-defined; the framework does not know what a project
+                -- cares about, so this stays JSON rather than columns.
+                context         TEXT NOT NULL,
+                observations    TEXT NOT NULL,
+
+                outcome         TEXT NOT NULL,
+                end_event       TEXT,
+                completeness    TEXT NOT NULL DEFAULT 'unknown',
+
+                commander       TEXT,
+                commander_fid   TEXT,
+                -- §12: builds must be recorded so data from materially
+                -- different patches can be separated.
+                game_version    TEXT,
+                game_build      TEXT,
+                companion_version TEXT NOT NULL,
+                session_key     TEXT NOT NULL,
+
+                -- Separate from ended_at: a session is recorded long before,
+                -- and independently of, any decision to contribute it.
+                submitted_at    TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_research_project
+                ON research_sessions (project_id, started_at DESC);
+            -- Scoped by commander, like discovery state: two commanders sharing
+            -- a PC must not have their observations pooled.
+            CREATE INDEX IF NOT EXISTS idx_research_commander
+                ON research_sessions (commander_fid, started_at DESC);
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 
