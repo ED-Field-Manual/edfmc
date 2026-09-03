@@ -24,6 +24,12 @@ at or fly past:
 Turning it back off stops both immediately — the setting is consulted at call time,
 not read once at startup — and clears the reference data already cached.
 
+Submission is queued locally and sent in the background, so an outage costs
+nothing but latency and a queued observation survives a restart. Fleet carrier
+observations are never uploaded at all: their services are the owner's current
+configuration rather than a fact about the galaxy, so the server cannot derive
+anything from one and sending it would be traffic with no possible result.
+
 ### What a submission contains
 
 The station's MarketID, name, type, system, the service tokens your game reported, the

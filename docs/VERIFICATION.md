@@ -1,7 +1,8 @@
 # EDFM Verification Engine
 
-Status: **engine, evidence model and spoiler gating built; station provider
-registered; reference data now fed from the EDDN aggregate via the API.**
+Status: **complete.** Engine, evidence model, spoiler gating, reference data
+from the EDDN aggregate, client submission, server-side derivation, and the
+Contributions screen all work end to end.
 
 The comparison described below is no longer hypothetical: `services/api` serves
 station reference data and re-derives every submitted comparison server-side.

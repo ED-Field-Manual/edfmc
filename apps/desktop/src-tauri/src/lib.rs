@@ -252,6 +252,46 @@ fn migrations() -> Vec<Migration> {
                 ON research_sessions (commander_fid, started_at DESC);
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 7,
+        description: "observation submission queue",
+        sql: r#"
+            -- Observations waiting to be offered to EDFM.
+            --
+            -- The client submits what its game reported, never a finding: a
+            -- finding is a claim about what the reference says, and the client
+            -- does not hold the reference. The server re-derives the
+            -- comparison, and `findings` records what it derived, so a
+            -- client-side comparison bug shows up as a disagreement instead of
+            -- quietly shaping the corpus.
+            CREATE TABLE IF NOT EXISTS observation_queue (
+                -- file:byteOffset. As the primary key it deduplicates for
+                -- free: replay and restart re-read the same journal lines, and
+                -- neither may queue the same observation twice.
+                source_event_id TEXT PRIMARY KEY,
+                entity_type     TEXT NOT NULL,
+                entity_id       TEXT NOT NULL,
+                -- The observation verbatim. Held so the payload can be shown
+                -- to the commander before it is sent (S21) and so a queued row
+                -- survives a client upgrade that changes the request shape.
+                payload         TEXT NOT NULL,
+                observed_at     TEXT NOT NULL,
+                queued_at       TEXT NOT NULL,
+
+                attempts        INTEGER NOT NULL DEFAULT 0,
+                -- Set only once the server has accepted it. Nothing else marks
+                -- an observation contributed.
+                submitted_at    TEXT,
+                -- What the server derived. Null until accepted.
+                findings        INTEGER,
+                last_error      TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_observation_pending
+                ON observation_queue (queued_at) WHERE submitted_at IS NULL;
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

@@ -48,9 +48,13 @@ import {
   DiscoveryState,
   VerificationEngine,
   createReferenceClient,
+  createSubmitter,
+  isCarrier,
   observeStation,
   createStationProvider,
   type ReferenceClient,
+  type Submitter,
+  type IdentityMode,
 } from '@edfm/verification';
 import {
   SessionTracker,
@@ -190,6 +194,33 @@ export interface CompanionSnapshot {
   /** Whether the commander has opted in to verification (§21). */
   readonly verificationEnabled: boolean;
   readonly research: ResearchView;
+  readonly contributions: ContributionView;
+}
+
+/**
+ * Contribution history (S11).
+ *
+ * Deliberately not a leaderboard and deliberately not a score. S11 warns that
+ * incentivising accuracy encourages manufacturing reports, so these are counts
+ * of what this commander's client actually sent, with no ranking, no streak and
+ * nothing to beat.
+ */
+export interface ContributionView {
+  readonly enabled: boolean;
+  readonly identityMode: IdentityMode;
+  /** Observations the server accepted. */
+  readonly submitted: number;
+  /** Waiting to be sent, including while offline. */
+  readonly pending: number;
+  /** Rejected outright; retrying would send the same mistake. */
+  readonly failed: number;
+  /** What the server derived from those observations. */
+  readonly findingsFromSubmissions: number;
+  /** Detected locally, whether or not anything was ever sent. */
+  readonly discrepanciesDetected: number;
+  /** Recorded locally; contribution of research is not built yet. */
+  readonly researchSessions: number;
+  readonly lastContributionAt: string | null;
 }
 
 /**
@@ -331,6 +362,32 @@ export class Companion {
     },
   });
   private researchDirty = false;
+
+  /** S20: anonymous unless the commander chooses to be credited. */
+  private identityMode: IdentityMode = 'anonymous';
+
+  private readonly submitter: Submitter = createSubmitter({
+    baseUrl: API_BASE_URL,
+    // Consulted per call, so revoking consent stops submission immediately
+    // rather than at the next restart.
+    isEnabled: () => this.verificationEnabled,
+    identityMode: () => this.identityMode,
+    clientVersion: COMPANION_VERSION,
+    log: (message, detail) => logger.info('submit', message, detail ?? {}),
+  });
+  /** Guards against two flushes overlapping on a slow network. */
+  private flushingQueue = false;
+  private contributions: ContributionView = {
+    enabled: false,
+    identityMode: 'anonymous',
+    submitted: 0,
+    pending: 0,
+    failed: 0,
+    findingsFromSubmissions: 0,
+    discrepanciesDetected: 0,
+    researchSessions: 0,
+    lastContributionAt: null,
+  };
   private widgets: OverlayWidgets = { ...DEFAULT_WIDGETS };
   private cachedSnapshot: CompanionSnapshot | null = null;
   private db: Database | null = null;
@@ -388,6 +445,12 @@ export class Companion {
         verification: this.verification.stats(),
         verificationEnabled: this.verificationEnabled,
         research: this.researchView(),
+        contributions: {
+          ...this.contributions,
+          enabled: this.verificationEnabled,
+          identityMode: this.identityMode,
+          researchSessions: this.research.sessions().length,
+        },
       };
     }
     return this.cachedSnapshot;
@@ -443,9 +506,13 @@ export class Companion {
     // Opt-in, and read before ingest starts so no lookup can happen first.
     this.verificationEnabled = (await this.getSetting('verificationEnabled')) === 'true';
 
+    const storedMode = await this.getSetting('identityMode');
+    this.identityMode = storedMode === 'commander' ? 'commander' : 'anonymous';
+
     // Loaded before ingest starts, so a restart continues the record rather
     // than beginning a second one.
     await this.loadResearch();
+    await this.refreshContributions();
 
     const storedWidgets = await this.getSetting('overlayWidgets');
     if (storedWidgets) {
@@ -534,6 +601,8 @@ export class Companion {
         this.researchDirty = false;
         void this.saveResearch();
       }
+      // Never awaited: an unreachable server must not become journal latency.
+      void this.flushObservations();
     }, 3000);
     this.notify();
 
@@ -578,6 +647,7 @@ export class Companion {
       this.verificationDirty = true;
     }
     this.rememberForRecheck(event);
+    void this.queueObservation(event);
 
     // Research is local-only and runs regardless of contribution settings:
     // recording what happened is not the same as offering it to anyone.
@@ -1016,6 +1086,10 @@ export class Companion {
       this.pendingRecheck.clear();
     }
     await this.setSetting('verificationEnabled', String(enabled));
+    // Queued observations are deliberately kept: they are local, inert without
+    // consent, and deleting them would mean opting back in loses history the
+    // commander never asked to discard.
+    await this.refreshContributions();
     this.notify();
   }
 
@@ -1029,6 +1103,13 @@ export class Companion {
     if (!this.verificationEnabled) return;
     const observation = observeStation(event);
     if (observation === null) return;
+
+    // Fleet carriers are never compared -- their services are the owner's
+    // current configuration, not a fact about the galaxy -- so the server can
+    // only ever return zero findings for one. Uploading them anyway would be
+    // traffic that cannot produce a result, and S21 asks for the minimum
+    // payload the feature needs.
+    if (isCarrier(observation)) return;
 
     const key = `station:${String(observation.marketId)}`;
     this.pendingRecheck.delete(key);
@@ -1055,6 +1136,152 @@ export class Companion {
     } catch (err) {
       // A re-check is best effort. It must never take down ingest.
       logger.warn('verification', 'Re-check failed', { error: String(err) });
+    }
+  }
+
+  /* ----------------------------------------------------------- contribution */
+
+  get contributionIdentityMode(): IdentityMode {
+    return this.identityMode;
+  }
+
+  async setIdentityMode(mode: IdentityMode): Promise<void> {
+    this.identityMode = mode;
+    await this.setSetting('identityMode', mode);
+    this.notify();
+  }
+
+  /**
+   * Queue a station observation for submission.
+   *
+   * Queued regardless of consent, and sent only with it. An observation that
+   * was never queued cannot be offered later if the commander opts in, and
+   * queueing is purely local -- the row is inert until a flush reads it.
+   */
+  private async queueObservation(event: NormalizedEvent): Promise<void> {
+    if (!this.db) return;
+    const observation = observeStation(event);
+    if (observation === null) return;
+
+    try {
+      await this.db.execute(
+        `INSERT INTO observation_queue
+           (source_event_id, entity_type, entity_id, payload, observed_at, queued_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT(source_event_id) DO NOTHING`,
+        [
+          observation.sourceEventId,
+          'station',
+          String(observation.marketId),
+          JSON.stringify(observation),
+          observation.observedAt,
+          new Date().toISOString(),
+        ],
+      );
+    } catch (err) {
+      logger.warn('db', 'Could not queue observation', { error: String(err) });
+    }
+  }
+
+  /**
+   * Send what is queued.
+   *
+   * Bounded per pass and never awaited by ingest: a slow or unreachable server
+   * must not become the commander's journal latency.
+   */
+  private async flushObservations(): Promise<void> {
+    if (!this.db || !this.verificationEnabled || this.flushingQueue) return;
+    this.flushingQueue = true;
+
+    try {
+      const rows = await this.db.select<Array<{ source_event_id: string; payload: string; attempts: number }>>(
+        `SELECT source_event_id, payload, attempts FROM observation_queue
+          WHERE submitted_at IS NULL AND attempts < 5
+          ORDER BY queued_at LIMIT 10`,
+      );
+
+      for (const row of rows) {
+        let observation;
+        try {
+          observation = JSON.parse(row.payload) as ReturnType<typeof observeStation>;
+        } catch {
+          await this.db.execute(
+            `UPDATE observation_queue SET attempts = 99, last_error = $2
+              WHERE source_event_id = $1`,
+            [row.source_event_id, 'unreadable payload'],
+          );
+          continue;
+        }
+        if (observation === null) continue;
+
+        const outcome = await this.submitter.submit(observation);
+
+        if (outcome.kind === 'accepted') {
+          await this.db.execute(
+            `UPDATE observation_queue
+                SET submitted_at = $2, findings = $3, last_error = NULL
+              WHERE source_event_id = $1`,
+            [row.source_event_id, new Date().toISOString(), outcome.findings],
+          );
+        } else if (outcome.kind === 'rejected') {
+          // Our mistake. Attempts is exhausted rather than retried, because
+          // sending it again sends the same mistake.
+          await this.db.execute(
+            `UPDATE observation_queue SET attempts = 99, last_error = $2
+              WHERE source_event_id = $1`,
+            [row.source_event_id, outcome.detail],
+          );
+        } else if (outcome.kind === 'unavailable') {
+          // Offline or a server error: count the attempt and try again later.
+          await this.db.execute(
+            `UPDATE observation_queue SET attempts = attempts + 1, last_error = $2
+              WHERE source_event_id = $1`,
+            [row.source_event_id, outcome.detail],
+          );
+          // One outage stops the pass; hammering a down server helps nobody.
+          break;
+        } else {
+          break; // skipped: consent went off mid-flush
+        }
+      }
+
+      await this.refreshContributions();
+    } catch (err) {
+      logger.warn('submit', 'Flush failed', { error: String(err) });
+    } finally {
+      this.flushingQueue = false;
+    }
+  }
+
+  private async refreshContributions(): Promise<void> {
+    if (!this.db) return;
+    try {
+      const rows = await this.db.select<Array<Record<string, unknown>>>(
+        `SELECT
+           COUNT(*) FILTER (WHERE submitted_at IS NOT NULL)              AS submitted,
+           COUNT(*) FILTER (WHERE submitted_at IS NULL AND attempts < 5) AS pending,
+           COUNT(*) FILTER (WHERE submitted_at IS NULL AND attempts >= 5) AS failed,
+           COALESCE(SUM(findings), 0)                                    AS findings,
+           MAX(submitted_at)                                             AS last_at
+         FROM observation_queue`,
+      );
+      const r = rows[0] ?? {};
+      const detected = await this.db.select<Array<{ n: number }>>(
+        'SELECT COUNT(*) AS n FROM verification_queue',
+      );
+
+      this.contributions = {
+        ...this.contributions,
+        submitted: Number(r.submitted ?? 0),
+        pending: Number(r.pending ?? 0),
+        failed: Number(r.failed ?? 0),
+        findingsFromSubmissions: Number(r.findings ?? 0),
+        discrepanciesDetected: Number(detected[0]?.n ?? 0),
+        lastContributionAt: r.last_at === null || r.last_at === undefined ? null : String(r.last_at),
+      };
+      this.notify();
+    } catch (err) {
+      logger.warn('db', 'Could not read contribution counts', { error: String(err) });
     }
   }
 

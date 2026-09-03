@@ -12,6 +12,7 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { Research } from './Research';
+import { Contributions } from './Contributions';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -56,15 +57,13 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Dashboard',
   'Overlay',
   'Research',
+  'Contributions',
   'Settings',
   'Diagnostics',
 ]);
 
 const PHASE: Partial<Record<Section, string>> = {
-
   Logistics: 'Phase 8',
-  Research: 'Phase 6',
-  Contributions: 'Phase 5',
 };
 
 export default function App() {
@@ -118,6 +117,7 @@ export default function App() {
         {section === 'Missions' && <MissionsPanel snap={snap} />}
         {section === 'Overlay' && <OverlayPanel />}
         {section === 'Research' && <Research snap={snap} />}
+        {section === 'Contributions' && <Contributions snap={snap} />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
         {!IMPLEMENTED.has(section) && <Placeholder section={section} />}
