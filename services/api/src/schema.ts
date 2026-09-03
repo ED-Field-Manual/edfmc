@@ -62,9 +62,25 @@ export const submissionSchema = z.object({
   claimed: z.unknown().optional(),
 });
 
+export const marketSearchSchema = z.object({
+  // Bounded like everything else the client sends: an unbounded commodity list
+  // is a query planner denial-of-service with a JSON schema.
+  commodities: z.array(z.string().regex(/^[a-z0-9_]{1,64}$/)).min(1).max(64),
+  origin: z
+    .object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() })
+    .optional(),
+  radiusLy: z.number().positive().max(1000).optional(),
+  maxAgeSeconds: z.number().int().positive().max(30 * 24 * 3600).optional(),
+  minStock: z.number().int().nonnegative().max(1_000_000).optional(),
+  includeFleetCarriers: z.boolean().optional(),
+  includePlanetary: z.boolean().optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+
 export const lookupSchema = z.object({
   marketIds: z.array(bigintText).min(1).max(200),
 });
 
 export type SubmissionBody = z.infer<typeof submissionSchema>;
 export type LookupBody = z.infer<typeof lookupSchema>;
+export type MarketSearchBody = z.infer<typeof marketSearchSchema>;

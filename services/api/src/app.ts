@@ -12,7 +12,8 @@ import { recordSubmission } from './lib/store.js';
 import type { Notifier } from './lib/discord/notifier.js';
 import type { DiscordReporter } from './lib/discord/reporter.js';
 import { secretEquals } from './lib/identity.js';
-import { lookupSchema, submissionSchema } from './schema.js';
+import { lookupSchema, marketSearchSchema, submissionSchema } from './schema.js';
+import { searchMarkets } from './lib/market.js';
 
 export interface AppOptions {
   readonly config: Config;
@@ -63,6 +64,28 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     const stations = await getStations(db, parsed.data.marketIds);
     return { stations, requested: parsed.data.marketIds.length, returned: stations.length };
+  });
+
+  /* ------------------------------------------------------------ market */
+
+  /**
+   * Candidate markets for a sourcing plan (§16).
+   *
+   * The server filters and ranks; the client plans. Keeping the planning in the
+   * client means the reasoning stays where the commander can inspect it, and
+   * changing how plans are built does not require a deployment.
+   */
+  app.post('/v1/market/search', async (req, reply) => {
+    const parsed = marketSearchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid request', detail: parsed.error.issues });
+    }
+    const candidates = await searchMarkets(db, parsed.data);
+    return {
+      candidates,
+      stations: candidates.length,
+      offers: candidates.reduce((n, c) => n + c.offers.length, 0),
+    };
   });
 
   /* -------------------------------------------------------- submission */
