@@ -126,7 +126,7 @@ export function createDiscordClient(options: DiscordClientOptions): DiscordClien
   async function execute(
     url: string,
     body: unknown,
-    context: 'create' | 'send' | 'test',
+    context: 'create' | 'send',
   ): Promise<DiscordOutcome> {
     if (!ready()) return { kind: 'disabled' };
 
@@ -270,6 +270,11 @@ export function createDiscordClient(options: DiscordClientOptions): DiscordClien
     async testWebhookConnection() {
       if (!ready()) return { kind: 'disabled' };
       // Deliberately contains no game data at all — see DISCORD.md.
+      //
+      // Classified as a create, not a send: it carries thread_name, so Discord
+      // opens a Forum thread and returns a channel_id. Calling it a send made
+      // it report `sent` and discard the thread id, which is only visible
+      // against a real Forum -- a mock happily returns whatever it is told to.
       return execute(
         `${options.webhookUrl!}?wait=true`,
         {
@@ -279,7 +284,7 @@ export function createDiscordClient(options: DiscordClientOptions): DiscordClien
             'No game data is included.',
           allowed_mentions: { parse: [] },
         },
-        'test',
+        'create',
       );
     },
   };

@@ -189,8 +189,14 @@ not memory.
 | `429` | Honours `retry_after`, bounded by max attempts — not an unbounded honour-the-header loop |
 | `5xx`, timeout, network failure | Exponential backoff with jitter, then abandoned after 5 attempts |
 | `401` / `403`, or `404` on create | `invalid-webhook`; not retried, since a revoked credential will never start working |
-| `404` / locked / archived on an existing thread | `thread-gone`; association marked `deleted`, not retried |
+| Missing / locked / archived thread | `thread-gone`; association marked `deleted`, not retried |
 | Other `4xx` | `rejected`; not retried, because sending the same mistake again sends the same mistake |
+
+Classification uses Discord's **error codes**, not status alone. Verified
+against the live API: posting to a thread that does not exist returns HTTP
+**400 with code 10003**, not the 404 the status-based assumption would predict.
+Matching on `10003` / `10008` / `160005` is what makes that come out as
+`thread-gone` rather than a generic rejection.
 
 ### Deleted threads
 

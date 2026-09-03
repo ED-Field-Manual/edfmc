@@ -232,4 +232,17 @@ describe('testWebhookConnection', () => {
     expect(calls[0]!.body.thread_name).toBe('EDFM Companion — Webhook Test');
     expect(String(calls[0]!.body.content)).toContain('No game data is included');
   });
+
+  it('reports it as a created thread and returns the thread id', async () => {
+    // The gap that let a real bug through: asserting the request body says
+    // nothing about how the response is classified. Carrying thread_name means
+    // Discord opens a thread, so this is a create -- calling it a send made a
+    // successful run report failure and discard the thread id.
+    const { c } = client(() => res(200, { id: 'm1', channel_id: 'thread-9' }));
+    expect(await c.testWebhookConnection()).toEqual({
+      kind: 'created',
+      threadId: 'thread-9',
+      messageId: 'm1',
+    });
+  });
 });

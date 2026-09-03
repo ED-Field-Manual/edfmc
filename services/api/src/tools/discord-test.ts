@@ -16,12 +16,12 @@ import { loadConfig, ConfigError } from '../config.js';
 import { createDiscordClient, redactUrl } from '../lib/discord/client.js';
 import { parseTagMap } from '../lib/discord/tags.js';
 
-try {
+async function main(): Promise<number> {
   const config = loadConfig();
 
   if (config.discordWebhook === undefined) {
     console.error('No EDFM_DISCORD_WEBHOOK configured. Copy .env.example to .env and set it.');
-    process.exit(2);
+    return 2;
   }
   // Redacted: this output ends up in terminal scrollback and CI logs.
   console.log(`Webhook: ${redactUrl(config.discordWebhook)}`);
@@ -32,7 +32,7 @@ try {
 
   if (!config.discordEnabled) {
     console.error('Reporting is disabled. Set EDFM_DISCORD_ENABLED=true to send a test.');
-    process.exit(2);
+    return 2;
   }
 
   const client = createDiscordClient({
@@ -44,28 +44,37 @@ try {
   const outcome = await client.testWebhookConnection();
   console.log(`Outcome: ${outcome.kind}`);
 
-  if (outcome.kind === 'created') {
-    console.log(`Forum post created. Thread id: ${outcome.threadId}`);
-    console.log('Delete the test post in Discord when you are done with it.');
-    process.exit(0);
+  switch (outcome.kind) {
+    case 'created':
+      console.log(`Forum post created. Thread id: ${outcome.threadId}`);
+      console.log('Delete the test post in Discord when you are done with it.');
+      return 0;
+    case 'rejected':
+      console.error(`Discord rejected the request: ${outcome.detail}`);
+      console.error(
+        'If this mentions thread_name, the webhook targets a text channel rather than a Forum.',
+      );
+      return 1;
+    case 'invalid-webhook':
+      console.error(`Webhook rejected: ${outcome.detail}. It may have been deleted or revoked.`);
+      return 1;
+    default:
+      console.error(`Failed: ${outcome.kind}`);
+      return 1;
   }
-  if (outcome.kind === 'rejected') {
-    console.error(`Discord rejected the request: ${outcome.detail}`);
-    console.error(
-      'If this says "thread_name", the webhook targets a text channel rather than a Forum.',
-    );
-    process.exit(1);
-  }
-  if (outcome.kind === 'invalid-webhook') {
-    console.error(`Webhook rejected: ${outcome.detail}. It may have been deleted or revoked.`);
-    process.exit(1);
-  }
-  console.error(`Failed: ${outcome.kind}`);
-  process.exit(1);
+}
+
+try {
+  // Assigning exitCode rather than calling process.exit(): exiting while the
+  // fetch handle is still closing trips a libuv assertion on Windows, which
+  // turns a successful run into a crash report.
+  process.exitCode = await main();
 } catch (error) {
   if (error instanceof ConfigError) {
     console.error(`Configuration error: ${error.message}`);
-    process.exit(2);
+    process.exitCode = 2;
+  } else {
+    console.error(error);
+    process.exitCode = 1;
   }
-  throw error;
 }
