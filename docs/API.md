@@ -1,7 +1,8 @@
 # EDFM API
 
-Status: **built and running against PostgreSQL.** Reference lookup, discrepancy
-submission, independence scoring and Discord notification all work end to end.
+Status: **deployed** at `https://api.edfieldmanual.com`. Reference lookup,
+discrepancy submission, independence scoring and Discord reporting all work end
+to end. See [DEPLOYMENT.md](DEPLOYMENT.md) for how it is hosted.
 
 `services/api` — Node 20, Fastify 5, PostgreSQL. Shares a database with the EDDN
 worker, and shares its comparison vocabulary with `@edfm/verification` so the
