@@ -17,9 +17,9 @@ import { companion, type CompanionSnapshot } from './lib/companion';
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="field">
-      <span className="label">{label}</span>
-      <span className="value">{value}</span>
-      {hint && <span className="muted">{hint}</span>}
+      <div className="field-label">{label}</div>
+      <div className="field-value">{value}</div>
+      {hint && <div className="field-hint">{hint}</div>}
     </div>
   );
 }

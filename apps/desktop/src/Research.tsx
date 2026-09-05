@@ -16,8 +16,8 @@ import { companion, type CompanionSnapshot } from './lib/companion';
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="field">
-      <span className="label">{label}</span>
-      <span className="value">{value}</span>
+      <div className="field-label">{label}</div>
+      <div className="field-value">{value}</div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { Logistics } from './Logistics';
 import { Research } from './Research';
 import { Contributions } from './Contributions';
+import { Plugins as PluginsScreen } from './Plugins';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -47,6 +48,7 @@ const SECTIONS = [
   'Research',
   'Contributions',
   'Overlay',
+  'Plugins',
   'Settings',
   'Diagnostics',
 ] as const;
@@ -60,6 +62,7 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Logistics',
   'Research',
   'Contributions',
+  'Plugins',
   'Settings',
   'Diagnostics',
 ]);
@@ -119,6 +122,7 @@ export default function App() {
         {section === 'Logistics' && <Logistics snap={snap} />}
         {section === 'Research' && <Research snap={snap} />}
         {section === 'Contributions' && <Contributions snap={snap} />}
+        {section === 'Plugins' && <PluginsScreen snap={snap} />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
         {!IMPLEMENTED.has(section) && <Placeholder section={section} />}
@@ -851,149 +855,6 @@ function Settings({ snap }: { snap: Snap }) {
             Observations checked: {snap.verification.checked} · findings: {snap.verification.discrepancies}
           </p>
         )}
-      </section>
-
-      <section className="card">
-        <h2>Plugins</h2>
-        <p className="muted">
-          Plugins add context rules and research projects. They are plain JSON &mdash; the
-          Companion never runs plugin code, so an installed plugin cannot read your journal,
-          reach the network, or do anything the app itself would not.
-        </p>
-
-        {snap.plugins.directory ? (
-          <p className="muted">
-            Installed from: <code>{snap.plugins.directory}</code>
-          </p>
-        ) : (
-          <p className="note">
-            No usable plugins folder on this system.
-            {snap.plugins.fallbackReason && ` ${snap.plugins.fallbackReason}`}
-          </p>
-        )}
-
-        {/* A commander told "Documents" who finds nothing there needs to know
-            where it actually went, and why. */}
-        {snap.plugins.fallbackReason && snap.plugins.directory && (
-          <p className="note">
-            {snap.plugins.fallbackReason} Plugins are being read from the path above instead.
-          </p>
-        )}
-
-        {/* The case this exists for: OneDrive holding a manifest online-only.
-            The plugin is installed, looks installed, and does nothing. */}
-        {snap.plugins.unreadable.length > 0 && (
-          <>
-            <p className="note">
-              {snap.plugins.unreadable.length} plugin folder
-              {snap.plugins.unreadable.length === 1 ? '' : 's'} could not be read:
-            </p>
-            <ul className="note">
-              {snap.plugins.unreadable.map((u) => (
-                <li key={u.directory}>
-                  <strong>{u.directory}</strong>: {u.message}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-
-        <div className="row">
-          <button type="button" onClick={() => void companion.openPluginsFolder()}>
-            Open plugins folder
-          </button>
-          <button type="button" onClick={() => void companion.reloadPlugins()}>
-            Reload plugins
-          </button>
-        </div>
-
-        {snap.plugins.loaded.length === 0 && snap.plugins.rejected.length === 0 ? (
-          <p className="muted">
-            None installed. To add one, put its folder in the plugins directory and press
-            Reload &mdash; each plugin is a folder containing a <code>plugin.json</code>.
-          </p>
-        ) : (
-          <table className="rows">
-            <thead>
-              <tr><th>Plugin</th><th>Version</th><th>Contributes</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {snap.plugins.loaded.map((p) => (
-                <tr key={p.manifest.id}>
-                  <td>
-                    {p.manifest.name}
-                    <br />
-                    <span className="muted">{p.manifest.id}</span>
-                    {p.manifest.author && <span className="muted"> &middot; {p.manifest.author}</span>}
-                  </td>
-                  <td>{p.manifest.version}</td>
-                  <td className="muted">
-                    {/* The titles, not just a count. A commander who installs a
-                        plugin has no other way to find out what it does: these
-                        rules only appear elsewhere in the app once something in
-                        the game actually matches them, which may be hours away
-                        or may need a trip to a particular station. */}
-                    {p.contextRules.length > 0 && (
-                      <div>
-                        {p.contextRules.length} context rule
-                        {p.contextRules.length === 1 ? '' : 's'}:
-                        <ul>
-                          {p.contextRules.map((r) => (
-                            <li key={r.id}>{r.title}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {p.researchProjects.length > 0 && (
-                      <div>
-                        {p.researchProjects.length} research project
-                        {p.researchProjects.length === 1 ? '' : 's'}:
-                        <ul>
-                          {p.researchProjects.map((r) => (
-                            <li key={r.id}>{r.title}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </td>
-                  <td className="muted">
-                    {p.warnings.length === 0 ? 'Loaded' : `Loaded with ${p.warnings.length} warning(s)`}
-                    {p.warnings.map((w) => (
-                      <div key={w}>{w}</div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-              {snap.plugins.rejected.map((p) => (
-                <tr key={p.directory}>
-                  <td>
-                    <span className="muted">{p.id ?? p.directory}</span>
-                    <br />
-                    <span className="muted">folder: {p.directory}</span>
-                  </td>
-                  <td>&mdash;</td>
-                  <td>&mdash;</td>
-                  <td className="note">
-                    {p.problems.map((problem) => (
-                      <div key={problem.message}>{problem.message}</div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <p className="muted">
-          EDFM Note: a plugin that fails to load is listed with the reason rather than ignored.
-          A plugin that quietly did nothing would be indistinguishable from one that was never
-          installed, and the author is usually the person running the app.
-        </p>
-        <p className="muted">
-          Context rules appear on the Context screen and in the overlay only while they match
-          &mdash; a rule about core asteroids stays quiet until you prospect one. Listing them
-          here is how you can tell an installed plugin from a working one without going looking
-          for the situation that triggers it.
-        </p>
       </section>
 
       <section className="card">

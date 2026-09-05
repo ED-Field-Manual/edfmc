@@ -248,6 +248,14 @@ export interface PluginView {
    * plugins" and "could not read your plugin" must not look the same.
    */
   readonly unreadable: readonly { readonly directory: string; readonly message: string }[];
+  /**
+   * Plugins the commander switched off.
+   *
+   * Disabled rather than uninstalled: the plugin stays listed, keeps its
+   * instructions, and contributes nothing. Turning something off should not
+   * require deleting it and finding it again later.
+   */
+  readonly disabledIds: readonly string[];
 }
 
 /**
@@ -458,7 +466,11 @@ export class Companion {
     source: 'none',
     fallbackReason: null,
     unreadable: [],
+    disabledIds: [],
   };
+
+  /** Persisted across restarts; read before the first load. */
+  private disabledPlugins = new Set<string>();
 
   /** Construction sites, keyed by depot MarketID. */
   private sites = new Map<string, ConstructionSite>();
@@ -614,6 +626,20 @@ export class Companion {
 
     // Loaded before ingest starts, so a restart continues the record rather
     // than beginning a second one.
+    // Before the plugins are read, so a disabled plugin never contributes
+    // even briefly.
+    const storedDisabled = await this.getSetting('disabledPlugins');
+    if (storedDisabled !== null) {
+      try {
+        const ids = JSON.parse(storedDisabled) as unknown;
+        if (Array.isArray(ids)) {
+          this.disabledPlugins = new Set(ids.filter((v): v is string => typeof v === 'string'));
+        }
+      } catch {
+        // A corrupt setting must not stop the app; every plugin simply stays on.
+      }
+    }
+
     // Before ingest, so a contributed rule is live for the first event.
     await this.loadPluginsFromDisk();
 
@@ -922,7 +948,10 @@ export class Companion {
     // plugin's contributions -- they would work until the first update and
     // then vanish, which is precisely the kind of failure a commander cannot
     // diagnose.
-    const merged = mergeContextRules(ruleSet, this.pluginView.loaded);
+    const merged = mergeContextRules(
+      ruleSet,
+      this.pluginView.loaded.filter((p) => !this.disabledPlugins.has(p.manifest.id)),
+    );
     this.resolver.setRuleSet(merged);
     logger.info('context', 'Rule set replaced', {
       version: this.resolver.version,
@@ -1284,8 +1313,9 @@ export class Companion {
       // Built-ins first: if a namespacing bug ever let an id collide, the
       // shipped rule wins. A plugin quietly replacing a built-in context would
       // be invisible to the commander.
-      const merged = mergeContextRules(BUNDLED_RULES, result.loaded);
-      if (result.loaded.length > 0) this.resolver.setRuleSet(merged);
+      const enabled = result.loaded.filter((p) => !this.disabledPlugins.has(p.manifest.id));
+      const merged = mergeContextRules(BUNDLED_RULES, enabled);
+      this.resolver.setRuleSet(merged);
 
       this.pluginView = {
         loaded: result.loaded,
@@ -1295,6 +1325,7 @@ export class Companion {
         source: scan.source,
         fallbackReason: scan.fallback_reason,
         unreadable: scan.errors,
+        disabledIds: [...this.disabledPlugins],
       };
 
       for (const plugin of result.loaded) {
@@ -1335,6 +1366,30 @@ export class Companion {
   /** Reload without restarting, so an author can iterate. */
   async reloadPlugins(): Promise<void> {
     await this.loadPluginsFromDisk();
+  }
+
+  /**
+   * Switch a plugin on or off.
+   *
+   * Takes effect immediately by rebuilding the rule set, rather than asking
+   * for a restart: a toggle that needs a restart is a toggle people distrust.
+   */
+  async setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+    if (enabled) this.disabledPlugins.delete(id);
+    else this.disabledPlugins.add(id);
+
+    await this.setSetting('disabledPlugins', JSON.stringify([...this.disabledPlugins]));
+
+    const active = this.pluginView.loaded.filter((p) => !this.disabledPlugins.has(p.manifest.id));
+    this.resolver.setRuleSet(mergeContextRules(BUNDLED_RULES, active));
+
+    this.pluginView = { ...this.pluginView, disabledIds: [...this.disabledPlugins] };
+    logger.info('plugins', enabled ? 'Enabled' : 'Disabled', { id });
+    this.notify();
+  }
+
+  isPluginEnabled(id: string): boolean {
+    return !this.disabledPlugins.has(id);
   }
 
   async openPluginsFolder(): Promise<void> {

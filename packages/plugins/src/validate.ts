@@ -26,6 +26,8 @@ export interface RawPlugin {
   /** Folder name, used for reporting and never trusted as an identifier. */
   readonly directory: string;
   readonly json: string;
+  /** Contents of README.md beside the manifest, when the author wrote one. */
+  readonly readme?: string | null;
 }
 
 /** Reverse-DNS-ish. Restrictive on purpose: this becomes an id prefix. */
@@ -105,6 +107,9 @@ function validateManifest(raw: unknown): { manifest: PluginManifest } | { proble
       ...(text(m.author, 80) === null ? {} : { author: text(m.author, 80)! }),
       ...(text(m.description, 400) === null ? {} : { description: text(m.description, 400)! }),
       ...(text(m.homepage, 300) === null ? {} : { homepage: text(m.homepage, 300)! }),
+      ...(text(m.instructions, PLUGIN_LIMITS.maxInstructionsChars) === null
+        ? {}
+        : { instructions: text(m.instructions, PLUGIN_LIMITS.maxInstructionsChars)! }),
       contributes: m.contributes as PluginManifest['contributes'],
     },
   };
@@ -255,7 +260,22 @@ export function validatePlugin(raw: RawPlugin): LoadedPlugin | RejectedPlugin {
     };
   }
 
-  return { manifest, directory: raw.directory, contextRules, researchProjects, warnings };
+  const readme =
+    typeof raw.readme === 'string' && raw.readme.trim() !== ''
+      ? raw.readme.slice(0, PLUGIN_LIMITS.maxReadmeChars)
+      : null;
+  if (raw.readme != null && raw.readme.length > PLUGIN_LIMITS.maxReadmeChars) {
+    warnings.push('README.md was truncated for display.');
+  }
+
+  return {
+    manifest,
+    directory: raw.directory,
+    contextRules,
+    researchProjects,
+    warnings,
+    readme,
+  };
 }
 
 /** Validate every plugin found on disk, keeping the good ones. */

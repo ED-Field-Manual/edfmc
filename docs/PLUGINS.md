@@ -1,15 +1,16 @@
 # Plugins
 
 Status: **built.** Plugins contribute context rules and research projects, load
-at startup, and can be reloaded without restarting.
+at startup, can be switched on and off individually, and can be reloaded
+without restarting. They have their own screen in the app.
 
 ## Installing one
 
 A plugin is a folder containing a `plugin.json`. Installing it means putting
 that folder in the plugins directory.
 
-1. Open **Settings → Plugins → Open plugins folder**, or just go straight to
-   it:
+1. Open the **Plugins** tab and press **Open plugins folder**, or just go
+   straight to it:
 
    ```
    Documents\EDFM Companion\plugins
@@ -34,9 +35,18 @@ The full path on a typical Windows machine:
 C:\Users\<you>\Documents\EDFM Companion\plugins\deep-core-mining\plugin.json
 ```
 
-The Settings table then lists it with its version and what it contributed. If
-it did not load, it is listed anyway with the reason — a plugin that silently
-did nothing is indistinguishable from one that was never installed.
+The Plugins screen then shows a card for it: description, version, author, the
+rules it contributed **by name**, whatever instructions the author wrote, and a
+switch to turn it off. If it did not load, it is listed anyway with the reason —
+a plugin that silently did nothing is indistinguishable from one that was never
+installed.
+
+### Turning one off
+
+Every plugin has a switch on its card. Off means it contributes nothing, takes
+effect immediately without a restart, and survives one — but the plugin stays
+installed and keeps its instructions. Turning something off should not mean
+deleting it and having to find it again.
 
 That is the whole install flow. No archives, no build step, no restart, and
 nothing is downloaded or executed.
@@ -111,7 +121,22 @@ be told, not have their plugin quietly altered into something else.
 }
 ```
 
-A complete working example is in
+### Telling people how to use it
+
+A context rule is invisible until something in the game matches it, so "install
+it and see" is not a usable instruction. Two places to explain yourself, and
+both are shown on the plugin's card:
+
+- **`instructions`** in the manifest — short, for a couple of paragraphs.
+- **`README.md`** beside `plugin.json` — longer, and far nicer to write than a
+  JSON string full of escaped newlines.
+
+Both are displayed as **plain text**. Nothing is rendered as Markdown or HTML:
+the text comes from a stranger, and text that can style itself is text that can
+misrepresent itself as part of the application. Write for a monospace block —
+blank lines and indentation survive, `# headings` will not become headings.
+
+A complete working example, with both, is in
 [`examples/plugins/deep-core-mining`](../examples/plugins/deep-core-mining).
 
 Check it before installing — this runs exactly the validation the app runs, so

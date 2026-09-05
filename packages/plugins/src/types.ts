@@ -37,6 +37,19 @@ export interface PluginManifest {
   readonly author?: string;
   readonly description?: string;
   readonly homepage?: string;
+  /**
+   * How to use the plugin, in the author's own words.
+   *
+   * A context rule is invisible until something in the game matches it, so
+   * "install it and see" is not a usable instruction. This is where an author
+   * says what to do — dock somewhere with a Material Trader, prospect an
+   * asteroid — so a commander can tell a working plugin from a quiet one.
+   *
+   * Rendered as plain text, never as HTML or Markdown. It comes from a
+   * stranger, and text that can style itself is text that can misrepresent
+   * itself as part of the application.
+   */
+  readonly instructions?: string;
   readonly contributes: PluginContributions;
 }
 
@@ -59,6 +72,13 @@ export interface LoadedPlugin {
   readonly researchProjects: readonly ResearchProject[];
   /** Non-fatal complaints: the plugin loaded, but something was dropped. */
   readonly warnings: readonly string[];
+  /**
+   * Contents of an optional README.md beside the manifest.
+   *
+   * Longer than `instructions` and far nicer to write than a JSON string full
+   * of escaped newlines. Also plain text on display, for the same reason.
+   */
+  readonly readme: string | null;
 }
 
 export interface RejectedPlugin {
@@ -84,6 +104,9 @@ export const PLUGIN_LIMITS = {
   maxContextRulesPerPlugin: 200,
   maxResearchProjectsPerPlugin: 10,
   maxManifestBytes: 512 * 1024,
+  /** Instructions are read, not scrolled through forever. */
+  maxInstructionsChars: 4000,
+  maxReadmeChars: 20_000,
 } as const;
 
 /**

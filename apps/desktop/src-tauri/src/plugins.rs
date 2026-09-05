@@ -35,6 +35,12 @@ pub struct RawPlugin {
     /// Folder name, so a commander can find the one that misbehaved.
     directory: String,
     json: String,
+    /// Optional README.md beside the manifest.
+    ///
+    /// Instructions can also live in the manifest, but a JSON string full of
+    /// escaped newlines is a miserable way to write a paragraph, and authors
+    /// already reach for a README without being asked.
+    readme: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -214,10 +220,17 @@ pub fn plugins_read(app: tauri::AppHandle) -> PluginScan {
         }
 
         match fs::read_to_string(&manifest) {
-            Ok(json) => plugins.push(RawPlugin {
-                directory: name,
-                json,
-            }),
+            Ok(json) => {
+                // Missing or unreadable is simply "no readme": an author who
+                // wrote no instructions is not an error, and one whose readme
+                // is a cloud placeholder should still get their plugin loaded.
+                let readme = fs::read_to_string(entry.path().join("README.md")).ok();
+                plugins.push(RawPlugin {
+                    directory: name,
+                    json,
+                    readme,
+                });
+            }
             Err(e) => {
                 // The file is there and we cannot read it. Never silent: this
                 // is the case that makes a plugin appear uninstalled.
