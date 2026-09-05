@@ -22,10 +22,27 @@ pub struct RawPlugin {
     json: String,
 }
 
-/// `<app data>/plugins`, created on first use so the folder always exists to
-/// be opened. Returns None only if the platform has no app data directory.
+/// `Documents/EDFM Companion/plugins`, created on first use.
+///
+/// Documents rather than the app data directory, and a readable name rather
+/// than the bundle identifier, because installing a plugin means a person
+/// putting a folder somewhere. Somewhere they can find without being told a
+/// path is worth more than somewhere technically tidier:
+/// `Documents\EDFM Companion\plugins` can be described over voice chat;
+/// `%APPDATA%\com.edfieldmanual.companion\plugins` cannot.
+///
+/// Falls back to the app data directory on a platform with no Documents
+/// folder, so the feature degrades rather than disappearing. The database
+/// stays in app data either way -- that is not something anyone should be
+/// hand-editing.
 fn plugins_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_data_dir().ok()?.join("plugins");
+    let dir = app
+        .path()
+        .document_dir()
+        .map(|d| d.join("EDFM Companion").join("plugins"))
+        .or_else(|_| app.path().app_data_dir().map(|d| d.join("plugins")))
+        .ok()?;
+
     // Best effort: a failure here surfaces as "no plugins found" rather than an
     // error dialog, which is the right outcome for an optional feature.
     let _ = fs::create_dir_all(&dir);

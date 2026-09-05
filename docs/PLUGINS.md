@@ -8,9 +8,14 @@ at startup, and can be reloaded without restarting.
 A plugin is a folder containing a `plugin.json`. Installing it means putting
 that folder in the plugins directory.
 
-1. Open **Settings → Plugins → Open plugins folder**. On Windows this is
-   roughly `%APPDATA%\com.edfieldmanual.companion\plugins\`; the app shows the
-   real path and opens it for you, so you never have to type it.
+1. Open **Settings → Plugins → Open plugins folder**, or just go straight to
+   it:
+
+   ```
+   Documents\EDFM Companion\plugins
+   ```
+
+   The folder is created the first time the app runs, so it is always there.
 2. Drop the plugin's folder inside, so you have:
 
    ```
@@ -20,6 +25,12 @@ that folder in the plugins directory.
    ```
 
 3. Press **Reload plugins**.
+
+The full path on a typical Windows machine:
+
+```
+C:\Users\<you>\Documents\EDFM Companion\plugins\deep-core-mining\plugin.json
+```
 
 The Settings table then lists it with its version and what it contributed. If
 it did not load, it is listed anyway with the reason — a plugin that silently
@@ -169,6 +180,14 @@ already uses, not in this system.
 - `plugins.rs` reads one directory, one level deep, and returns text. Recursing
   would let a plugin hide manifests inside another plugin's folder, which makes
   "which plugin contributed this" unanswerable.
+- The folder is `Documents/EDFM Companion/plugins`, not app data, and is named
+  for people rather than by bundle identifier. Installing a plugin means someone
+  putting a folder somewhere, and somewhere they can find unaided beats
+  somewhere technically tidier — `Documents\EDFM Companion\plugins` can be
+  described over voice chat; `%APPDATA%\com.edfieldmanual.companion\plugins`
+  cannot. It falls back to app data on a platform with no Documents folder. The
+  SQLite database stays in app data either way, since nobody should be
+  hand-editing that.
 - Loading happens before ingest starts, so a contributed rule is live for the
   first journal line rather than the second.
 - The loader never throws. A plugin system that can stop the app from starting
