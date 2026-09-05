@@ -308,6 +308,77 @@ describe('sanitise', () => {
     expect(set.rules[0]!.ttlSeconds).toBe(24 * 60 * 60);
     expect(set.rules[1]!.ttlSeconds).toBe(300);
   });
+
+  it('keeps actions and note intact when they are within bounds', () => {
+    const set = sanitise({
+      ...base,
+      rules: [
+        {
+          id: 'a',
+          title: 't',
+          when: { kind: 'event', name: 'X' },
+          priority: 1,
+          ttlSeconds: 1,
+          resources: [],
+          actions: ['Do this first.', 'Then do this.'],
+          note: 'Editorial guidance from EDFM.',
+        },
+      ],
+    } as ContextRuleSet);
+    expect(set.rules[0]!.actions).toEqual(['Do this first.', 'Then do this.']);
+    expect(set.rules[0]!.note).toBe('Editorial guidance from EDFM.');
+  });
+
+  it('truncates an oversized actions list rather than dropping the rule', () => {
+    const set = sanitise({
+      ...base,
+      rules: [
+        {
+          id: 'a',
+          title: 't',
+          when: { kind: 'event', name: 'X' },
+          priority: 1,
+          ttlSeconds: 1,
+          resources: [],
+          actions: ['one', 'two', 'three', 'four', 'five', 'six'],
+        },
+      ],
+    } as ContextRuleSet);
+    expect(set.rules[0]!.actions!.length).toBe(4);
+    expect(set.rules[0]!.actions).toEqual(['one', 'two', 'three', 'four']);
+  });
+
+  it('clamps over-long action strings and notes', () => {
+    const huge = 'x'.repeat(10_000);
+    const set = sanitise({
+      ...base,
+      rules: [
+        {
+          id: 'a',
+          title: 't',
+          when: { kind: 'event', name: 'X' },
+          priority: 1,
+          ttlSeconds: 1,
+          resources: [],
+          actions: [huge],
+          note: huge,
+        },
+      ],
+    } as ContextRuleSet);
+    expect(set.rules[0]!.actions![0]!.length).toBe(512);
+    expect(set.rules[0]!.note!.length).toBe(512);
+  });
+
+  it('leaves actions and note absent when a rule has neither', () => {
+    const set = sanitise({
+      ...base,
+      rules: [
+        { id: 'a', title: 't', when: { kind: 'event', name: 'X' }, priority: 1, ttlSeconds: 1, resources: [] },
+      ],
+    } as ContextRuleSet);
+    expect(set.rules[0]!.actions).toBeUndefined();
+    expect(set.rules[0]!.note).toBeUndefined();
+  });
 });
 
 describe('bundled rule set', () => {

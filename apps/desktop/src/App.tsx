@@ -296,6 +296,14 @@ function ContextPanel({ snap }: { snap: Snap }) {
             <h2>{ctx.rule.title}</h2>
             {ctx.rule.subtitle && <p className="muted">{ctx.rule.subtitle}</p>}
 
+            {ctx.rule.actions && ctx.rule.actions.length > 0 && (
+              <ol className="context-actions">
+                {ctx.rule.actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ol>
+            )}
+
             <ul className="resources">
               {ctx.rule.resources.map((resource) => {
                 const url = resourceUrl(resource);
@@ -312,6 +320,8 @@ function ContextPanel({ snap }: { snap: Snap }) {
                 );
               })}
             </ul>
+
+            {ctx.rule.note && <p className="muted">EDFM Note: {ctx.rule.note}</p>}
 
             {/* Provenance: which event caused this, per §27. */}
             <p className="provenance">

@@ -164,6 +164,11 @@ OK: Deep Core Mining Helper 1.0.0 (com.example.deep-core-mining)
 
 There is no regular-expression operator, and there will not be one.
 
+A rule may also carry `actions` (a short list of imperative steps the
+commander can act on right now, capped at 4) and `note` (one editorial
+remark, shown with an "EDFM Note:" prefix). Both are optional and, like every
+other rule field, clamped by `sanitise()` before they reach the UI.
+
 ### Ids are namespaced for you
 
 Your rule `core-asteroid` becomes `com.example.deep-core-mining/core-asteroid`.

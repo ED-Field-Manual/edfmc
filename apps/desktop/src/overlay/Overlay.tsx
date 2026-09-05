@@ -18,6 +18,8 @@ import './overlay.css';
 interface OverlayContext {
   title: string;
   subtitle: string | null;
+  actions: readonly string[];
+  note: string | null;
   resources: ReadonlyArray<{ label: string; url: string }>;
 }
 
@@ -205,6 +207,13 @@ export default function Overlay() {
                 <div className="context">
                   <div className="context-title">{state.context.title}</div>
                   {state.context.subtitle && <div className="context-sub">{state.context.subtitle}</div>}
+                  {state.context.actions.length > 0 && (
+                    <ul className="context-actions">
+                      {state.context.actions.map((a) => (
+                        <li key={a}>{a}</li>
+                      ))}
+                    </ul>
+                  )}
                   {state.context.resources.length > 0 && (
                     <div className="context-links">
                       {/*
@@ -217,6 +226,12 @@ export default function Overlay() {
                           {r.label}
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {state.context.note && (
+                    <div className="context-note">
+                      <span className="note-label">EDFM</span>
+                      {state.context.note}
                     </div>
                   )}
                 </div>

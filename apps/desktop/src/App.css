@@ -216,6 +216,11 @@ input[type='text']:focus { border-color: var(--accent); }
 
 .muted-inline { color: var(--muted); }
 
+/* ------------------------------------------------------------- actions */
+
+.context-actions { margin: 0.5rem 0 0.75rem; padding-left: 1.25rem; }
+.context-actions li { margin: 0.1875rem 0; }
+
 /* ----------------------------------------------------------- resources */
 
 .resources { list-style: none; padding: 0; margin: 0.25rem 0 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }

@@ -107,6 +107,17 @@ export interface ContextRule {
    */
   readonly ttlSeconds: number;
   readonly resources: readonly ContextResource[];
+  /**
+   * Short imperative steps the commander can act on right now, e.g. "Follow the
+   * blue circle to fight the interdiction." Most contexts are informational —
+   * this is for the minority where there is something to actually do.
+   */
+  readonly actions?: readonly string[];
+  /**
+   * One editorial remark, rendered with the "EDFM Note:" prefix convention used
+   * throughout the app for guidance that is not read directly off the journal.
+   */
+  readonly note?: string;
 }
 
 export interface ContextRuleSet {
@@ -141,4 +152,6 @@ export const RULE_LIMITS = {
   maxConditionDepth: 12,
   maxResourcesPerRule: 8,
   maxStringLength: 512,
+  /** Enough for a short numbered checklist; more than that is not readable mid-flight. */
+  maxActions: 4,
 } as const;

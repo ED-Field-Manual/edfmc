@@ -864,6 +864,8 @@ export class Companion {
           ? {
               title: top.rule.title,
               subtitle: top.rule.subtitle ?? null,
+              actions: top.rule.actions ?? [],
+              note: top.rule.note ?? null,
               resources: top.rule.resources
                 .map((r) => ({ label: r.label, url: resourceUrl(r) }))
                 .filter((r): r is { label: string; url: string } => r.url !== null)

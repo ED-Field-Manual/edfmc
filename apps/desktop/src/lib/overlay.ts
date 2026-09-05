@@ -37,6 +37,8 @@ export interface DisplayModeInfo {
 export interface OverlayContext {
   title: string;
   subtitle: string | null;
+  actions: readonly string[];
+  note: string | null;
   resources: ReadonlyArray<{ label: string; url: string }>;
 }
 

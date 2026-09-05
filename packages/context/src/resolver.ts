@@ -145,8 +145,21 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
     if (typeof rule.title !== 'string' || !rule.when) continue;
 
     seen.add(rule.id);
+    const { actions: rawActions, note: rawNote, ...restRule } = rule;
+
+    // Present only when there is something to show — exactOptionalPropertyTypes
+    // forbids `actions: undefined`, and an absent field is the correct signal
+    // to the UI anyway (nothing to render), not an empty list.
+    const actions = Array.isArray(rawActions)
+      ? rawActions
+          .filter((a): a is string => typeof a === 'string' && a.length > 0)
+          .slice(0, RULE_LIMITS.maxActions)
+          .map((a) => a.slice(0, RULE_LIMITS.maxStringLength))
+      : undefined;
+    const note = typeof rawNote === 'string' ? rawNote.slice(0, RULE_LIMITS.maxStringLength) : undefined;
+
     rules.push({
-      ...rule,
+      ...restRule,
       priority: Number.isFinite(rule.priority) ? rule.priority : 0,
       // A missing or absurd TTL must not pin a context on screen forever.
       ttlSeconds:
@@ -154,6 +167,8 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
           ? Math.min(rule.ttlSeconds, 24 * 60 * 60)
           : 300,
       resources: (rule.resources ?? []).slice(0, RULE_LIMITS.maxResourcesPerRule),
+      ...(actions && actions.length > 0 ? { actions } : {}),
+      ...(note ? { note } : {}),
     });
   }
 

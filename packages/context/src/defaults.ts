@@ -39,6 +39,13 @@ export const BUNDLED_RULES: ContextRuleSet = {
       priority: 95,
       ttlSeconds: 300,
       resources: [{ label: 'Frame Shift Drive Interdictor', page: 'Frame Shift Drive Interdictor' }],
+      actions: [
+        'Follow the blue circle to fight the interdiction.',
+        'Or zero your throttle to submit deliberately.',
+      ],
+      // Editorial guidance from the project owner (edfieldmanual.com), not derived
+      // from journal data — that is exactly what `note` is for.
+      note: 'Submitting voluntarily lets your FSD recharge faster, so you can potentially escape sooner.',
     },
 
     /* ------------------------------------------------------- colonisation */
