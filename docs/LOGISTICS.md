@@ -1,8 +1,8 @@
 # Logistics and Market Confidence
 
-Status: **core built and proven against live data.** Confidence engine, sourcing
-planner, construction-project tracking and the market search endpoint all work.
-The client UI is the remaining piece.
+Status: **complete.** Confidence engine, sourcing planner, multi-site
+construction tracking, the market search endpoint and the Logistics screen all
+work, proven end to end against live data.
 
 ## What was measured first
 
@@ -142,6 +142,60 @@ Four modes, and the difference between them is real rather than cosmetic:
 
 An exclusion is not a low score, and the two are separate code paths: a
 commander who wonders where a station went can be told.
+
+## Demonstrated on real data
+
+Phase 9 is gated on the basic optimiser being "demonstrably correct", and unit
+tests only demonstrate that code does what it was told. Replaying the real
+journals:
+
+```
+5,813 depot events -> 21 distinct sites (17 complete, 4 active)
+progress reported at 0.2%, 11.0%, 11.7%, 45.6%
+combined outstanding: 19 commodities
+resources whose symbol did not fold cleanly: 0
+```
+
+Planned against the live market database:
+
+```
+4 active sites, 19 outstanding commodities
+market search returned 120 candidate stations
+
+STOP 1  Craterside City      fulfils 17 of 19 outstanding commodities
+STOP 2  Nilson's Progress    fulfils 2 of 2 outstanding commodities
+
+Stations required: 2
+Could not source: 0 commodities
+```
+
+Nineteen commodities in two stops is the "favour reducing unnecessary stops"
+behaviour §16 asks for, and each purchase carries its §17 distribution —
+Aluminium's 100,503 tonnes split across four sites as 50,208 + 45,220 + 4,575 +
+500.
+
+### The bug only real data found
+
+Running against real requirements rather than fixtures produced **42 candidate
+stations and zero stops**. The safety margin was applied to a take already
+capped at available stock, so a partial fill scored `stock / (stock × 1.1)` =
+91% coverage, failed the coverage minimum and rated `unusable`. Every large
+requirement was therefore unsourceable.
+
+A margin is headroom *above* what you take, and there is none when you are
+clearing the shelf. It is dropped in that case and kept in every other.
+
+A second run then returned zero stops again — correctly. The local development
+database had stopped ingesting, so every observation in it was 57 hours old and
+the confidence engine refused all of them:
+
+```
+Maddex Manufacturing: Steel data is 57h old and stock is 503% of what is needed
+```
+
+Plenty of stock, far too old. That is the engine doing its job, and the
+distinction between "no good option" and "no fresh data" is visible in the
+rejection rather than hidden behind an empty list.
 
 ## Multiple sites (§17)
 

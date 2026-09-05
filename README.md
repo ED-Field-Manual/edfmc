@@ -8,10 +8,10 @@ and — passively — helps EDFM verify and improve its own information.
 
 This is **not** an EDMC plugin and does not require EDMarketConnector.
 
-> **Status: Phases 0–5 and 7.** The journal engine, overlay, context assistant,
-> mission planner, EDDN ingestion and the verification backend work end to end.
-> Research (Phase 6) and logistics (Phase 8) are designed but deliberately not
-> built yet. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> **Status: Phases 0–9 complete.** The journal engine, overlay, context
+> assistant, mission planner, EDDN ingestion, verification backend, field
+> research and colonisation logistics all work end to end, against live data.
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What works today
 
