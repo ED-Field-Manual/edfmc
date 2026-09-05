@@ -1,7 +1,8 @@
 # Discord Forum Reporting
 
-Status: **built and tested.** Discrepancies become Discord Forum posts, one per
-issue, updated in place rather than reposted.
+Status: **live.** Discrepancies become Discord Forum posts, one per issue,
+updated in place rather than reposted. Enabled on the production deployment and
+confirmed posting from there.
 
 Lives entirely in `services/api`. The desktop client is not involved and holds
 no Discord credential — see [Why there is no button in the app](#why-there-is-no-button-in-the-app).

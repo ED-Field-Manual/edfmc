@@ -105,11 +105,22 @@ still means ingestion has silently stopped.
 
 ## Discord
 
-Left **disabled** on this deployment. The webhook used during development was
-exposed and must be rotated before it is configured here. To enable: rotate it
-in Discord, put the new URL in the API's `.env`, set
-`EDFM_DISCORD_ENABLED=true`, restart, and test through the SSH tunnel. See
-[DISCORD.md](DISCORD.md).
+**Enabled.** The webhook is in the API's gitignored `.env` (mode 600) and
+`EDFM_DISCORD_ENABLED=true`. Verified from the box after enabling: the test
+posted a Forum thread and returned `created`, and the webhook appears nowhere in
+the journal.
+
+Forum tag IDs are not configured, so reports post untagged. That is a supported
+state rather than a failure -- an unmapped category is dropped and the report
+still goes out. Set `EDFM_DISCORD_FORUM_TAGS` when you want them filed; see
+[DISCORD.md](DISCORD.md) for how to find the IDs.
+
+Administrative actions run through the SSH tunnel, since `/v1/admin/*` is
+loopback-only:
+
+```bash
+ssh -p 11750 -L 8787:127.0.0.1:8787 teejay@<host>
+```
 
 ## Notes for next time
 
