@@ -861,10 +861,41 @@ function Settings({ snap }: { snap: Snap }) {
           reach the network, or do anything the app itself would not.
         </p>
 
-        {snap.plugins.directory && (
+        {snap.plugins.directory ? (
           <p className="muted">
             Installed from: <code>{snap.plugins.directory}</code>
           </p>
+        ) : (
+          <p className="note">
+            No usable plugins folder on this system.
+            {snap.plugins.fallbackReason && ` ${snap.plugins.fallbackReason}`}
+          </p>
+        )}
+
+        {/* A commander told "Documents" who finds nothing there needs to know
+            where it actually went, and why. */}
+        {snap.plugins.fallbackReason && snap.plugins.directory && (
+          <p className="note">
+            {snap.plugins.fallbackReason} Plugins are being read from the path above instead.
+          </p>
+        )}
+
+        {/* The case this exists for: OneDrive holding a manifest online-only.
+            The plugin is installed, looks installed, and does nothing. */}
+        {snap.plugins.unreadable.length > 0 && (
+          <>
+            <p className="note">
+              {snap.plugins.unreadable.length} plugin folder
+              {snap.plugins.unreadable.length === 1 ? '' : 's'} could not be read:
+            </p>
+            <ul className="note">
+              {snap.plugins.unreadable.map((u) => (
+                <li key={u.directory}>
+                  <strong>{u.directory}</strong>: {u.message}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         <div className="row">

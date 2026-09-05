@@ -230,6 +230,24 @@ export interface PluginView {
   readonly directory: string | null;
   /** Context rules contributed by plugins, over the built-in count. */
   readonly contributedRules: number;
+  /** Which location was used: `documents`, `app-data`, or `none`. */
+  readonly source: string;
+  /**
+   * Why the preferred location was not used.
+   *
+   * Set on a machine with no Documents folder, or one where it is not
+   * writable. Surfaced rather than logged, because a commander who was told
+   * "Documents" and finds nothing there needs to know where it went instead.
+   */
+  readonly fallbackReason: string | null;
+  /**
+   * Folders whose plugin.json exists but could not be read.
+   *
+   * The case this exists for is OneDrive holding a manifest online-only: the
+   * plugin is installed, looks installed, and silently does nothing. "No
+   * plugins" and "could not read your plugin" must not look the same.
+   */
+  readonly unreadable: readonly { readonly directory: string; readonly message: string }[];
 }
 
 /**
@@ -437,6 +455,9 @@ export class Companion {
     rejected: [],
     directory: null,
     contributedRules: 0,
+    source: 'none',
+    fallbackReason: null,
+    unreadable: [],
   };
 
   /** Construction sites, keyed by depot MarketID. */
@@ -1243,12 +1264,15 @@ export class Companion {
    */
   private async loadPluginsFromDisk(): Promise<void> {
     try {
-      const [raws, directory] = await Promise.all([
-        invoke<Array<{ directory: string; json: string }>>('plugins_read'),
-        invoke<string | null>('plugins_dir'),
-      ]);
+      const scan = await invoke<{
+        directory: string | null;
+        source: string;
+        fallback_reason: string | null;
+        plugins: Array<{ directory: string; json: string }>;
+        errors: Array<{ directory: string; message: string }>;
+      }>('plugins_read');
 
-      const result = loadPlugins(raws);
+      const result = loadPlugins(scan.plugins);
 
       // Built-ins first: if a namespacing bug ever let an id collide, the
       // shipped rule wins. A plugin quietly replacing a built-in context would
@@ -1259,8 +1283,11 @@ export class Companion {
       this.pluginView = {
         loaded: result.loaded,
         rejected: result.rejected,
-        directory: directory ?? null,
+        directory: scan.directory,
         contributedRules: merged.rules.length - BUNDLED_RULES.rules.length,
+        source: scan.source,
+        fallbackReason: scan.fallback_reason,
+        unreadable: scan.errors,
       };
 
       for (const plugin of result.loaded) {
@@ -1276,6 +1303,18 @@ export class Companion {
         logger.warn('plugins', 'Refused', {
           directory: bad.directory,
           reason: bad.problems[0]?.message ?? 'unknown',
+        });
+      }
+      for (const unreadable of scan.errors) {
+        logger.warn('plugins', 'Unreadable', {
+          directory: unreadable.directory,
+          reason: unreadable.message,
+        });
+      }
+      if (scan.fallback_reason !== null) {
+        logger.info('plugins', 'Using a fallback folder', {
+          source: scan.source,
+          reason: scan.fallback_reason,
         });
       }
       this.notify();

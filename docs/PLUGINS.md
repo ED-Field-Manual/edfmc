@@ -16,6 +16,8 @@ that folder in the plugins directory.
    ```
 
    The folder is created the first time the app runs, so it is always there.
+   If your Documents folder cannot be used, the app falls back to its own data
+   directory, and Settings tells you where it went and why.
 2. Drop the plugin's folder inside, so you have:
 
    ```
@@ -158,6 +160,33 @@ Enforced per plugin, because a plugin folder is user-supplied input:
 
 Exceeding a limit is a warning and a truncation, not a rejection — the plugin
 still loads, and Settings says what was dropped.
+
+## When the folder is not where you expect
+
+Two situations move or hide plugins. Both are reported in Settings rather than
+left to guess at, because "no plugins installed" and "your plugin could not be
+read" must not look the same.
+
+**OneDrive.** A redirected Documents folder can hold `plugin.json` as an
+online-only placeholder. The file looks present, and reading it fails while you
+are offline or signed out — so the plugin is installed, appears installed, and
+does nothing. Settings names the folder and says:
+
+> OneDrive is storing this plugin online-only, so it could not be read.
+> Right-click the folder and choose "Always keep on this device", or reconnect
+> and try again.
+
+**Linux without a Documents folder.** `xdg-user-dirs` is not installed
+everywhere, and a stale entry in `user-dirs.dirs` can point at a path that no
+longer exists. The app checks the folder is genuinely usable by writing a probe
+file, because creating a directory can succeed on a read-only home or a removed
+drive and still be unusable. If it is not, plugins fall back to the application
+data directory and Settings says so.
+
+Opening the folder tries `xdg-open`, `gio`, `nautilus`, `dolphin`, `thunar` and
+`nemo` in turn — `xdg-open` ships with xdg-utils, which the same minimal
+installs that lack a Documents folder also tend to lack. If none is present,
+the error names the path so it can be copied.
 
 ## What is deliberately not pluggable
 
