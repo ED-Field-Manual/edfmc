@@ -15,6 +15,7 @@
     "@edfm/elite-journal": "*",
     "@edfm/logistics": "*",
     "@edfm/missions": "*",
+    "@edfm/plugins": "*",
     "@edfm/research": "*",
     "@edfm/verification": "*",
     "@tauri-apps/api": "^2",

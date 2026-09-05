@@ -65,6 +65,7 @@ packages/
   verification       Evidence model, spoiler gating, comparison engine
   research           Research framework and the settlement-materials project
   logistics          Market confidence, sourcing plans, construction projects
+  plugins            Plugin manifest schema and validation
 services/
   api                Backend API: reference data, submissions, notification
   eddn-worker        EDDN ingestion, Python
@@ -132,6 +133,7 @@ without a journal folder.
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | How the API and EDDN worker are hosted and updated |
 | [RESEARCH.md](docs/RESEARCH.md) | Research framework, session model, data-quality rules |
 | [LOGISTICS.md](docs/LOGISTICS.md) | Confidence engine, sourcing planner, construction projects |
+| [PLUGINS.md](docs/PLUGINS.md) | Installing and writing plugins, and why they are safe |
 | [EDDN.md](docs/EDDN.md) | EDDN ingestion, schemas, normalization decisions |
 | [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
 | [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |

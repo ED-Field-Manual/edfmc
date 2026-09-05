@@ -6,6 +6,7 @@
  */
 
 import Database from '@tauri-apps/plugin-sql';
+import { invoke } from '@tauri-apps/api/core';
 import {
   JournalEngine,
   learnCarrier,
@@ -56,6 +57,12 @@ import {
   type Submitter,
   type IdentityMode,
 } from '@edfm/verification';
+import {
+  loadPlugins,
+  mergeContextRules,
+  type LoadedPlugin,
+  type RejectedPlugin,
+} from '@edfm/plugins';
 import {
   buildPlan,
   combinedRequirements,
@@ -207,6 +214,22 @@ export interface CompanionSnapshot {
   readonly research: ResearchView;
   readonly contributions: ContributionView;
   readonly logistics: LogisticsView;
+  readonly plugins: PluginView;
+}
+
+/**
+ * Installed plugins.
+ *
+ * Rejections are part of the view, not a log line. A plugin that silently did
+ * not load is indistinguishable from one that loaded and did nothing, and the
+ * author is usually the person running the app.
+ */
+export interface PluginView {
+  readonly loaded: readonly LoadedPlugin[];
+  readonly rejected: readonly RejectedPlugin[];
+  readonly directory: string | null;
+  /** Context rules contributed by plugins, over the built-in count. */
+  readonly contributedRules: number;
 }
 
 /**
@@ -409,6 +432,13 @@ export class Companion {
   /** Guards against two flushes overlapping on a slow network. */
   private flushingQueue = false;
 
+  private pluginView: PluginView = {
+    loaded: [],
+    rejected: [],
+    directory: null,
+    contributedRules: 0,
+  };
+
   /** Construction sites, keyed by depot MarketID. */
   private sites = new Map<string, ConstructionSite>();
   private sitesDirty = false;
@@ -485,6 +515,7 @@ export class Companion {
         verification: this.verification.stats(),
         verificationEnabled: this.verificationEnabled,
         research: this.researchView(),
+        plugins: this.pluginView,
         logistics: {
           sites: [...this.sites.values()].sort(
             (a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt),
@@ -562,6 +593,9 @@ export class Companion {
 
     // Loaded before ingest starts, so a restart continues the record rather
     // than beginning a second one.
+    // Before ingest, so a contributed rule is live for the first event.
+    await this.loadPluginsFromDisk();
+
     await this.loadResearch();
     await this.loadSites();
     await this.refreshContributions();
@@ -1194,6 +1228,74 @@ export class Companion {
     } catch (err) {
       // A re-check is best effort. It must never take down ingest.
       logger.warn('verification', 'Re-check failed', { error: String(err) });
+    }
+  }
+
+  /* --------------------------------------------------------------- plugins */
+
+  /**
+   * Load plugins from disk and merge what they contribute.
+   *
+   * Runs once at startup, before ingest, so a contributed context rule is live
+   * for the first journal line rather than the second. Failure is contained:
+   * the loader never throws, a bad plugin is reported rather than fatal, and
+   * the application starts normally with no plugins at all.
+   */
+  private async loadPluginsFromDisk(): Promise<void> {
+    try {
+      const [raws, directory] = await Promise.all([
+        invoke<Array<{ directory: string; json: string }>>('plugins_read'),
+        invoke<string | null>('plugins_dir'),
+      ]);
+
+      const result = loadPlugins(raws);
+
+      // Built-ins first: if a namespacing bug ever let an id collide, the
+      // shipped rule wins. A plugin quietly replacing a built-in context would
+      // be invisible to the commander.
+      const merged = mergeContextRules(BUNDLED_RULES, result.loaded);
+      if (result.loaded.length > 0) this.resolver.setRuleSet(merged);
+
+      this.pluginView = {
+        loaded: result.loaded,
+        rejected: result.rejected,
+        directory: directory ?? null,
+        contributedRules: merged.rules.length - BUNDLED_RULES.rules.length,
+      };
+
+      for (const plugin of result.loaded) {
+        logger.info('plugins', 'Loaded', {
+          id: plugin.manifest.id,
+          version: plugin.manifest.version,
+          contextRules: plugin.contextRules.length,
+          researchProjects: plugin.researchProjects.length,
+          warnings: plugin.warnings.length,
+        });
+      }
+      for (const bad of result.rejected) {
+        logger.warn('plugins', 'Refused', {
+          directory: bad.directory,
+          reason: bad.problems[0]?.message ?? 'unknown',
+        });
+      }
+      this.notify();
+    } catch (err) {
+      // A plugin system that can stop the app from starting is worse than no
+      // plugin system.
+      logger.warn('plugins', 'Could not read plugins folder', { error: String(err) });
+    }
+  }
+
+  /** Reload without restarting, so an author can iterate. */
+  async reloadPlugins(): Promise<void> {
+    await this.loadPluginsFromDisk();
+  }
+
+  async openPluginsFolder(): Promise<void> {
+    try {
+      await invoke('plugins_open_folder');
+    } catch (err) {
+      logger.warn('plugins', 'Could not open plugins folder', { error: String(err) });
     }
   }
 

@@ -854,6 +854,93 @@ function Settings({ snap }: { snap: Snap }) {
       </section>
 
       <section className="card">
+        <h2>Plugins</h2>
+        <p className="muted">
+          Plugins add context rules and research projects. They are plain JSON &mdash; the
+          Companion never runs plugin code, so an installed plugin cannot read your journal,
+          reach the network, or do anything the app itself would not.
+        </p>
+
+        {snap.plugins.directory && (
+          <p className="muted">
+            Installed from: <code>{snap.plugins.directory}</code>
+          </p>
+        )}
+
+        <div className="row">
+          <button type="button" onClick={() => void companion.openPluginsFolder()}>
+            Open plugins folder
+          </button>
+          <button type="button" onClick={() => void companion.reloadPlugins()}>
+            Reload plugins
+          </button>
+        </div>
+
+        {snap.plugins.loaded.length === 0 && snap.plugins.rejected.length === 0 ? (
+          <p className="muted">
+            None installed. To add one, put its folder in the plugins directory and press
+            Reload &mdash; each plugin is a folder containing a <code>plugin.json</code>.
+          </p>
+        ) : (
+          <table className="rows">
+            <thead>
+              <tr><th>Plugin</th><th>Version</th><th>Contributes</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {snap.plugins.loaded.map((p) => (
+                <tr key={p.manifest.id}>
+                  <td>
+                    {p.manifest.name}
+                    <br />
+                    <span className="muted">{p.manifest.id}</span>
+                    {p.manifest.author && <span className="muted"> &middot; {p.manifest.author}</span>}
+                  </td>
+                  <td>{p.manifest.version}</td>
+                  <td className="muted">
+                    {[
+                      p.contextRules.length > 0 &&
+                        `${p.contextRules.length} context rule${p.contextRules.length === 1 ? '' : 's'}`,
+                      p.researchProjects.length > 0 &&
+                        `${p.researchProjects.length} research project${p.researchProjects.length === 1 ? '' : 's'}`,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </td>
+                  <td className="muted">
+                    {p.warnings.length === 0 ? 'Loaded' : `Loaded with ${p.warnings.length} warning(s)`}
+                    {p.warnings.map((w) => (
+                      <div key={w}>{w}</div>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+              {snap.plugins.rejected.map((p) => (
+                <tr key={p.directory}>
+                  <td>
+                    <span className="muted">{p.id ?? p.directory}</span>
+                    <br />
+                    <span className="muted">folder: {p.directory}</span>
+                  </td>
+                  <td>&mdash;</td>
+                  <td>&mdash;</td>
+                  <td className="note">
+                    {p.problems.map((problem) => (
+                      <div key={problem.message}>{problem.message}</div>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted">
+          EDFM Note: a plugin that fails to load is listed with the reason rather than ignored.
+          A plugin that quietly did nothing would be indistinguishable from one that was never
+          installed, and the author is usually the person running the app.
+        </p>
+      </section>
+
+      <section className="card">
         <h2>Privacy</h2>
         <p className="muted">
           Everything else is local. Your journals are read on this machine and never uploaded,

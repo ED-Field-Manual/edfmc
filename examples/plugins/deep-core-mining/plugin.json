@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.deep-core-mining",
+  "name": "Deep Core Mining Helper",
+  "version": "1.0.0",
+  "author": "CMDR Example",
+  "description": "Surfaces EDFM mining pages when you prospect an asteroid or dock somewhere with a Material Trader.",
+  "contributes": {
+    "contextRules": [
+      {
+        "id": "core-asteroid",
+        "title": "Deep core asteroid",
+        "subtitle": "You prospected an asteroid with a core",
+        "when": {
+          "kind": "all",
+          "of": [
+            { "kind": "event", "name": "ProspectedAsteroid" },
+            { "kind": "field", "path": "MotherlodeMaterial", "op": "exists" }
+          ]
+        },
+        "priority": 80,
+        "ttlSeconds": 240,
+        "resources": [
+          { "label": "Core Mining", "page": "Mining" },
+          { "label": "Seismic Charge Placement", "page": "Abrasion Blaster" }
+        ]
+      },
+      {
+        "id": "material-trader",
+        "title": "Material Trader here",
+        "when": { "kind": "service", "id": "materialtrader" },
+        "priority": 40,
+        "ttlSeconds": 900,
+        "resources": [{ "label": "Material Trading", "page": "Material Trader" }]
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@
 
 mod journal;
 mod overlay;
+mod plugins;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -367,6 +368,9 @@ pub fn run() {
             journal::journal_watch,
             journal::journal_unwatch,
             overlay::elite_window_info,
+            plugins::plugins_dir,
+            plugins::plugins_read,
+            plugins::plugins_open_folder,
             overlay::elite_display_mode,
             overlay::overlay_start,
             overlay::overlay_stop,
