@@ -214,3 +214,42 @@ describe('mergeContextRules', () => {
     expect(mergeContextRules(base, [])).toBe(base);
   });
 });
+
+describe('surviving a rule-set replacement', () => {
+  const bundled: ContextRuleSet = {
+    version: 3,
+    updatedAt: '2026-09-05T00:00:00Z',
+    source: 'bundled',
+    rules: [rule('engineer-workshop')] as ContextRuleSet['rules'],
+  };
+
+  it('keeps plugin rules when a server set replaces the bundled one', () => {
+    // The bug this exists for: setContextRules replaces the whole set, so a
+    // server update silently deleted every installed plugin's contributions.
+    // Plugins worked until the first update and then vanished, which is not
+    // something a commander could ever diagnose.
+    const loaded = loadPlugins([raw(manifest())]).loaded;
+
+    const fromServer: ContextRuleSet = {
+      version: 9,
+      updatedAt: '2026-09-06T00:00:00Z',
+      source: 'remote',
+      rules: [rule('new-server-rule')] as ContextRuleSet['rules'],
+    };
+
+    const merged = mergeContextRules(fromServer, loaded);
+    expect(merged.rules.map((r) => r.id)).toContain('com.example.test/my-rule');
+    expect(merged.rules.map((r) => r.id)).toContain('new-server-rule');
+    // The server's own metadata survives; only the rules are added to.
+    expect(merged.version).toBe(9);
+    expect(merged.source).toBe('remote');
+  });
+
+  it('does not accumulate duplicates across repeated replacements', () => {
+    const loaded = loadPlugins([raw(manifest())]).loaded;
+    let set = mergeContextRules(bundled, loaded);
+    set = mergeContextRules(set, loaded);
+    set = mergeContextRules(set, loaded);
+    expect(set.rules.filter((r) => r.id === 'com.example.test/my-rule')).toHaveLength(1);
+  });
+});

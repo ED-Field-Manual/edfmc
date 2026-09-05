@@ -917,10 +917,17 @@ export class Companion {
    * policy stay in application code where they can be logged and surfaced.
    */
   setContextRules(ruleSet: Parameters<ContextResolver['setRuleSet']>[0]): void {
-    this.resolver.setRuleSet(ruleSet);
+    // Plugin rules are merged back in, because this replaces the whole set.
+    // Without it a server rule update would silently delete every installed
+    // plugin's contributions -- they would work until the first update and
+    // then vanish, which is precisely the kind of failure a commander cannot
+    // diagnose.
+    const merged = mergeContextRules(ruleSet, this.pluginView.loaded);
+    this.resolver.setRuleSet(merged);
     logger.info('context', 'Rule set replaced', {
       version: this.resolver.version,
       source: this.resolver.source,
+      pluginRules: merged.rules.length - ruleSet.rules.length,
     });
     this.notify();
   }

@@ -928,14 +928,33 @@ function Settings({ snap }: { snap: Snap }) {
                   </td>
                   <td>{p.manifest.version}</td>
                   <td className="muted">
-                    {[
-                      p.contextRules.length > 0 &&
-                        `${p.contextRules.length} context rule${p.contextRules.length === 1 ? '' : 's'}`,
-                      p.researchProjects.length > 0 &&
-                        `${p.researchProjects.length} research project${p.researchProjects.length === 1 ? '' : 's'}`,
-                    ]
-                      .filter(Boolean)
-                      .join(', ')}
+                    {/* The titles, not just a count. A commander who installs a
+                        plugin has no other way to find out what it does: these
+                        rules only appear elsewhere in the app once something in
+                        the game actually matches them, which may be hours away
+                        or may need a trip to a particular station. */}
+                    {p.contextRules.length > 0 && (
+                      <div>
+                        {p.contextRules.length} context rule
+                        {p.contextRules.length === 1 ? '' : 's'}:
+                        <ul>
+                          {p.contextRules.map((r) => (
+                            <li key={r.id}>{r.title}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {p.researchProjects.length > 0 && (
+                      <div>
+                        {p.researchProjects.length} research project
+                        {p.researchProjects.length === 1 ? '' : 's'}:
+                        <ul>
+                          {p.researchProjects.map((r) => (
+                            <li key={r.id}>{r.title}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </td>
                   <td className="muted">
                     {p.warnings.length === 0 ? 'Loaded' : `Loaded with ${p.warnings.length} warning(s)`}
@@ -968,6 +987,12 @@ function Settings({ snap }: { snap: Snap }) {
           EDFM Note: a plugin that fails to load is listed with the reason rather than ignored.
           A plugin that quietly did nothing would be indistinguishable from one that was never
           installed, and the author is usually the person running the app.
+        </p>
+        <p className="muted">
+          Context rules appear on the Context screen and in the overlay only while they match
+          &mdash; a rule about core asteroids stays quiet until you prospect one. Listing them
+          here is how you can tell an installed plugin from a working one without going looking
+          for the situation that triggers it.
         </p>
       </section>
 
