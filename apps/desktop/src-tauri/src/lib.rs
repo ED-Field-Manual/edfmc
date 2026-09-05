@@ -292,6 +292,48 @@ fn migrations() -> Vec<Migration> {
                 ON observation_queue (queued_at) WHERE submitted_at IS NULL;
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 8,
+        description: "construction sites",
+        sql: r#"
+            -- Colonisation construction sites (S17).
+            --
+            -- Tracked automatically, which was checked before being claimed:
+            -- ColonisationConstructionDepot carries RequiredAmount and
+            -- ProvidedAmount per commodity at 100% presence across 5,703
+            -- measured events, so remaining is reported by the game rather
+            -- than inferred from deliveries.
+            --
+            -- Each depot event is a COMPLETE snapshot, so this row is replaced
+            -- wholesale rather than merged. A missed event cannot corrupt a
+            -- total; the next one simply supersedes it.
+            CREATE TABLE IF NOT EXISTS construction_sites (
+                -- The depot's MarketID. Stable identity for the site.
+                market_id     TEXT PRIMARY KEY,
+                -- 0..1 as the game reports it. NULL means it never said.
+                progress      REAL,
+                complete      INTEGER NOT NULL DEFAULT 0,
+                failed        INTEGER NOT NULL DEFAULT 0,
+                -- Per-commodity required/provided, verbatim plus the folded
+                -- market symbol. Kept as JSON because the set of commodities is
+                -- Frontier's to change, not ours to enumerate in columns.
+                resources     TEXT NOT NULL,
+
+                -- Commander-assigned. The game does not name depots, and with
+                -- several sites running a commander needs to tell them apart
+                -- and say which matters most.
+                name          TEXT,
+                priority      INTEGER NOT NULL DEFAULT 1,
+
+                updated_at    TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sites_active
+                ON construction_sites (complete, failed, updated_at DESC);
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

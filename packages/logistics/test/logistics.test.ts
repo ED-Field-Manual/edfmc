@@ -398,3 +398,37 @@ describe('safety margin arithmetic', () => {
     expect(assessConfidence({ needed: 101, reported: 500, ageSeconds: 1, safetyMargin: 0.1 }).needed).toBe(112);
   });
 });
+
+describe('partial fills with a safety margin', () => {
+  it('sources a large requirement across stops rather than refusing entirely', () => {
+    // Found against real data: four construction sites needing 138,791 tonnes
+    // of Steel matched 42 candidate stations and produced zero stops, because
+    // the margin was applied to a take that was already capped at stock --
+    // stock / (stock * 1.1) never reaches the coverage minimum.
+    const result = buildPlan(
+      [need('steel', 138791)],
+      [
+        station({ marketId: 'a', distanceLy: 5, offers: [{ commodity: 'steel', stock: 50000, buyPrice: 100, observedAt: at(3) }] }),
+        station({ marketId: 'b', distanceLy: 8, offers: [{ commodity: 'steel', stock: 50000, buyPrice: 100, observedAt: at(3) }] }),
+      ],
+      { nowMs: fresh, safetyMargin: 0.1 },
+    );
+    expect(result.totalStops).toBe(2);
+    expect(result.stops.reduce((n, s) => n + s.purchases[0]!.amount, 0)).toBe(100000);
+    expect(result.unfulfilled[0]!.amount).toBe(38791);
+  });
+
+  it('still applies the margin when the market can cover it', () => {
+    // Taking 100 from a market holding 105 leaves no headroom, and the
+    // commander asked for 10%.
+    const thin = buildPlan([need('a', 100)],
+      [station({ marketId: 's', offers: [{ commodity: 'a', stock: 105, buyPrice: 10, observedAt: at(1) }] })],
+      { nowMs: fresh, safetyMargin: 0.1 });
+    expect(thin.stops).toHaveLength(0);
+
+    const ample = buildPlan([need('a', 100)],
+      [station({ marketId: 's', offers: [{ commodity: 'a', stock: 500, buyPrice: 10, observedAt: at(1) }] })],
+      { nowMs: fresh, safetyMargin: 0.1 });
+    expect(ample.stops).toHaveLength(1);
+  });
+});

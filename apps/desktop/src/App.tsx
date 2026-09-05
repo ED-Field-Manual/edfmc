@@ -11,6 +11,7 @@ import {
 } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
+import { Logistics } from './Logistics';
 import { Research } from './Research';
 import { Contributions } from './Contributions';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
@@ -56,15 +57,14 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Missions',
   'Dashboard',
   'Overlay',
+  'Logistics',
   'Research',
   'Contributions',
   'Settings',
   'Diagnostics',
 ]);
 
-const PHASE: Partial<Record<Section, string>> = {
-  Logistics: 'Phase 8',
-};
+const PHASE: Partial<Record<Section, string>> = {};
 
 export default function App() {
   const [section, setSection] = useState<Section>('Dashboard');
@@ -116,6 +116,7 @@ export default function App() {
         {section === 'Context' && <ContextPanel snap={snap} />}
         {section === 'Missions' && <MissionsPanel snap={snap} />}
         {section === 'Overlay' && <OverlayPanel />}
+        {section === 'Logistics' && <Logistics snap={snap} />}
         {section === 'Research' && <Research snap={snap} />}
         {section === 'Contributions' && <Contributions snap={snap} />}
         {section === 'Settings' && <Settings snap={snap} />}

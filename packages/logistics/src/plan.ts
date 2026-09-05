@@ -263,8 +263,23 @@ export function buildPlan(
         // only changes the case where a market cannot cover everything, which
         // now rates as thin (coverage near 1.0) rather than unusable -- which
         // is the honest reading of "you would be taking all of it".
+        //
+        // The margin is deliberately dropped when the take *is* the entire
+        // stock. A margin is headroom above what you buy, and there is none
+        // when you are clearing the shelf: applying it there gives
+        // stock / (stock x 1.1) = 91% coverage, which fails the minimum and
+        // rates every partial fill unusable. That made large requirements
+        // unsourceable -- caught against real data, where four live
+        // construction sites needing 138,791 tonnes of Steel produced 42
+        // candidate stations and zero stops.
+        const clearingTheShelf = take >= offer.stock;
         const confidence = assessConfidence(
-          { needed: take, reported: offer.stock, ageSeconds: age, safetyMargin },
+          {
+            needed: take,
+            reported: offer.stock,
+            ageSeconds: age,
+            safetyMargin: clearingTheShelf ? 0 : safetyMargin,
+          },
           rules,
         );
 
@@ -305,7 +320,6 @@ export function buildPlan(
       /* ------------------------------------------------ scoring, exposed */
 
       const covered = purchases.length;
-      const totalUnits = purchases.reduce((n, p) => n + p.amount, 0);
       const systemNearness = nearness(station.distanceLy, 40);
       const arrivalNearness = nearness(station.arrivalDistanceLs, 2000);
       const avgConfidence =
