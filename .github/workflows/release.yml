@@ -1,0 +1,71 @@
+# Build installers and publish them to a GitHub Release.
+#
+# Triggered by pushing a version tag, so cutting a release is one command:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The point is that a player never sees any of this. They open the Releases
+# page and download one file — no Node, no Rust, no toolchain, no terminal.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Also runnable by hand, so the build can be proven before a tag is cut
+  # rather than discovering it is broken at the moment you want to ship.
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Windows only for now: the overlay uses Win32 window tracking, and the
+    # README does not claim Linux support it does not have.
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Keyed on the lockfile so a dependency change invalidates it, and scoped
+      # to the Tauri crate directory where the build actually happens.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The suite is fast and catches the things a release must not ship with.
+      # Suites needing PostgreSQL skip on their own without EDFM_TEST_DSN.
+      - name: Test
+        run: npm test --workspaces --if-present
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'EDFM Companion ${{ github.ref_name }}'
+          releaseBody: |
+            Download the `.msi` or `.exe` below and run it.
+
+            Windows will likely warn that the publisher is unrecognised, because
+            the installer is not code-signed. Choose **More info → Run anyway**.
+
+            Everything works offline. Contributing observations to EDFM is
+            optional and off until you turn it on in Settings.
+          releaseDraft: true
+          prerelease: false

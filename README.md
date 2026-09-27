@@ -2,57 +2,137 @@
 
 The official desktop companion for the [Elite Dangerous Field Manual](https://edfieldmanual.com/).
 
-EDFM is the reference. The Companion is the live gameplay layer: it knows what is
-happening in your game right now, surfaces the relevant EDFM material, helps you plan,
-and — passively — helps EDFM verify and improve its own information.
+It watches your journal as you play, works out what you are doing, and puts the
+relevant EDFM material in front of you — in a window or in an overlay on top of
+the game. It also tracks your missions, your colonisation sites, and where to
+buy what those sites need.
 
-This is **not** an EDMC plugin and does not require EDMarketConnector.
+**Not an EDMC plugin.** It does not require EDMarketConnector, and it never
+touches the game: no memory reading, no injection, no input automation.
 
-> **Status: Phases 0–9 complete.** The journal engine, overlay, context
-> assistant, mission planner, EDDN ingestion, verification backend, field
-> research and colonisation logistics all work end to end, against live data.
-> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Download
 
-## What works today
+**[→ Get the latest release](../../releases/latest)**
 
-- Locates the Elite Dangerous journal folder via the Windows Saved Games known
-  folder, with a manual override.
-- Tails the active journal safely: byte offsets, no partial lines, rotation
-  handling, truncation detection, and resume-without-duplicate-events across
-  restarts.
-- Parses and normalizes events while always retaining the raw payload and full
-  provenance.
-- Maintains commander/session state where "the game did not say" stays visibly
-  distinct from "the game said none".
-- Dashboard, Settings and Diagnostics screens.
-- Replays any journal file through the identical live pipeline.
-- A game overlay that does not inject anything into Elite Dangerous.
-- Deterministic context assistance and a mission planner with delivery
-  progress.
-- Ingests EDDN into PostgreSQL, and serves station reference data from it.
-- Verifies what your game reports against that reference, and submits
-  disagreements — **off by default**.
+Download the `.msi`, run it, and start Elite. That is the whole setup — the app
+finds your journal folder by itself.
 
-Everything except verification is local, and verification is opt-in. There is no
-analytics in any configuration.
+You need **Windows 10 or 11**. Nothing else: no Node, no Rust, no database, no
+account.
+
+Two things to expect on first run:
+
+- **Windows will warn that the publisher is unrecognised.** The installer is not
+  code-signed. Choose **More info → Run anyway**. (Signing costs money annually;
+  it is on the list.)
+- **Nothing is sent anywhere.** Contributing observations to EDFM is optional and
+  switched off until you turn it on in Settings.
+
+## What it does
+
+- **Knows where you are** — system, station, ship, missions — and keeps
+  "the game did not say" visibly different from "the game said none".
+- **Surfaces the right EDFM pages** for what is happening right now, in the app
+  or as an overlay over the game.
+- **Tracks missions** including delivery progress, so you can see what is left
+  rather than doing the arithmetic.
+- **Tracks colonisation sites** automatically and plans your buying: which
+  stations to visit, in what order, and why each one was chosen.
+- **Records field research** locally — what you find at settlements — with the
+  honesty to say when a sample is too small to mean anything.
+- **Takes plugins**, which are plain JSON and cannot run code. See
+  [docs/PLUGINS.md](docs/PLUGINS.md).
+- **Helps EDFM improve**, if you let it, by reporting where the game disagrees
+  with the wiki.
+
+## Your data
+
+Your journal contains your chat, friends, finances and travel history. It is
+read on your machine and **never uploaded**.
+
+With contribution switched on, the app sends one thing: observations about
+stations you dock at. Your commander name and Frontier ID are sent as one-way
+hashes, never as values, so the server can tell two reporters apart without
+knowing who either is. There is no telemetry and no analytics in any
+configuration, and with contribution off the app makes no network requests at
+all.
+
+[docs/PRIVACY.md](docs/PRIVACY.md) is the full account.
 
 ## Design commitments
 
 These are constraints, not aspirations:
 
-- **Verify aggressively. Reveal conservatively.** The verification engine may compare
-  anything against EDFM's data; the app shows only what this commander's own game has
-  reported. A commander who enjoys exploring is never spoiled because EDFM already
-  knows the answer. See [docs/SPOILERS.md](docs/SPOILERS.md).
-- **Never guess.** A value the journal did not provide is rendered `Unknown`. Field
-  presence was measured across a 197,164-line corpus; anything below 100% is typed
-  optional. See [docs/JOURNAL.md](docs/JOURNAL.md).
-- **Raw is never discarded.** Normalization is additive, so a mapping mistake can be
-  corrected later without having lost the observation.
+- **Verify aggressively. Reveal conservatively.** The verification engine may
+  compare anything against EDFM's data; the app shows only what your own game has
+  reported. Nobody gets their exploration spoiled because EDFM already knows the
+  answer. See [docs/SPOILERS.md](docs/SPOILERS.md).
+- **Never guess.** A value the journal did not provide is rendered `Unknown`.
+  Field presence was measured across a 197,164-line corpus; anything below 100%
+  is typed optional. See [docs/JOURNAL.md](docs/JOURNAL.md).
+- **Raw is never discarded.** Normalization is additive, so a mapping mistake can
+  be corrected later without having lost the observation.
 - **Read-only with respect to the game.** No memory access, no DLL injection, no
-  input automation, no botting (§31).
+  input automation, no botting.
 - **Secrets stay server-side.** The desktop client is untrusted and never holds
   Discord webhooks, database credentials or administrative keys.
+
+---
+
+# Development
+
+Everything below is for working on the Companion. If you just want to use it,
+the [download](#download) above is all you need.
+
+## Building from source
+
+Requires **Node.js 20+** and **Rust stable** with the MSVC toolchain.
+
+```bash
+npm install
+```
+
+```bash
+npm run tauri dev --workspace @edfm/desktop
+```
+
+To produce installers locally:
+
+```bash
+npm run tauri build --workspace @edfm/desktop
+```
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+when a version tag is pushed, so cutting one is `git tag v0.1.0 && git push origin v0.1.0`.
+
+## Tests
+
+```bash
+npm test --workspaces --if-present
+```
+
+Tests needing PostgreSQL skip unless `EDFM_TEST_DSN` is set, and refuse to run
+against a database not named for testing — they `TRUNCATE`, and pointing them at
+the development database while the EDDN worker was ingesting into it wiped a
+table mid-run.
+
+```bash
+createdb edfm_test
+```
+
+## Validating against a game update
+
+Elite changes. After any update, re-measure rather than assuming:
+
+```bash
+pwsh scripts/profile-journal.ps1 -Events Docked,MissionAccepted
+```
+
+Any field that drops below 100% presence must become optional in the parser. The
+corpus tests replay your real journals and fail if parsing regresses; they skip
+automatically on machines without a journal folder. This is not theoretical — it
+is how `ApproachSettlement` was found to fire for Guardian ruins, which had been
+quietly polluting the research corpus.
 
 ## Repository layout
 
@@ -73,52 +153,6 @@ docs/                Architecture and subsystem documentation
 scripts/             Journal profiling tooling
 ```
 
-## Requirements
-
-- Windows 10/11 (Windows-first; Linux support is designed for, not yet built)
-- Node.js 20+
-- Rust stable (MSVC toolchain) and MSVC build tools, for the desktop client
-
-## Getting started
-
-```bash
-npm install
-```
-
-Run the test suite:
-
-```bash
-npm test --workspaces --if-present
-```
-
-Tests needing PostgreSQL skip unless `EDFM_TEST_DSN` is set, and refuse to run
-against a database not named for testing — they `TRUNCATE`, and pointing them at
-the development database while the EDDN worker was ingesting into it wiped a
-table mid-run.
-
-```bash
-createdb edfm_test
-```
-
-Run the desktop client in development:
-
-```bash
-npm run tauri dev --workspace @edfm/desktop
-```
-
-## Validating against a game update
-
-Elite changes. After any update, re-measure rather than assuming:
-
-```bash
-pwsh scripts/profile-journal.ps1 -Events Docked,MissionAccepted
-```
-
-Any field that drops below 100% presence must become optional in the parser. The
-corpus tests in `packages/elite-journal/test/corpus.test.ts` replay your real
-journals and will fail if parsing regresses; they skip automatically on machines
-without a journal folder.
-
 ## Documentation
 
 | Document | Contents |
@@ -138,8 +172,6 @@ without a journal folder.
 | [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
 | [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |
 | [MISSIONS.md](docs/MISSIONS.md) | Mission tracking and delivery progress |
-
-Research and logistics documents arrive with their respective phases.
 
 ## Licence
 
