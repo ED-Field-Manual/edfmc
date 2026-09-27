@@ -32,6 +32,26 @@ export const SETTLEMENT_MATERIALS: ResearchProject = {
   context: [
     {
       on: 'ApproachSettlement',
+      /**
+       * Only approaches that are actually settlements.
+       *
+       * `ApproachSettlement` also fires for Guardian sites -- `$Ancient:#index=3;`
+       * ("Ancient Ruins"), `$Ancient_Small_005:#index=1;` ("Guardian Structure").
+       * Measured on 2026-09-27: 5 of 462 events, all on game 4.4.1.1, carrying
+       * only a name, body and coordinates. Every one of them lacks MarketID,
+       * StationEconomy, StationFaction, StationGovernment and StationServices.
+       *
+       * They are a different kind of place sharing an event name, and without
+       * this guard a walk around Guardian ruins opened a settlement session and
+       * filed it under an economy of `null`. That is not a thin observation; it
+       * is a different subject entirely, and mixing it into the corpus would
+       * quietly bias every rate computed from it.
+       *
+       * MarketID is the test because it is the same identity rule station
+       * verification already applies -- no MarketID, no observation -- and it is
+       * what distinguishes a place with a market from a ruin.
+       */
+      when: { kind: 'field', path: 'MarketID', op: 'exists' },
       capture: {
         settlementName: { path: 'Name' },
         marketId: { path: 'MarketID' },

@@ -335,3 +335,44 @@ describe('the project definition itself', () => {
     expect(events).toEqual(['CollectItems']);
   });
 });
+
+describe('Guardian sites are not settlements', () => {
+  /**
+   * `ApproachSettlement` fires for Guardian ruins too. Measured on 2026-09-27:
+   * 5 of 462 events, carrying only a name, body and coordinates.
+   */
+  const guardian = (at: string) =>
+    ev(
+      'ApproachSettlement',
+      {
+        Name: '$Ancient_Small_005:#index=1;',
+        Name_Localised: 'Guardian Structure',
+        SystemAddress: 1184840454858,
+        BodyID: 18,
+        BodyName: 'Synuefe NL-N c23-4 B 3',
+        Latitude: 51.209953,
+        Longitude: 89.097206,
+      },
+      at,
+    );
+
+  it('does not open a session for Guardian ruins', () => {
+    // Without the MarketID guard this recorded a settlement visit with a null
+    // economy, which is not a thin observation but a different subject.
+    const t = track();
+    t.observe(guardian('2026-09-10T16:56:00Z'), state);
+    t.observe(disembark('2026-09-10T16:58:00Z', { BodyID: 18 }), state);
+    expect(t.openSession).toBeNull();
+  });
+
+  it('does not let a Guardian approach mask a real settlement', () => {
+    // Both are on the same body. The real approach must still win, rather than
+    // the Guardian one displacing it as the most recent context.
+    const t = track();
+    t.observe(approach('2026-09-10T16:50:00Z', { BodyID: 18 }), state);
+    t.observe(guardian('2026-09-10T16:56:00Z'), state);
+    t.observe(disembark('2026-09-10T16:58:00Z', { BodyID: 18 }), state);
+    expect(t.openSession).not.toBeNull();
+    expect(t.openSession!.context.settlementName).toBe('Webb Analysis Lab');
+  });
+});

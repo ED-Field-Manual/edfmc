@@ -47,6 +47,34 @@ and `BackpackChange` is not read at all.
 at the session boundaries — cannot work: `Backpack` fires near only 45 of 178
 disembarks and **0 of 175 embarks**. Incremental events are the only option.
 
+## Not every "settlement" is a settlement
+
+`ApproachSettlement` also fires for Guardian sites. Measured on 2026-09-27
+across 462 events:
+
+```
+$Ancient:#index=3;            → "Ancient Ruins (3)"
+$Ancient_Small_005:#index=1;  → "Guardian Structure"
+```
+
+Five of them, all on game 4.4.1.1, carrying only a name, body and coordinates.
+Every one lacks `MarketID`, `StationEconomy`, `StationFaction`,
+`StationGovernment` and `StationServices`.
+
+They are a different kind of place sharing an event name. Without a guard, a
+walk around Guardian ruins opened a settlement session and filed it under an
+economy of `null` — not a thin observation but a *different subject*, and
+mixing it into the corpus would quietly bias every rate computed from it. Three
+such sessions had already been recorded before this was caught.
+
+The project therefore requires `MarketID` to be present before capturing an
+approach. That is the same identity rule station verification already applies —
+no MarketID, no observation — which is why verification was never affected.
+
+It was the corpus test that caught this, by asserting that economy is present
+on every session. A unit test could not have: the fixtures were all real
+settlements, because those were the only kind I knew existed when I wrote them.
+
 ## Fields the game does not expose
 
 §12 asked for settlement security, powered/unpowered state, and
