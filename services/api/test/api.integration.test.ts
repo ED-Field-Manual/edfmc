@@ -5,7 +5,7 @@
  * independence scoring and notify-once are enforced by primary keys and by SQL
  * running across transactions, not by application logic.
  *
- *   set EDFM_TEST_DSN=postgresql://postgres:edfmdev@localhost/edfm_test
+ *   set EDFM_TEST_DSN=postgresql://postgres:<password>@localhost/edfm_test
  */
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';

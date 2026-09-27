@@ -140,3 +140,14 @@ without a journal folder.
 | [MISSIONS.md](docs/MISSIONS.md) | Mission tracking and delivery progress |
 
 Research and logistics documents arrive with their respective phases.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+The overlay was written from scratch against the Win32 API rather than derived
+from EDMCOverlay, specifically so this project was free to choose a permissive
+licence.
+
+Elite Dangerous is a trademark of Frontier Developments plc. This project is
+unofficial and not affiliated with or endorsed by Frontier Developments.

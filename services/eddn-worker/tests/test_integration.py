@@ -8,7 +8,7 @@ database proves it works.
 Skipped automatically when no database is configured, so CI and other machines
 stay green:
 
-    set EDFM_TEST_DSN=postgresql://postgres:edfmdev@localhost/edfm_test
+    set EDFM_TEST_DSN=postgresql://postgres:<password>@localhost/edfm_test
     python -m pytest tests/test_integration.py
 """
 

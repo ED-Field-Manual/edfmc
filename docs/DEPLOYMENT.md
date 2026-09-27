@@ -48,7 +48,7 @@ The tree is deployed with `git archive`, which ships exactly the committed files
 in the archive:
 
 ```bash
-git archive --format=tar HEAD | ssh -p 11750 teejay@<host> 'tar x -C /var/www/edfm-api'
+git archive --format=tar HEAD | ssh -p <port> <user>@<host> 'tar x -C /var/www/edfm-api'
 ```
 
 Then, on the server, as needed:
@@ -78,7 +78,7 @@ unable to boot.
 Reach them through an SSH tunnel:
 
 ```bash
-ssh -p 11750 -L 8787:127.0.0.1:8787 teejay@<host>
+ssh -p <port> -L 8787:127.0.0.1:8787 <user>@<host>
 ```
 
 An earlier version also allowed the LAN range. That was removed: LAN traffic
@@ -119,7 +119,7 @@ Administrative actions run through the SSH tunnel, since `/v1/admin/*` is
 loopback-only:
 
 ```bash
-ssh -p 11750 -L 8787:127.0.0.1:8787 teejay@<host>
+ssh -p <port> -L 8787:127.0.0.1:8787 <user>@<host>
 ```
 
 ## Notes for next time
