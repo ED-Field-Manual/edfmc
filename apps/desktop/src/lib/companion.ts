@@ -753,6 +753,9 @@ export class Companion {
     if (rememberedTraders === 0) {
       void this.backfillTraderIdentities(resolution.directory);
     }
+    // Always, not just on first run: the commander may have scanned in a session
+    // the app was not watching, and the count is derived rather than stored.
+    void this.backfillExobiologyHoldings(resolution.directory);
   }
 
   stop(): void {
@@ -1312,6 +1315,62 @@ export class Companion {
       }
     } catch (err) {
       logger.warn('journal', 'Material trader backfill failed', { error: String(err) });
+    }
+  }
+
+  /* ------------------------------------------------ exobiology holdings */
+
+  /**
+   * Recover the confirmed-unsold exobiology count from recent journals.
+   *
+   * Without this the count starts at zero on every launch, so a commander who
+   * scanned yesterday would be told nothing at Vista Genomics today -- which is the
+   * same unhelpfulness as the ungated rule, in the other direction.
+   *
+   * Cheaply bounded: the count only depends on events *since* the most recent sale
+   * or death, so this walks backwards and stops at the first one it finds. If no
+   * reset appears within `maxFiles`, the result is an undercount, which is the
+   * correct direction for a figure documented as a lower bound.
+   *
+   * Runs after live ingest has started, so it must not clobber what live events
+   * have already established -- it takes the larger of the two.
+   */
+  private async backfillExobiologyHoldings(directory: string, maxFiles = 25): Promise<void> {
+    try {
+      const files = (await listJournalFiles(directory, tauriFs)).filter((f) => f.sizeBytes > 0);
+      const recent = files.slice(-maxFiles);
+
+      let analysed = 0;
+      // Newest file first, and within a file walk events in reverse, so the first
+      // reset encountered is genuinely the most recent one.
+      for (let i = recent.length - 1; i >= 0; i -= 1) {
+        const result = await replayFile(recent[i]!.fullPath, tauriFs);
+        let hitReset = false;
+
+        for (let j = result.events.length - 1; j >= 0; j -= 1) {
+          const event = result.events[j]!;
+          if (event.kind === 'organic-sold' || event.kind === 'died') {
+            hitReset = true;
+            break;
+          }
+          if (event.kind !== 'organic-scan') continue;
+          const d = event.data as { scanType: unknown };
+          if (d.scanType === 'Analyse') analysed += 1;
+        }
+
+        if (hitReset) break;
+      }
+
+      if (analysed > this.state.exobiologyToSell) {
+        this.state.exobiologyToSell = analysed;
+        logger.info('journal', 'Recovered unsold exobiology count from history', {
+          confirmedUnsold: analysed,
+        });
+        this.notify();
+        if (this.overlayEnabled) this.pushOverlayState();
+      }
+    } catch (err) {
+      logger.warn('journal', 'Exobiology holdings backfill failed', { error: String(err) });
     }
   }
 

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 
 import { listJournalFiles, selectActiveJournal, resolveJournalDirectory } from '../src/directory.js';
 import { replayFile } from '../src/engine.js';
+import { applyEvent, initialState } from '../src/state.js';
 import { isKnownEvent } from '../src/normalizer.js';
 
 const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? '';
@@ -185,5 +186,65 @@ suite('real journal corpus', () => {
     }
 
     expect(traderStations).toBeGreaterThanOrEqual(0);
+  });
+
+  /* ---------------------------------------------------- exobiology holdings */
+
+  it('keeps the confirmed-unsold exobiology count coherent across all history', async () => {
+    // Replays the whole corpus through the real reducer. The count is documented as
+    // a lower bound, so the properties that must hold are that it never goes
+    // negative and never exceeds the number of completed scans that could produce
+    // it -- either would mean the gating is arithmetically unsound.
+    const files = await listJournalFiles(DIR);
+    const all = files.filter((f) => f.sizeBytes > 0);
+
+    const state = initialState();
+    let analysed = 0;
+    let sold = 0;
+    let peak = 0;
+
+    for (const f of all) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        if (e.kind === 'organic-scan') {
+          const d = e.data as { scanType: unknown };
+          if (d.scanType === 'Analyse') analysed += 1;
+        } else if (e.kind === 'organic-sold') {
+          const d = e.data as { sold: unknown };
+          if (typeof d.sold === 'number') sold += d.sold;
+        }
+        applyEvent(state, e);
+        expect(state.exobiologyToSell).toBeGreaterThanOrEqual(0);
+        peak = Math.max(peak, state.exobiologyToSell);
+      }
+    }
+
+    // A commander who has never completed a scan has nothing to assert about.
+    if (analysed === 0) return;
+
+    // The count can only ever have come from completed scans.
+    expect(peak).toBeLessThanOrEqual(analysed);
+    expect(state.exobiologyToSell).toBeLessThanOrEqual(Math.max(0, analysed - sold));
+  });
+
+  it('finds no event that states exobiology holdings outright', async () => {
+    // The premise of deriving the count. Backpack is suit inventory and Materials is
+    // engineering stock; if either ever grows an organic section, the derivation
+    // should be replaced by reading it directly.
+    const files = await listJournalFiles(DIR);
+    const recent = files.filter((f) => f.sizeBytes > 0).slice(-40);
+
+    for (const f of recent) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        const name = e.source.event;
+        if (name !== 'Backpack' && name !== 'Materials') continue;
+        const raw = e.source.raw as Record<string, unknown>;
+        const keys = Object.keys(raw).filter((k) => k !== 'event' && k !== 'timestamp');
+        for (const k of keys) {
+          expect(/organic|bio|exobio/i.test(k), `${name} now reports ${k}`).toBe(false);
+        }
+      }
+    }
   });
 });

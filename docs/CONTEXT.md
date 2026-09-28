@@ -95,7 +95,7 @@ Measured across the corpus (242 distinct stations docked at):
 | `engineer` | **227 / 242 (93.8%)**, including all 17 Fleet Carriers | Rejected — says nothing |
 | `outfitting` | 167 / 266 (62.8%) | Rejected — fires at two-thirds of stations |
 | `shipyard` | 148 / 266 (55.6%) | Not used |
-| `vistagenomics` | 137 / 266 (51.5%) | Used — carriers can install it, and do |
+| `vistagenomics` | 137 / 266 (51.5%) | Used, **but gated** — see below |
 | `tuning` | 103 / 266 (38.7%), incl. Lave and Hutton Orbital | Rejected — meaning unverified |
 | `pioneersupplies` | 101 / 266 (38.0%) | Used |
 | `carriermanagement` | 44 / 266 (16.5%) | Used |
@@ -134,6 +134,30 @@ measured claims, so a game update that changes either fails the suite.
 distinguishes a Guardian broker from a Human one — "broker" appears only as the bare
 token and in unrelated `BrokerPercentage` fields. That variant cannot be answered from
 the commander's own journal at all, and would need reference data.
+
+### Presence of a service is not a reason to mention it
+
+`vistagenomics` is at 155 of 295 stations, carriers included, so the rule fired at
+over half of all docks and told commanders to sell exobiology data they were not
+carrying. Prevalence made it noise.
+
+Gating it needs a holdings figure **the journal never states** — see `docs/JOURNAL.md`
+— so `exobiologyToSell` accumulates completed `Analyse` scans and subtracts what sales
+report. Three properties make that safe to act on:
+
+- **It is a lower bound, not a total.** Zero means "nothing confirmed", not "you are
+  carrying nothing". The rule's silence is the absence of a claim.
+- **Only `Analyse` counts.** Log and Sample are progress toward one specimen — 183 of
+  243 scans — so counting them would inflate a holding roughly fourfold.
+- **A death resets it, and that is a choice about which error to make, not a claim
+  about the mechanic.** Whether death destroys unsold data could not be established
+  from 18 deaths in the corpus. Resetting risks withholding a reminder; not resetting
+  risks sending someone across the bubble to sell data they no longer have.
+
+The count is also recovered from recent journals at startup, or it would be zero every
+launch and the gate would simply replace one unhelpful behaviour with another. That
+walk is bounded: only events since the most recent sale or death matter, so it stops
+at the first one it finds, and an undercount is the correct direction for a lower bound.
 
 **Prevalence is the bar a service rule has to clear.** A token present at most
 stations cannot be telling the commander anything specific, however suggestive its

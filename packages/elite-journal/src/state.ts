@@ -104,6 +104,32 @@ export interface CommanderState {
   /** MarketID -> TraderType, accumulated from MaterialTrade. Stable per station. */
   knownTraders: Record<number, string>;
 
+  /**
+   * Completed exobiology scans that are **confirmed** still unsold: a LOWER BOUND
+   * on what the commander is carrying, never a claim about the true total.
+   *
+   * The journal never states exobiology holdings. `Backpack` is suit inventory
+   * (Items / Components / Consumables / Data) and `Materials` is engineering stock
+   * (Raw / Manufactured / Encoded); neither includes organic data. So the only
+   * available answer is accumulated from events.
+   *
+   * `Analyse` is the scan type that completes a specimen (60 of 243 scans; Log and
+   * Sample are progress toward it), and `SellOrganicData.BioData.length` is the
+   * only quantity the journal reports for a sale.
+   *
+   * A death resets it to zero, and that is deliberately the conservative choice
+   * rather than a claim about the mechanic. Whether death destroys unsold data
+   * could not be established: across 18 deaths in the corpus, no window between
+   * two deaths ever sold more than it scanned, which is consistent with both
+   * possibilities. Resetting means the app may stay quiet about data the commander
+   * still holds -- withholding a reminder. Not resetting would mean telling them to
+   * go and sell data they may no longer have, which is the error that actually
+   * misleads.
+   *
+   * Zero therefore means "nothing confirmed", not "you are carrying nothing".
+   */
+  exobiologyToSell: number;
+
   travel: TravelState;
 
   /**
@@ -164,6 +190,7 @@ export function initialState(): CommanderState {
     knownCarriers: {},
     traderType: UNKNOWN,
     knownTraders: {},
+    exobiologyToSell: 0,
     docking: 'unknown',
     travel: 'unknown',
     jumpTarget: UNKNOWN,
@@ -353,6 +380,28 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       if (isKnown(d.marketId) && isKnown(d.traderType)) {
         learnTrader(state, d.marketId, d.traderType);
       }
+      break;
+    }
+
+    case 'organic-scan': {
+      const d = event.data as { scanType: Known<string> };
+      // Only a completed Analyse yields sellable data. Log and Sample are steps
+      // toward one specimen, so counting them would inflate the total.
+      if (isKnown(d.scanType) && d.scanType === 'Analyse') state.exobiologyToSell += 1;
+      break;
+    }
+
+    case 'organic-sold': {
+      const d = event.data as { sold: Known<number> };
+      // Floored, not reset. Selling fewer than we counted leaves the rest held;
+      // selling more than we counted means older data we never saw was included,
+      // and zero is the correct lower bound in that case.
+      if (isKnown(d.sold)) state.exobiologyToSell = Math.max(0, state.exobiologyToSell - d.sold);
+      break;
+    }
+
+    case 'died': {
+      state.exobiologyToSell = 0;
       break;
     }
 

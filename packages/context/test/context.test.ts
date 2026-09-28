@@ -72,6 +72,19 @@ const DOCKED_TRADER_STATION =
 const MATERIAL_TRADE_ENCODED =
   '{ "timestamp":"2026-06-20T22:53:15Z", "event":"MaterialTrade", "MarketID":3223343616, "TraderType":"encoded", "Paid":{ "Material":"adaptiveencryptors", "Category":"Encoded", "Quantity":2 }, "Received":{ "Material":"disruptedwakeechoes", "Category":"Encoded", "Quantity":27 } }';
 
+/** Verbatim ScanOrganic. Only ScanType "Analyse" completes a specimen. */
+const SCAN_ANALYSE =
+  '{ "timestamp":"2026-09-18T03:00:00Z", "event":"ScanOrganic", "ScanType":"Analyse", "Genus":"$Codex_Ent_Bacterial_Genus_Name;", "Genus_Localised":"Bacterium", "Species":"$Codex_Ent_Bacterial_05_Name;", "Species_Localised":"Bacterium Informem", "SystemAddress":1213084977515, "Body":12 }';
+
+const SCAN_SAMPLE =
+  '{ "timestamp":"2026-09-18T02:00:00Z", "event":"ScanOrganic", "ScanType":"Sample", "Genus":"$Codex_Ent_Bacterial_Genus_Name;", "Genus_Localised":"Bacterium", "Species":"$Codex_Ent_Bacterial_05_Name;", "Species_Localised":"Bacterium Informem", "SystemAddress":1213084977515, "Body":12 }';
+
+/** Verbatim SellOrganicData. BioData length is the only quantity reported. */
+const SELL_ORGANIC_ONE =
+  '{ "timestamp":"2026-09-18T04:06:39Z", "event":"SellOrganicData", "MarketID":3703420416, "BioData":[ { "Genus":"$Codex_Ent_Bacterial_Genus_Name;", "Species":"$Codex_Ent_Bacterial_05_Name;", "Value":1000000, "Bonus":0 } ] }';
+
+const DIED = '{ "timestamp":"2026-09-18T05:00:00Z", "event":"Died" }';
+
 function stateWith(line?: string): CommanderState {
   const s = initialState();
   if (line) applyEvent(s, ev(line));
@@ -438,7 +451,9 @@ describe('bundled rule set', () => {
     for (const rule of BUNDLED_RULES.rules) {
       for (const resource of rule.resources) {
         if (!resource.page) continue;
-        const [title, fragment] = resource.page.split('#');
+        const hash = resource.page.indexOf('#');
+        const title = hash === -1 ? resource.page : resource.page.slice(0, hash);
+        const fragment = hash === -1 ? undefined : resource.page.slice(hash + 1);
         expect(VERIFIED_PAGES.has(title), `${rule.id} -> "${title}"`).toBe(true);
         if (fragment !== undefined) {
           expect(
@@ -555,8 +570,93 @@ describe('Material Trader kind', () => {
     const r = resolver(() => 1000);
     r.observe(ev(MUSIC), state);
     const active = r.current().find((a) => a.rule.id === 'station-material-trader-encoded');
-    expect(resourceUrl(active!.rule.resources[0])).toBe(
+    const resource = active?.rule.resources[0];
+    expect(resource).toBeDefined();
+    expect(resourceUrl(resource!)).toBe(
       'https://edfieldmanual.com/wiki/Engineering_Materials#Material_Traders',
     );
+  });
+});
+
+describe('Vista Genomics gating', () => {
+  function resolver(now: () => number) {
+    return new ContextResolver(BUNDLED_RULES, { now, maxActive: 5 });
+  }
+
+  function activeAt(state: CommanderState): string[] {
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), state);
+    return r.current().map((a) => a.rule.id);
+  }
+
+  it('stays quiet at Vista Genomics with nothing confirmed to sell', () => {
+    // The original complaint. `vistagenomics` is at 155 of 295 stations, including
+    // carriers, so on its own it fired constantly and told commanders to sell data
+    // they did not have.
+    const s = stateWith(DOCKED_FLEET_CARRIER); // this carrier has vistagenomics
+    expect(s.exobiologyToSell).toBe(0);
+    expect(activeAt(s)).not.toContain('station-vista-genomics');
+  });
+
+  it('offers it once a specimen has actually been completed', () => {
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SCAN_ANALYSE));
+    expect(s.exobiologyToSell).toBe(1);
+    expect(activeAt(s)).toContain('station-vista-genomics');
+  });
+
+  it('does not count an incomplete sample as sellable data', () => {
+    // Log and Sample are progress toward one specimen -- 183 of 243 scans. Counting
+    // them would claim data the commander cannot sell.
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SCAN_SAMPLE));
+    expect(s.exobiologyToSell).toBe(0);
+    expect(activeAt(s)).not.toContain('station-vista-genomics');
+  });
+
+  it('stops offering it after the data has been sold', () => {
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SCAN_ANALYSE));
+    expect(activeAt(s)).toContain('station-vista-genomics');
+
+    applyEvent(s, ev(SELL_ORGANIC_ONE));
+    expect(s.exobiologyToSell).toBe(0);
+    expect(activeAt(s)).not.toContain('station-vista-genomics');
+  });
+
+  it('keeps offering it when only part of the holding was sold', () => {
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SCAN_ANALYSE));
+    applyEvent(s, ev(SCAN_ANALYSE));
+    applyEvent(s, ev(SELL_ORGANIC_ONE)); // sells 1 of 2
+    expect(s.exobiologyToSell).toBe(1);
+    expect(activeAt(s)).toContain('station-vista-genomics');
+  });
+
+  it('never goes negative when a sale includes data it never saw', () => {
+    // Backfill is bounded, so a sale can legitimately exceed the running count.
+    // Zero is the correct lower bound; a negative would make `gt 0` nonsense.
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SELL_ORGANIC_ONE));
+    expect(s.exobiologyToSell).toBe(0);
+  });
+
+  it('stops claiming held data after a death', () => {
+    // Deliberately conservative, not a claim about the mechanic: whether death
+    // destroys unsold data could not be established from 18 deaths in the corpus.
+    // Withholding a reminder is the better error than sending someone to sell data
+    // they may no longer have.
+    const s = stateWith(DOCKED_FLEET_CARRIER);
+    applyEvent(s, ev(SCAN_ANALYSE));
+    applyEvent(s, ev(DIED));
+    expect(s.exobiologyToSell).toBe(0);
+    expect(activeAt(s)).not.toContain('station-vista-genomics');
+  });
+
+  it('still recognises the act of scanning, separately from having data', () => {
+    // The exobiology-scan rule is event-scoped and must be unaffected by gating.
+    const r = resolver(() => 1000);
+    r.observe(ev(SCAN_ANALYSE), initialState());
+    expect(r.current().map((a) => a.rule.id)).toContain('exobiology-scan');
   });
 });

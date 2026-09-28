@@ -427,6 +427,52 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
     }),
   },
   Liftoff: { kind: 'liftoff', fn: (r) => ({ body: str(r, 'Body') }) },
+
+  /**
+   * Exobiology sampling.
+   *
+   * ScanType is one of Log / Sample / Analyse (measured 63 / 120 / 60 across 243
+   * events, all fields 100% present). Only `Analyse` completes a specimen and
+   * produces data that can be sold -- the first two are progress toward it.
+   */
+  ScanOrganic: {
+    kind: 'organic-scan',
+    fn: (r) => ({
+      scanType: str(r, 'ScanType'),
+      genus: str(r, 'Genus_Localised'),
+      species: str(r, 'Species_Localised'),
+      variant: str(r, 'Variant_Localised'),
+      systemAddress: num(r, 'SystemAddress'),
+      bodyId: num(r, 'Body'),
+    }),
+  },
+
+  /**
+   * Selling exobiology data at Vista Genomics.
+   *
+   * `BioData` is an array of what was sold, one entry per species -- 100% present
+   * across 5 sales, of lengths 1, 1, 7, 8 and 28. Its length is the only statement
+   * the journal makes about quantity.
+   */
+  SellOrganicData: {
+    kind: 'organic-sold',
+    fn: (r) => {
+      const bio = r['BioData'];
+      return {
+        marketId: num(r, 'MarketID'),
+        sold: Array.isArray(bio) ? bio.length : (UNKNOWN as Known<number>),
+      };
+    },
+  },
+
+  /**
+   * Commander death.
+   *
+   * Normalized only so held exobiology data can be treated as no longer
+   * confirmed. Whether death actually destroys unsold data could not be
+   * established from the corpus -- see `exobiologyToSell`.
+   */
+  Died: { kind: 'died', fn: () => ({}) },
 };
 
 function onFootTransition(r: Readonly<Record<string, unknown>>) {

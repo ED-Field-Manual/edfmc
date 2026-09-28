@@ -84,11 +84,31 @@ export const BUNDLED_RULES: ContextRuleSet = {
       ttlSeconds: 900,
       resources: [{ label: 'Exobiology', page: 'Exobiology' }],
     },
+    /*
+     * Vista Genomics, but only when there is something to sell.
+     *
+     * The service is present at 155 of 295 stations -- over half, including fleet
+     * carriers -- so on its own it fires constantly and told commanders to sell data
+     * they did not have.
+     *
+     * Gating it needs a holdings figure the journal never states: neither `Backpack`
+     * (suit inventory) nor `Materials` (engineering stock) includes organic data. So
+     * `exobiologyToSell` accumulates completed `Analyse` scans and subtracts what
+     * sales report, and is treated as a lower bound rather than a total. See its
+     * doc comment for why a death resets it, and why that is the conservative
+     * choice rather than a claim about the mechanic.
+     */
     {
       id: 'station-vista-genomics',
       title: 'Vista Genomics available',
-      subtitle: 'Sell exobiology data here',
-      when: { kind: 'service', id: 'vistagenomics' },
+      subtitle: 'You have exobiology data to sell',
+      when: {
+        kind: 'all',
+        of: [
+          { kind: 'service', id: 'vistagenomics' },
+          { kind: 'state', path: 'exobiologyToSell', op: 'gt', value: 0 },
+        ],
+      },
       priority: 55,
       ttlSeconds: 1800,
       resources: [{ label: 'Exobiology', page: 'Exobiology' }],

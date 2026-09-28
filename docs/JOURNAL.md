@@ -165,6 +165,25 @@ from Market/EDDN naming — normalization required before Logistics.
 - **`StationEconomies` proportions do not sum to 1.0.** Observed
   `0.90 + 0.10 + 0.05 + 0.05 = 1.10`. Do not renormalise.
 - **`ScanOrganic.Body` is an integer BodyID**, not a body name.
+- **No event states exobiology holdings.** `Backpack` carries Items / Components /
+  Consumables / Data (Odyssey suit inventory) and `Materials` carries Raw /
+  Manufactured / Encoded (engineering stock). Neither includes organic data, so what
+  a commander is carrying has to be derived from `ScanOrganic` and
+  `SellOrganicData`. A corpus test asserts neither event grows an organic section.
+- **Only `ScanOrganic.ScanType == "Analyse"` completes a specimen.** Measured
+  Log 63 / Sample 120 / Analyse 60 across 243 events. Counting all three would
+  roughly quadruple an apparent holding.
+- **`SellOrganicData.BioData` length is the only quantity reported** for a sale —
+  observed lengths 1, 1, 7, 8, 28 across 5 sales, 100% present.
+- **Whether death destroys unsold exobiology data is not determinable from the
+  journal.** Across 18 `Died` events, no window between two deaths ever sold more
+  than it scanned, which is consistent with both possibilities. Do not assume either.
+- **`MaterialTrade.TraderType`** (`encoded` / `raw` / `manufactured`) is the *only*
+  place the kind of a Material Trader appears. `StationServices` carries the bare
+  token `materialtrader` and nothing else — measured over 141 docks.
+- **Nothing distinguishes a Guardian tech broker from a Human one.** `techBroker` is
+  the only token, and "broker" otherwise appears solely in unrelated
+  `BrokerPercentage` fields on `PayFines` / `PayBounties` / `RedeemVoucher`.
 - **`$`-wrapped localisation tokens** (`$economy_Colony;`, `$aluminium_name;`) appear
   alongside `_Localised` companions. Keep both.
 
