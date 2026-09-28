@@ -101,6 +101,14 @@ export interface OverlayPushState {
   remainingJumps: number | null;
   /** Highest-ranked context only; null when nothing is currently relevant. */
   context: OverlayContext | null;
+  /**
+   * Other contexts that are also true right now, title and subtitle only.
+   *
+   * The primary context gets links, actions and a note; these do not. Space over a
+   * game window is scarce, and the point of these lines is awareness -- "there is
+   * also a Material Trader here" -- not a second set of things to read.
+   */
+  alsoActive: { title: string; subtitle: string | null }[];
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }

@@ -579,9 +579,18 @@ function OverlayPanel() {
     (cb) => companion.subscribe(cb),
     () => companion.overlayWidgets,
   );
-  const [enabled, setEnabled] = useState(false);
+  // Read from the companion rather than held locally: both are persisted, so the
+  // toggle has to show the restored value on first paint instead of defaulting to
+  // off and contradicting an overlay that is already on screen.
+  const enabled = useSyncExternalStore(
+    (cb) => companion.subscribe(cb),
+    () => companion.overlayOn,
+  );
+  const hideInactive = useSyncExternalStore(
+    (cb) => companion.subscribe(cb),
+    () => companion.overlayHideWhenInactive,
+  );
   const [editing, setEditing] = useState(false);
-  const [hideInactive, setHideInactive] = useState(true);
   const [mode, setMode] = useState<DisplayModeInfo | null>(null);
   const [win, setWin] = useState<EliteWindowInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -604,16 +613,15 @@ function OverlayPanel() {
     try {
       if (next) {
         await overlayApi.start(hideInactive);
-        companion.setOverlayEnabled(true);
+        companion.setOverlayEnabled(true, hideInactive);
       } else {
         if (editing) {
           await overlayApi.setEditMode(false);
           setEditing(false);
         }
         await overlayApi.stop();
-        companion.setOverlayEnabled(false);
+        companion.setOverlayEnabled(false, hideInactive);
       }
-      setEnabled(next);
     } catch (e) {
       setError(String(e));
     }
@@ -718,8 +726,9 @@ function OverlayPanel() {
               type="checkbox"
               checked={hideInactive}
               onChange={(e) => {
-                setHideInactive(e.target.checked);
-                if (enabled) void overlayApi.start(e.target.checked);
+                const next = e.target.checked;
+                companion.setOverlayEnabled(enabled, next);
+                if (enabled) void overlayApi.start(next);
               }}
             />
             <span>Hide while Elite is not the active window</span>

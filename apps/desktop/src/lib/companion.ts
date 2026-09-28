@@ -353,6 +353,8 @@ const EMPTY_STATS: IngestStats = {
 export class Companion {
   private started = false;
   private overlayEnabled = false;
+  /** Mirrors the overlay's own `hide_when_inactive`, so it can be restored with it. */
+  private overlayHideInactive = true;
   /**
    * Starts on the bundled rule set so context works offline and on first run
    * (§22). A server-supplied set supersedes it via `setContextRules`.
@@ -648,6 +650,12 @@ export class Companion {
     await this.loadSites();
     await this.refreshContributions();
 
+    // Read here with the other overlay settings; actually starting it happens at
+    // the end of start(), once there is state worth pushing to it.
+    this.overlayEnabled = (await this.getSetting('overlayEnabled')) === 'true';
+    // Defaults to true when never set, matching the checkbox's default.
+    this.overlayHideInactive = (await this.getSetting('overlayHideInactive')) !== 'false';
+
     const storedWidgets = await this.getSetting('overlayWidgets');
     if (storedWidgets) {
       try {
@@ -756,6 +764,32 @@ export class Companion {
     // Always, not just on first run: the commander may have scanned in a session
     // the app was not watching, and the count is derived rather than stored.
     void this.backfillExobiologyHoldings(resolution.directory);
+
+    // Bring the overlay back if it was on when the app last closed. Last, so the
+    // first frame it receives describes where the commander actually is rather
+    // than an empty state that would flash Unknown across every field.
+    if (this.overlayEnabled) void this.restoreOverlay();
+  }
+
+  /**
+   * Re-open the overlay after a restart.
+   *
+   * Failure is logged and the flag cleared rather than thrown: the overlay is a
+   * convenience, and a commander whose display setup has changed since last launch
+   * must still get a working app.
+   */
+  private async restoreOverlay(): Promise<void> {
+    try {
+      await overlayApi.start(this.overlayHideInactive);
+      this.pushOverlayState();
+      logger.info('overlay', 'Restored overlay from the previous session', {
+        hideWhenInactive: this.overlayHideInactive,
+      });
+    } catch (err) {
+      this.overlayEnabled = false;
+      logger.warn('overlay', 'Could not restore the overlay', { error: String(err) });
+      this.notify();
+    }
   }
 
   stop(): void {
@@ -825,9 +859,31 @@ export class Companion {
 
   /* --------------------------------------------------------------- overlay */
 
-  setOverlayEnabled(enabled: boolean): void {
+  /** Whether the overlay is currently on. Restored across restarts. */
+  get overlayOn(): boolean {
+    return this.overlayEnabled;
+  }
+
+  get overlayHideWhenInactive(): boolean {
+    return this.overlayHideInactive;
+  }
+
+  /**
+   * Turn the overlay on or off, and remember the choice.
+   *
+   * Persisted because the overlay is not a transient view: someone who plays with
+   * it on wants it on, and having to re-enable it after every launch made it feel
+   * like a setting that did not stick.
+   */
+  setOverlayEnabled(enabled: boolean, hideWhenInactive?: boolean): void {
     this.overlayEnabled = enabled;
+    if (hideWhenInactive !== undefined) this.overlayHideInactive = hideWhenInactive;
     if (enabled) this.pushOverlayState();
+    this.notify();
+
+    // Not awaited: a settings write must never make a toggle feel sluggish.
+    void this.setSetting('overlayEnabled', String(enabled));
+    void this.setSetting('overlayHideInactive', String(this.overlayHideInactive));
   }
 
   /**
@@ -839,7 +895,11 @@ export class Companion {
   pushOverlayState(): void {
     const s = this.state;
     const text = (v: Known<string>): string | null => (isKnown(v) ? v : null);
-    const top = this.resolver.current()[0] ?? null;
+    // The whole ranked set, not just the winner. One context alone meant a fact
+    // that was true right now could be completely hidden by an activity that had
+    // merely happened recently -- docked at a Material Trader while the overlay
+    // read "Engineering", from another system.
+    const [top = null, ...alsoActive] = this.resolver.current();
 
     void overlayApi
       .pushState({
@@ -866,11 +926,15 @@ export class Companion {
         // Destination and route progress, shown only while actually travelling.
         jumpTarget: isKnown(s.jumpTarget) ? s.jumpTarget : null,
         remainingJumps: isKnown(s.remainingJumps) ? s.remainingJumps : null,
-        // Only the single highest-ranked context reaches the overlay. Space over a
-        // game window is scarce, and §6 is explicit that the commander should not
-        // be handed a wall of links mid-flight.
+        // The highest-ranked context is rendered in full. The rest are titles only,
+        // so the commander still learns what else is true here without being handed
+        // a wall of links mid-flight, which §6 is explicit about.
         missions: this.overlayMissions(),
         widgets: this.widgets,
+        alsoActive: alsoActive.map((c) => ({
+          title: c.rule.title,
+          subtitle: c.rule.subtitle ?? null,
+        })),
         context: top
           ? {
               title: top.rule.title,

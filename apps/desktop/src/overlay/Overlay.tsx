@@ -66,6 +66,8 @@ interface OverlayState {
   jumpTarget: string | null;
   remainingJumps: number | null;
   context: OverlayContext | null;
+  /** Other contexts true right now, title and subtitle only. */
+  alsoActive: { title: string; subtitle: string | null }[];
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }
@@ -227,6 +229,18 @@ export default function Overlay() {
                         </span>
                       ))}
                     </div>
+                  )}
+                  {(state.alsoActive?.length ?? 0) > 0 && (
+                    <ul className="context-also">
+                      {(state.alsoActive ?? []).map((c) => (
+                        <li key={c.title}>
+                          <span className="context-also-title">{c.title}</span>
+                          {c.subtitle && (
+                            <span className="context-also-sub"> — {c.subtitle}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                   {state.context.note && (
                     <div className="context-note">
