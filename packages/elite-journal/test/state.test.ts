@@ -8,7 +8,7 @@ import {
   learnTrader,
   type CommanderState,
 } from '../src/state.js';
-import { UNKNOWN } from '../src/types.js';
+import { UNKNOWN, isKnown } from '../src/types.js';
 
 const ctx = new JournalSessionContext();
 let offset = 0;
@@ -382,5 +382,106 @@ describe('material trader kinds', () => {
       '{ "timestamp":"2026-09-01T20:00:00Z", "event":"Docked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "MarketID":3703420416, "StationServices":[ "dock", "commodities", "contacts" ] }',
     );
     expect(s.traderType).toBe(UNKNOWN);
+  });
+});
+
+describe('carrier jump scheduling', () => {
+  const OWN = 3703420416;
+  const OTHER = 3712487680;
+
+  const REQUEST =
+    '{ "timestamp":"2026-08-14T00:16:25Z", "event":"CarrierJumpRequest", "CarrierType":"FleetCarrier", "CarrierID":3703420416, "SystemName":"Wregoe JL-Q b46-0", "Body":"Wregoe JL-Q b46-0 A", "SystemAddress":676323337617, "BodyID":1, "DepartureTime":"2026-08-14T00:32:10Z" }';
+
+  it('records the departure time the game stated, verbatim', () => {
+    const s = initialState();
+    feed(s, REQUEST);
+
+    const jump = s.carrierJumps[OWN];
+    expect(jump).toBeDefined();
+    expect(jump!.departureTime).toBe('2026-08-14T00:32:10Z');
+    expect(jump!.system).toBe('Wregoe JL-Q b46-0');
+    expect(jump!.body).toBe('Wregoe JL-Q b46-0 A');
+  });
+
+  it('a new request supersedes the old destination', () => {
+    // Re-targeting is normal. Keeping the first would show a destination the
+    // commander has already changed their mind about.
+    const s = initialState();
+    feed(s, REQUEST);
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:20:00Z", "event":"CarrierJumpRequest", "CarrierType":"FleetCarrier", "CarrierID":3703420416, "SystemName":"Leesti", "SystemAddress":3932277478114, "BodyID":5, "DepartureTime":"2026-08-14T00:36:00Z" }',
+    );
+
+    expect(Object.keys(s.carrierJumps)).toHaveLength(1);
+    expect(s.carrierJumps[OWN]!.system).toBe('Leesti');
+    // No Body on this one: 97.1% presence, so absence is normal and must not
+    // become an empty string.
+    expect(isKnown(s.carrierJumps[OWN]!.body)).toBe(false);
+  });
+
+  it('clears on cancellation', () => {
+    const s = initialState();
+    feed(s, REQUEST);
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:25:00Z", "event":"CarrierJumpCancelled", "CarrierType":"FleetCarrier", "CarrierID":3703420416 }',
+    );
+    expect(s.carrierJumps[OWN]).toBeUndefined();
+  });
+
+  it('clears on arrival reported by CarrierLocation, with nobody aboard', () => {
+    // The case that matters: only 72 CarrierJump events against 136 requests,
+    // because CarrierJump is written only when the commander is there to see it.
+    // Without this, roughly half of all countdowns would never end.
+    const s = initialState();
+    feed(s, REQUEST);
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:33:00Z", "event":"CarrierLocation", "CarrierType":"FleetCarrier", "CarrierID":3703420416, "StarSystem":"Wregoe JL-Q b46-0", "SystemAddress":676323337617, "BodyID":1 }',
+    );
+    expect(s.carrierJumps[OWN]).toBeUndefined();
+  });
+
+  it('does not clear when CarrierLocation reports somewhere else', () => {
+    // CarrierLocation is emitted routinely, including at session start while the
+    // carrier is still sitting where it was. Only the destination means arrival.
+    const s = initialState();
+    feed(s, REQUEST);
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:20:00Z", "event":"CarrierLocation", "CarrierType":"FleetCarrier", "CarrierID":3703420416, "StarSystem":"Leesti", "SystemAddress":3932277478114, "BodyID":5 }',
+    );
+    expect(s.carrierJumps[OWN]).toBeDefined();
+  });
+
+  it('tracks several carriers independently', () => {
+    // This commander commands three. One countdown would be wrong.
+    const s = initialState();
+    feed(s, REQUEST);
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:17:00Z", "event":"CarrierJumpRequest", "CarrierType":"FleetCarrier", "CarrierID":3715965184, "SystemName":"Shinrarta Dezhra", "SystemAddress":3932277478115, "BodyID":2, "DepartureTime":"2026-08-14T00:34:00Z" }',
+    );
+    expect(Object.keys(s.carrierJumps)).toHaveLength(2);
+
+    // Cancelling one must not touch the other.
+    feed(
+      s,
+      '{ "timestamp":"2026-08-14T00:18:00Z", "event":"CarrierJumpCancelled", "CarrierType":"FleetCarrier", "CarrierID":3715965184 }',
+    );
+    expect(s.carrierJumps[OWN]).toBeDefined();
+    expect(s.carrierJumps[3715965184]).toBeUndefined();
+  });
+
+  it('never learns a jump for a carrier the commander does not command', () => {
+    // Not a filter we apply -- the game simply never emits CarrierJumpRequest for
+    // anyone else's carrier. Docking at one tells us nothing about its plans.
+    const s = initialState();
+    feed(
+      s,
+      `{ "timestamp":"2026-08-14T01:00:00Z", "event":"Docked", "StationName":"SOMEONE ELSE X1Y-2Z3", "StationType":"FleetCarrier", "StarSystem":"Leesti", "SystemAddress":3932277478114, "MarketID":${OTHER}, "StationServices":[ "dock", "commodities" ] }`,
+    );
+    expect(Object.keys(s.carrierJumps)).toHaveLength(0);
   });
 });

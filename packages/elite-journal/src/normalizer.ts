@@ -338,6 +338,59 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
       name: str(r, 'Name'),
     }),
   },
+  /**
+   * Fleet carrier jump scheduling.
+   *
+   * `DepartureTime` is present on 100% of 136 requests and is accurate: the
+   * observed `CarrierJump` follows it by a median of 58 seconds (range -60s to
+   * +63s, the spread being when the *commander* loaded into the new system rather
+   * than when the carrier left). So a countdown is reported, not inferred.
+   *
+   * These are management events and follow the commander, not the carrier: only
+   * 47.8% of requests were made while aboard, the rest from open space or a station
+   * in another system. A pending jump is therefore knowable from anywhere.
+   *
+   * `CarrierJumpRequest` only ever fires for a carrier the commander commands --
+   * all 136 belong to the three carriers seen in CarrierStats, and none of the 45
+   * other carriers docked at produced one. Someone else's carrier tells us nothing.
+   */
+  CarrierJumpRequest: {
+    kind: 'carrier-jump-request',
+    fn: (r) => ({
+      carrierId: num(r, 'CarrierID'),
+      system: str(r, 'SystemName'),
+      systemAddress: num(r, 'SystemAddress'),
+      // 97.1% present: a jump to a system with no body selected omits it.
+      body: str(r, 'Body'),
+      bodyId: num(r, 'BodyID'),
+      departureTime: str(r, 'DepartureTime'),
+    }),
+  },
+
+  CarrierJumpCancelled: {
+    kind: 'carrier-jump-cancelled',
+    fn: (r) => ({ carrierId: num(r, 'CarrierID') }),
+  },
+
+  /**
+   * Where the carrier is, independent of whether the commander saw it move.
+   *
+   * This is what makes a pending jump resolvable at all. `CarrierJump` is only
+   * written when the commander is aboard -- 53 of them while docked at an owned
+   * carrier, and none otherwise -- so with 136 requests against 72 jumps, roughly
+   * half of all jumps are never witnessed. Keying completion on `CarrierJump` alone
+   * would leave a countdown stuck pending forever on those.
+   */
+  CarrierLocation: {
+    kind: 'carrier-location',
+    fn: (r) => ({
+      carrierId: num(r, 'CarrierID'),
+      starSystem: str(r, 'StarSystem'),
+      systemAddress: num(r, 'SystemAddress'),
+      bodyId: num(r, 'BodyID'),
+    }),
+  },
+
   CarrierBuy: {
     kind: 'carrier-identity',
     fn: (r) => ({

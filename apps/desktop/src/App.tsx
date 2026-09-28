@@ -20,6 +20,7 @@ import { logger, type LogEntry } from './lib/logger.js';
 import {
   onEditMode,
   onEliteWindow,
+  countdownTo,
   overlayApi,
   type DisplayModeInfo,
   type EliteWindowInfo,
@@ -190,6 +191,63 @@ function stationDisplay(s: CommanderState): string {
   return s.stationName;
 }
 
+/**
+ * Scheduled jumps for the commander's own carriers.
+ *
+ * Rendered only when one is pending. Ticks once a second off the departure instant
+ * the game stated, rather than a duration computed once and then drifting.
+ *
+ * There is deliberately no equivalent for anyone else's carrier. `CarrierJumpRequest`
+ * is only ever written for a carrier the commander commands -- all 136 in the corpus
+ * belong to their own three, and none of the 45 other carriers they have docked at
+ * produced one. A carrier you are visiting can leave without the journal ever
+ * mentioning it, and inventing a countdown for that would be a guess.
+ */
+function CarrierJumpCard() {
+  const jumps = useSyncExternalStore(
+    (cb) => companion.subscribe(cb),
+    () => companion.carrierJumps,
+  );
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (jumps.length === 0) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [jumps.length]);
+
+  if (jumps.length === 0) return null;
+
+  return (
+    <section className="card">
+      <h2>Carrier jump</h2>
+      <div className="grid">
+        {jumps.map((j) => {
+          const remaining = countdownTo(j.departureTime, now);
+          return (
+            <Field
+              key={j.carrierId}
+              label={j.name}
+              wide
+              value={
+                remaining === null
+                  ? // The stated time has passed and no arrival has been confirmed.
+                    // "Departing" is what we know; "arrived" would be invented.
+                    `Departing → ${j.system}${j.body ? ` ${j.body}` : ''}`
+                  : `${remaining} → ${j.system}${j.body ? ` ${j.body}` : ''}`
+              }
+            />
+          );
+        })}
+      </div>
+      <p className="muted">
+        Your own carriers only. The game does not tell the Companion when someone
+        else&apos;s carrier is about to jump, so none is shown rather than guessed.
+      </p>
+    </section>
+  );
+}
+
 function Dashboard({ snap }: { snap: Snap }) {
   const s = snap.state;
   const pos = isKnown(s.starPos) ? s.starPos.map((n) => n.toFixed(2)).join(' / ') : 'Unknown';
@@ -238,6 +296,8 @@ function Dashboard({ snap }: { snap: Snap }) {
           )}
         </div>
       </section>
+
+      <CarrierJumpCard />
 
       <section className="card">
         <h2>Ship &amp; cargo</h2>
@@ -791,6 +851,22 @@ function OverlayPanel() {
             <span>
               Show EDFM notes on missions{' '}
               <span className="muted-inline">— explains what a mission type actually asks</span>
+            </span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={widgets.carrierJump}
+              onChange={(e) =>
+                void companion.setOverlayWidgets({ ...widgets, carrierJump: e.target.checked })
+              }
+            />
+            <span>
+              Carrier jump countdown{' '}
+              <span className="muted-inline">
+                — your own carriers only; the game never reveals anyone else&apos;s
+              </span>
             </span>
           </label>
         </div>

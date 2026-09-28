@@ -11,6 +11,9 @@ import {
   JournalEngine,
   learnCarrier,
   learnTrader,
+  recordCarrierJump,
+  cancelCarrierJump,
+  confirmCarrierAt,
   listJournalFiles,
   replayFile,
   applyEvent,
@@ -93,6 +96,7 @@ import { policyFor, projectResources } from './spoiler.js';
 import {
   DEFAULT_WIDGETS,
   overlayApi,
+  type OverlayCarrierJump,
   type OverlayMissionRow,
   type OverlayMissions,
   type OverlayWidgets,
@@ -765,6 +769,11 @@ export class Companion {
     // the app was not watching, and the count is derived rather than stored.
     void this.backfillExobiologyHoldings(resolution.directory);
 
+    // A jump can be scheduled a quarter of an hour ahead and requested from
+    // anywhere -- 52% of them were made away from the carrier -- so one may well
+    // have been booked in a session this app never saw.
+    void this.backfillCarrierJumps(resolution.directory);
+
     // Bring the overlay back if it was on when the app last closed. Last, so the
     // first frame it receives describes where the commander actually is rather
     // than an empty state that would flash Unknown across every field.
@@ -857,6 +866,39 @@ export class Companion {
     }
   }
 
+  /* -------------------------------------------------------- carrier jumps */
+
+  /**
+   * Scheduled jumps for the commander's own carriers, soonest first.
+   *
+   * A record is dropped once its departure is more than an hour past. Completion
+   * normally arrives as a `CarrierLocation` at the destination, but a commander who
+   * was offline when the carrier jumped may not see one for a long time, and a
+   * countdown that has been "departing" since yesterday is noise rather than
+   * information.
+   */
+  get carrierJumps(): OverlayCarrierJump[] {
+    const now = Date.now();
+    const STALE_AFTER_MS = 60 * 60 * 1000;
+
+    return Object.values(this.state.carrierJumps)
+      .filter((j) => {
+        const departs = Date.parse(j.departureTime);
+        return !Number.isFinite(departs) || now - departs < STALE_AFTER_MS;
+      })
+      .sort((a, b) => Date.parse(a.departureTime) - Date.parse(b.departureTime))
+      .map((j) => ({
+        carrierId: j.carrierId,
+        // knownCarriers is populated only from CarrierStats / CarrierNameChange /
+        // CarrierBuy, all of which the game writes solely for carriers the
+        // commander commands -- so a name here is itself the ownership proof.
+        name: this.state.knownCarriers[j.carrierId] ?? `Carrier ${j.carrierId}`,
+        system: j.system,
+        body: isKnown(j.body) ? j.body : null,
+        departureTime: j.departureTime,
+      }));
+  }
+
   /* --------------------------------------------------------------- overlay */
 
   /** Whether the overlay is currently on. Restored across restarts. */
@@ -935,6 +977,7 @@ export class Companion {
           title: c.rule.title,
           subtitle: c.rule.subtitle ?? null,
         })),
+        carrierJumps: this.carrierJumps,
         context: top
           ? {
               title: top.rule.title,
@@ -1379,6 +1422,60 @@ export class Companion {
       }
     } catch (err) {
       logger.warn('journal', 'Material trader backfill failed', { error: String(err) });
+    }
+  }
+
+  /**
+   * Recover a pending carrier jump from recent journals.
+   *
+   * Oldest file first, applying the same three mutations the live reducer uses, so
+   * supersede / cancel / arrival all resolve exactly as they would have live rather
+   * than being re-derived here and drifting.
+   *
+   * Bounded to recent files: the countdown is about a quarter of an hour, and this
+   * drops anything already past by more than that on the way out.
+   */
+  private async backfillCarrierJumps(directory: string, maxFiles = 10): Promise<void> {
+    try {
+      const files = (await listJournalFiles(directory, tauriFs)).filter((f) => f.sizeBytes > 0);
+
+      for (const file of files.slice(-maxFiles)) {
+        const result = await replayFile(file.fullPath, tauriFs);
+        for (const event of result.events) {
+          const d = event.data as { carrierId?: unknown; starSystem?: unknown };
+          switch (event.kind) {
+            case 'carrier-jump-request':
+              recordCarrierJump(this.state, event.data, event.source.provenance.timestamp);
+              break;
+            case 'carrier-jump-cancelled':
+              if (typeof d.carrierId === 'number') cancelCarrierJump(this.state, d.carrierId);
+              break;
+            case 'carrier-location':
+              if (typeof d.carrierId === 'number' && typeof d.starSystem === 'string') {
+                confirmCarrierAt(this.state, d.carrierId, d.starSystem);
+              }
+              break;
+            default:
+              break;
+          }
+        }
+      }
+
+      // Anything whose departure has already passed is history, not a countdown.
+      // Dropped here rather than displayed as "departing" from a stale journal.
+      const now = Date.now();
+      for (const [id, jump] of Object.entries(this.state.carrierJumps)) {
+        if (Date.parse(jump.departureTime) < now) delete this.state.carrierJumps[Number(id)];
+      }
+
+      const pending = Object.keys(this.state.carrierJumps).length;
+      if (pending > 0) {
+        logger.info('journal', 'Recovered a scheduled carrier jump from history', { pending });
+        this.notify();
+        if (this.overlayEnabled) this.pushOverlayState();
+      }
+    } catch (err) {
+      logger.warn('journal', 'Carrier jump backfill failed', { error: String(err) });
     }
   }
 

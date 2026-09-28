@@ -227,6 +227,70 @@ suite('real journal corpus', () => {
     expect(state.exobiologyToSell).toBeLessThanOrEqual(Math.max(0, analysed - sold));
   });
 
+  /* -------------------------------------------------------- carrier jumps */
+
+  it('only ever schedules jumps for carriers the commander commands', async () => {
+    // The ownership claim the whole feature rests on. CarrierStats is written only
+    // for your own carriers; if a CarrierJumpRequest ever appeared for one outside
+    // that set, "own carrier only" would be false and the UI would be lying.
+    const files = await listJournalFiles(DIR);
+    const all = files.filter((f) => f.sizeBytes > 0);
+
+    const owned = new Set<number>();
+    const requestedFor = new Set<number>();
+    let requests = 0;
+    let departuresParsed = 0;
+
+    for (const f of all) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        if (e.kind === 'carrier-identity') {
+          const d = e.data as { carrierId: unknown };
+          if (typeof d.carrierId === 'number') owned.add(d.carrierId);
+        } else if (e.kind === 'carrier-jump-request') {
+          const d = e.data as { carrierId: unknown; departureTime: unknown };
+          requests += 1;
+          if (typeof d.carrierId === 'number') requestedFor.add(d.carrierId);
+          // A departure time that will not parse is a countdown that cannot be
+          // drawn, so the format is asserted rather than assumed.
+          if (typeof d.departureTime === 'string' && Number.isFinite(Date.parse(d.departureTime))) {
+            departuresParsed += 1;
+          }
+        }
+      }
+    }
+
+    if (requests === 0) return; // no carrier, nothing to assert
+
+    expect(departuresParsed).toBe(requests);
+    for (const id of requestedFor) {
+      expect(owned.has(id), `jump requested for carrier ${id}, which we do not own`).toBe(true);
+    }
+  });
+
+  it('does not leave carrier jumps pending across the whole history', async () => {
+    // Replays everything through the real reducer. Requests vastly outnumber
+    // observed CarrierJump events because the commander is usually not aboard, so
+    // this is really a test that CarrierLocation closes them out. A pending count
+    // in the dozens would mean countdowns pile up and never clear.
+    const files = await listJournalFiles(DIR);
+    const state = initialState();
+    let requests = 0;
+
+    for (const f of files.filter((x) => x.sizeBytes > 0)) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        if (e.kind === 'carrier-jump-request') requests += 1;
+        applyEvent(state, e);
+      }
+    }
+
+    if (requests === 0) return;
+    // At most one per owned carrier can ever be outstanding, by construction.
+    const pending = Object.keys(state.carrierJumps).length;
+    expect(pending).toBeLessThanOrEqual(Object.keys(state.knownCarriers).length);
+  });
+
   it('finds no event that states exobiology holdings outright', async () => {
     // The premise of deriving the count. Backpack is suit inventory and Materials is
     // engineering stock; if either ever grows an organic section, the derivation

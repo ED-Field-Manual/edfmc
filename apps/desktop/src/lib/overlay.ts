@@ -48,13 +48,56 @@ export interface OverlayWidgets {
   missions: boolean;
   /** Whether mission rows carry EDFM's editorial guidance. */
   edfmNotes: boolean;
+  /** Countdown to a scheduled jump on one of the commander's own carriers. */
+  carrierJump: boolean;
 }
 
 export const DEFAULT_WIDGETS: OverlayWidgets = {
   context: true,
   missions: true,
   edfmNotes: true,
+  carrierJump: true,
 };
+
+/** A scheduled jump for one of the commander's own carriers. */
+export interface OverlayCarrierJump {
+  carrierId: number;
+  /** Human-readable name when known; the callsign otherwise. */
+  name: string;
+  system: string;
+  body: string | null;
+  /**
+   * ISO 8601, exactly as the game stated it.
+   *
+   * Sent as an absolute instant rather than a pre-formatted duration, unlike
+   * mission expiry. A countdown has to tick, and pushing a new string every second
+   * to keep it moving would be absurd -- so the instant is the data and the
+   * countdown is presentation, computed where it is drawn.
+   */
+  departureTime: string;
+}
+
+/**
+ * Render a countdown to an absolute instant.
+ *
+ * Returns null past the point where a countdown is meaningful. The caller decides
+ * what to say instead, because "departing" and "we lost track" are different
+ * statements and neither is a number.
+ */
+export function countdownTo(departureTime: string, now: number): string | null {
+  const target = Date.parse(departureTime);
+  if (!Number.isFinite(target)) return null;
+
+  const remainingMs = target - now;
+  if (remainingMs <= 0) return null;
+
+  const total = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
 
 export interface OverlayMissionRow {
   id: number;
@@ -109,6 +152,7 @@ export interface OverlayPushState {
    * also a Material Trader here" -- not a second set of things to read.
    */
   alsoActive: { title: string; subtitle: string | null }[];
+  carrierJumps: OverlayCarrierJump[];
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }

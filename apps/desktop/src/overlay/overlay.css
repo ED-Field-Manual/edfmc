@@ -191,6 +191,35 @@ body,
   margin-top: 0.375rem;
 }
 
+/* -------------------------------------------------- carrier jump widget */
+
+.cj { display: flex; flex-direction: column; gap: 0.0625rem; }
+.cj + .cj {
+  margin-top: 0.375rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.cj-name { color: #b9b9b9; font-size: 0.75rem; }
+.cj-line { display: flex; align-items: baseline; gap: 0.125rem; flex-wrap: wrap; }
+
+/* Tabular figures so the seconds do not shift the line as they tick. */
+.cj-time {
+  color: #ff9d5f;
+  font-weight: 600;
+  font-size: 1.0625rem;
+  font-variant-numeric: tabular-nums;
+}
+.cj-departing {
+  color: #ffb84d;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cj-dest { color: #d8d8d8; font-size: 0.8125rem; }
+.cj-body { color: #9a9a9a; }
+
 /* ------------------------------------------------------- missions widget */
 
 .widget { max-width: 26rem; }

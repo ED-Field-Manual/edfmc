@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+import { countdownTo, type OverlayCarrierJump } from '../lib/overlay';
+
 import './overlay.css';
 
 /**
@@ -54,6 +56,7 @@ interface OverlayWidgets {
   context: boolean;
   missions: boolean;
   edfmNotes: boolean;
+  carrierJump: boolean;
 }
 
 interface OverlayState {
@@ -68,6 +71,7 @@ interface OverlayState {
   context: OverlayContext | null;
   /** Other contexts true right now, title and subtitle only. */
   alsoActive: { title: string; subtitle: string | null }[];
+  carrierJumps: OverlayCarrierJump[];
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }
@@ -77,7 +81,7 @@ interface Point {
   y: number;
 }
 
-type WidgetId = 'context' | 'missions';
+type WidgetId = 'context' | 'missions' | 'carrierJump';
 
 const STORAGE_KEY = 'edfm.overlay.layout.v2';
 
@@ -85,11 +89,57 @@ const STORAGE_KEY = 'edfm.overlay.layout.v2';
 const DEFAULT_LAYOUT: Record<WidgetId, Point> = {
   context: { x: 32, y: 32 },
   missions: { x: 32, y: 260 },
+  carrierJump: { x: 32, y: 520 },
 };
 
 /** Leave edit mode. The backend restores click-through and tells both windows. */
 function exitEditMode(): void {
   void invoke('overlay_set_edit_mode', { editing: false }).catch(() => undefined);
+}
+
+/**
+ * Live countdown to a scheduled carrier jump.
+ *
+ * Ticks locally from the absolute departure instant. Mission expiry is
+ * pre-formatted by the main window precisely so the overlay needs no clock, but a
+ * countdown has to move every second and pushing a fresh string that often would be
+ * absurd. The instant is the reported fact; counting down from it is presentation.
+ */
+function CarrierJumpWidget({ jumps }: { jumps: OverlayCarrierJump[] }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <>
+      {jumps.map((j) => {
+        const remaining = countdownTo(j.departureTime, now);
+        return (
+          <div key={j.carrierId} className="cj">
+            <div className="cj-name">{j.name}</div>
+            <div className="cj-line">
+              {remaining === null ? (
+                // The clock has run out and no arrival has been confirmed yet. It is
+                // leaving, or has left -- saying "arrived" would be inventing the
+                // one thing we have not been told.
+                <span className="cj-departing">Departing</span>
+              ) : (
+                <span className="cj-time">{remaining}</span>
+              )}
+              <span className="cj-dest">
+                {' → '}
+                {j.system}
+                {j.body && <span className="cj-body"> {j.body}</span>}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 function loadLayout(): Record<WidgetId, Point> {
@@ -100,6 +150,7 @@ function loadLayout(): Record<WidgetId, Point> {
       return {
         context: valid(parsed.context) ?? DEFAULT_LAYOUT.context,
         missions: valid(parsed.missions) ?? DEFAULT_LAYOUT.missions,
+        carrierJump: valid(parsed.carrierJump) ?? DEFAULT_LAYOUT.carrierJump,
       };
     }
   } catch {
@@ -260,6 +311,22 @@ export default function Overlay() {
           <MissionsWidget missions={state.missions} />
         </Widget>
       )}
+
+      {/* Only rendered when a jump is actually scheduled: an empty countdown widget
+          is pure clutter over a game window. */}
+      {(widgets?.carrierJump ?? true) &&
+        state !== null &&
+        (state.carrierJumps?.length ?? 0) > 0 && (
+          <Widget
+            id="carrierJump"
+            title="Carrier Jump"
+            pos={layout.carrierJump}
+            editing={editing}
+            onMove={move}
+          >
+            <CarrierJumpWidget jumps={state.carrierJumps} />
+          </Widget>
+        )}
     </div>
   );
 }

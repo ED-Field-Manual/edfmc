@@ -45,6 +45,25 @@ export type TravelState =
   | 'witch-space'
   | 'unknown';
 
+/**
+ * A carrier jump the game has scheduled but not yet confirmed complete.
+ *
+ * `departureTime` is the instant the game stated, kept verbatim as ISO 8601 so a
+ * countdown is rendered from a reported fact rather than a duration we computed and
+ * then have to keep correcting.
+ */
+export interface PendingCarrierJump {
+  readonly carrierId: number;
+  readonly system: string;
+  /** Present on 97.1% of requests; absent when no body was selected. */
+  readonly body: Known<string>;
+  readonly systemAddress: Known<number>;
+  /** ISO 8601, exactly as the journal reported it. */
+  readonly departureTime: string;
+  /** When the request was seen, for ordering and for expiring a stale record. */
+  readonly requestedAt: string;
+}
+
 export interface CommanderState {
   commander: Known<string>;
   fid: Known<string>;
@@ -90,6 +109,19 @@ export interface CommanderState {
   carrierName: Known<string>;
   /** CarrierID -> name, accumulated from CarrierStats / CarrierNameChange. */
   knownCarriers: Record<number, string>;
+
+  /**
+   * Scheduled jumps for the commander's OWN carriers, keyed by CarrierID.
+   *
+   * Only ever populated from `CarrierJumpRequest`, which the game emits solely for
+   * carriers the commander commands. Another commander's carrier can jump out from
+   * under you and the journal says nothing about it beforehand -- that is a real
+   * gap, not a missing feature, and must not be papered over with a guess.
+   *
+   * Keyed rather than singular because a commander can command several carriers;
+   * this one has three.
+   */
+  carrierJumps: Record<number, PendingCarrierJump>;
 
   /**
    * Which kind of Material Trader the current station has: `encoded`, `raw` or
@@ -188,6 +220,7 @@ export function initialState(): CommanderState {
     stationServices: UNKNOWN,
     carrierName: UNKNOWN,
     knownCarriers: {},
+    carrierJumps: {},
     traderType: UNKNOWN,
     knownTraders: {},
     exobiologyToSell: 0,
@@ -238,6 +271,63 @@ export function learnCarrier(state: CommanderState, carrierId: number, name: str
   if (!Number.isFinite(carrierId) || name.length === 0) return;
   state.knownCarriers[carrierId] = name;
   if (isKnown(state.marketId) && state.marketId === carrierId) state.carrierName = name;
+}
+
+/**
+ * Record a scheduled carrier jump.
+ *
+ * Exported alongside `learnCarrier` and for the same reason: a pending jump has to
+ * be recoverable from historical journals at startup, and replaying those events
+ * through `applyEvent` would make the dashboard report stale activity as the latest
+ * thing that happened.
+ */
+export function recordCarrierJump(
+  state: CommanderState,
+  data: unknown,
+  requestedAt: string,
+): void {
+  const d = data as {
+    carrierId: Known<number>;
+    system: Known<string>;
+    systemAddress: Known<number>;
+    body: Known<string>;
+    departureTime: Known<string>;
+  };
+  // The destination and the departure instant are the whole point. Without either
+  // there is nothing honest to show, so nothing is recorded.
+  if (!isKnown(d.carrierId) || !isKnown(d.system) || !isKnown(d.departureTime)) return;
+
+  // A fresh request supersedes any earlier one for the same carrier: the commander
+  // re-targeted, and the previous destination is simply no longer true.
+  state.carrierJumps[d.carrierId] = {
+    carrierId: d.carrierId,
+    system: d.system,
+    body: d.body,
+    systemAddress: d.systemAddress,
+    departureTime: d.departureTime,
+    requestedAt,
+  };
+}
+
+export function cancelCarrierJump(state: CommanderState, carrierId: number): void {
+  delete state.carrierJumps[carrierId];
+}
+
+/**
+ * Note where a carrier actually is, completing a pending jump if it arrived.
+ *
+ * This is the only completion signal that covers the roughly half of jumps the
+ * commander is not aboard to witness: `CarrierJump` is written only when they are
+ * (53 times while docked at an owned carrier, never otherwise), against 136 jump
+ * requests. Keying completion on it alone would strand those countdowns forever.
+ */
+export function confirmCarrierAt(
+  state: CommanderState,
+  carrierId: number,
+  starSystem: string,
+): void {
+  const pending = state.carrierJumps[carrierId];
+  if (pending && pending.system === starSystem) delete state.carrierJumps[carrierId];
 }
 
 /** Trader kinds the journal actually emits, lowercase as `TraderType` reports them. */
@@ -369,6 +459,24 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       };
       // Also re-resolves, so a rename while docked takes effect immediately.
       if (isKnown(d.carrierId) && isKnown(d.name)) learnCarrier(state, d.carrierId, d.name);
+      break;
+    }
+
+    case 'carrier-jump-request':
+      recordCarrierJump(state, event.data, event.source.provenance.timestamp);
+      break;
+
+    case 'carrier-jump-cancelled': {
+      const d = event.data as { carrierId: Known<number> };
+      if (isKnown(d.carrierId)) cancelCarrierJump(state, d.carrierId);
+      break;
+    }
+
+    case 'carrier-location': {
+      const d = event.data as { carrierId: Known<number>; starSystem: Known<string> };
+      if (isKnown(d.carrierId) && isKnown(d.starSystem)) {
+        confirmCarrierAt(state, d.carrierId, d.starSystem);
+      }
       break;
     }
 

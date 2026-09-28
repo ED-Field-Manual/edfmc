@@ -181,6 +181,30 @@ from Market/EDDN naming — normalization required before Logistics.
 - **`MaterialTrade.TraderType`** (`encoded` / `raw` / `manufactured`) is the *only*
   place the kind of a Material Trader appears. `StationServices` carries the bare
   token `materialtrader` and nothing else — measured over 141 docks.
+- **`CarrierJumpRequest.DepartureTime` states the jump time outright** — 100% present
+  across 136 requests, and accurate: the observed `CarrierJump` follows it by a median
+  of **+58s** (range -60s to +63s, the spread being when the *commander* loaded into
+  the new system, not when the carrier left). Countdowns are ~15 minutes
+  (min 911s, median 948s, max 2641s).
+- **Carrier jump events only ever concern your OWN carriers.** `CarrierStats` is
+  written solely for carriers the commander commands, and all 136 jump requests belong
+  to the three carriers it names. None of the **45 other commanders' carriers** docked
+  at produced one. Ownership is therefore a fact from the journal, not a heuristic.
+- **`CarrierJump` is written only when the commander is aboard** — 53 while docked at
+  an owned carrier, zero otherwise, against 136 requests. **Roughly half of all jumps
+  are never witnessed**, so completion must be taken from `CarrierLocation`
+  (CarrierID / StarSystem / SystemAddress / BodyID, all 100%), which reports where the
+  carrier is regardless.
+- **A jump can be scheduled from anywhere.** Only 47.8% of requests were made while
+  aboard; 34.6% came from open space and 17.6% from a station in another system.
+- **The journal never warns that someone else's carrier is about to jump.** Carriers
+  emit exactly 12 distinct `ReceiveText` messages, and the only jump-related one is
+  *"Docking request denied, jump is imminent"* (n=1) — a refusal when approaching, not
+  a warning to anyone already aboard. No non-`Carrier*` event carries `DepartureTime`.
+- **The post-jump cooldown is not in the journal.** `CarrierStats` carries fuel, jump
+  range, finance, crew and packs — no timer field — and `CarrierJumpTimer` is never
+  emitted. A cooldown display would have to hardcode a game constant Frontier has
+  already changed once.
 - **Nothing distinguishes a Guardian tech broker from a Human one.** `techBroker` is
   the only token, and "broker" otherwise appears solely in unrelated
   `BrokerPercentage` fields on `PayFines` / `PayBounties` / `RedeemVoucher`.
