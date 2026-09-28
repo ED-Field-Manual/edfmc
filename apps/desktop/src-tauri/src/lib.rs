@@ -384,6 +384,43 @@ pub fn run() {
             }
             Ok(())
         })
+        // Closing the main window quits the application.
+        //
+        // Without this the process survived closing the window and had to be killed
+        // from Task Manager. The overlay is a second real window, and Tauri runs
+        // until every window is gone -- but the overlay is `skipTaskbar` with no
+        // decorations and is click-through by design, so nothing the user could see
+        // or click was left to close. The app was alive and unreachable.
+        //
+        // Exiting immediately is safe: the journal checkpoint is what makes restart
+        // resume without duplicating events, and the frontend flushes it on a
+        // three-second timer, so the worst case is re-reading a few seconds of
+        // journal -- which the checkpoint mechanism already exists to handle.
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+
+            if !matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                return;
+            }
+            // Only the main window. The overlay closing must never take the app with
+            // it, and a future second window should not either.
+            if window.label() != "main" {
+                return;
+            }
+
+            let app = window.app_handle();
+            // Stop the tracker thread before exiting, rather than leaving it polling
+            // for a game window while the process tears down around it.
+            if let Some(state) = app.try_state::<overlay::OverlayState>() {
+                state
+                    .running
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                state
+                    .editing
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+            app.exit(0);
+        })
         .invoke_handler(tauri::generate_handler![
             journal::saved_games_dir,
             journal::journal_read_dir,
@@ -404,4 +441,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running EDFM Companion");
+}
+
+#[cfg(test)]
+mod tests {
+    /// The exit handler matches on the window label `"main"`, and the overlay is
+    /// deliberately excluded from it. Renaming either label would silently stop the
+    /// app quitting when its window is closed -- the bug that previously left the
+    /// process running with only an invisible, click-through, taskbar-less overlay
+    /// alive, reachable solely through Task Manager.
+    #[test]
+    fn window_labels_the_exit_handler_depends_on_still_exist() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let windows = config["app"]["windows"]
+            .as_array()
+            .expect("app.windows array");
+
+        let labels: Vec<&str> = windows
+            .iter()
+            .filter_map(|w| w["label"].as_str())
+            .collect();
+        assert!(labels.contains(&"main"), "labels were {labels:?}");
+        assert!(labels.contains(&super::overlay::OVERLAY_LABEL), "labels were {labels:?}");
+
+        // And the reason the bug was unrecoverable: the overlay is unreachable by
+        // design, so it must never be the thing keeping the process alive.
+        let overlay = windows
+            .iter()
+            .find(|w| w["label"].as_str() == Some(super::overlay::OVERLAY_LABEL))
+            .expect("overlay window");
+        assert_eq!(overlay["skipTaskbar"].as_bool(), Some(true));
+        assert_eq!(overlay["decorations"].as_bool(), Some(false));
+    }
 }
