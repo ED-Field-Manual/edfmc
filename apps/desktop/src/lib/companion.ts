@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   JournalEngine,
   learnCarrier,
+  learnTrader,
   listJournalFiles,
   replayFile,
   applyEvent,
@@ -682,6 +683,7 @@ export class Companion {
     // Load before ingest starts, so a carrier we are already docked at resolves
     // on the first Location/Docked event rather than after it.
     const rememberedCarriers = await this.loadKnownCarriers();
+    const rememberedTraders = await this.loadKnownTraders();
     await this.loadMissions();
 
     const checkpoint = await this.loadCheckpoint();
@@ -748,6 +750,9 @@ export class Companion {
     if (rememberedCarriers === 0) {
       void this.backfillCarrierIdentities(resolution.directory);
     }
+    if (rememberedTraders === 0) {
+      void this.backfillTraderIdentities(resolution.directory);
+    }
   }
 
   stop(): void {
@@ -799,6 +804,9 @@ export class Companion {
 
     // Carrier identities are stable reference data: learn once, remember forever.
     if (event.kind === 'carrier-identity') void this.saveCarrierIdentity(event);
+    // Likewise the kind of Material Trader a station has, which is only ever
+    // revealed by trading there.
+    if (event.kind === 'trader-identity') void this.saveTraderIdentity(event);
 
     // Context resolution runs on every event, including the high-frequency ones:
     // a rule may legitimately key on them, and evaluating a dozen declarative
@@ -1213,6 +1221,97 @@ export class Companion {
       }
     } catch (err) {
       logger.warn('journal', 'Carrier identity backfill failed', { error: String(err) });
+    }
+  }
+
+  /* --------------------------------------------------- trader identities */
+
+  /**
+   * Load remembered Material Trader kinds before ingest begins.
+   *
+   * Same reasoning as `loadKnownCarriers`: the `MaterialTrade` that revealed a
+   * station's kind may have been months ago, so without this the answer is lost on
+   * every restart and the app falls back to "kind unknown" at a station the
+   * commander has used repeatedly.
+   */
+  private async loadKnownTraders(): Promise<number> {
+    if (!this.db) return 0;
+    try {
+      const rows = await this.db.select<Array<{ market_id: number; trader_type: string }>>(
+        'SELECT market_id, trader_type FROM known_traders',
+      );
+      for (const row of rows) this.state.knownTraders[row.market_id] = row.trader_type;
+      return rows.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async saveTraderIdentity(event: NormalizedEvent): Promise<void> {
+    if (!this.db) return;
+    const d = event.data as { marketId: unknown; traderType: unknown };
+    if (typeof d.marketId !== 'number' || typeof d.traderType !== 'string') return;
+    // Mirror learnTrader's filter, so an unrecognised kind is not persisted and
+    // then loaded back as though it had been validated.
+    const type = d.traderType.toLowerCase();
+    if (type !== 'encoded' && type !== 'raw' && type !== 'manufactured') return;
+
+    try {
+      await this.db.execute(
+        `INSERT INTO known_traders (market_id, trader_type, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT(market_id) DO UPDATE SET
+           trader_type = excluded.trader_type, updated_at = excluded.updated_at`,
+        [d.marketId, type, new Date().toISOString()],
+      );
+    } catch (err) {
+      logger.warn('db', 'Could not remember material trader kind', { error: String(err) });
+    }
+  }
+
+  /**
+   * Recover trader kinds from historical journals.
+   *
+   * Unlike the carrier backfill this does **not** stop at the first file that
+   * yields something. Each station's kind was revealed by whenever the commander
+   * happened to trade there, so the answers are scattered across the whole
+   * history rather than concentrated in the newest file -- in the corpus this was
+   * measured at 29 distinct stations across 246 MaterialTrade events.
+   *
+   * Oldest file first, so if a station ever does report a different kind the most
+   * recent observation is the one that survives.
+   */
+  private async backfillTraderIdentities(directory: string, maxFiles = 200): Promise<void> {
+    try {
+      const files = (await listJournalFiles(directory, tauriFs)).filter((f) => f.sizeBytes > 0);
+      const scan = files.slice(-maxFiles); // oldest -> newest
+      let learned = 0;
+
+      for (const file of scan) {
+        const result = await replayFile(file.fullPath, tauriFs);
+        for (const event of result.events) {
+          if (event.kind !== 'trader-identity') continue;
+          const d = event.data as { marketId: unknown; traderType: unknown };
+          if (typeof d.marketId !== 'number' || typeof d.traderType !== 'string') continue;
+          // learnTrader rather than applyEvent, for the same reason as carriers:
+          // these are historical events and must not overwrite lastEvent*.
+          learnTrader(this.state, d.marketId, d.traderType);
+          await this.saveTraderIdentity(event);
+          learned += 1;
+        }
+      }
+
+      if (learned > 0) {
+        logger.info('journal', 'Learned material trader kinds from history', {
+          trades: learned,
+          stations: Object.keys(this.state.knownTraders).length,
+        });
+        // Re-resolve: we may already be docked at a trader we just identified.
+        this.notify();
+        if (this.overlayEnabled) this.pushOverlayState();
+      }
+    } catch (err) {
+      logger.warn('journal', 'Material trader backfill failed', { error: String(err) });
     }
   }
 

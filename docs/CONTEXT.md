@@ -101,6 +101,40 @@ Measured across the corpus (242 distinct stations docked at):
 | `carriermanagement` | 44 / 266 (16.5%) | Used |
 | `materialtrader` | 37 / 266 (13.9%) | Used |
 
+### A service token can name a family without naming the variant
+
+`materialtrader` is present or absent reliably, but it never says **which** of the
+three traders a station has. Measured over 141 docks at trader stations: no field in
+any event names the type, and the token itself is always the bare string.
+
+`MaterialTrade.TraderType` does name it (`encoded` / `raw` / `manufactured`), so the
+kind is learned from the commander having traded there and remembered per MarketID —
+the same treatment as a fleet carrier name, and for the same reason: the trade that
+revealed it may have been months ago.
+
+Inferring it from station economy instead was measured and **rejected**:
+
+| Primary economy | Trader kinds actually observed |
+|---|---|
+| High Tech | `encoded` ×7, **`raw` ×1** |
+| Industrial | `manufactured` ×10, **`raw` ×2** |
+| Extraction | `raw` ×4, `encoded` ×1, `manufactured` ×1 |
+| Refinery | `raw` ×2 |
+| Agriculture | `encoded` ×1 |
+
+The widely-repeated economy-to-type mapping is therefore wrong often enough to name
+the wrong trader. Stability was checked too, since remembering the answer depends on
+it: across 29 stations with observed trades, **none ever reported a second kind**.
+
+Hence four rules rather than one — three that name a kind, and one that fires only
+while the kind is genuinely unestablished and says so. A corpus test asserts both
+measured claims, so a game update that changes either fails the suite.
+
+**`techBroker` has the same shape but no solution.** Nothing in the journal
+distinguishes a Guardian broker from a Human one — "broker" appears only as the bare
+token and in unrelated `BrokerPercentage` fields. That variant cannot be answered from
+the commander's own journal at all, and would need reference data.
+
 **Prevalence is the bar a service rule has to clear.** A token present at most
 stations cannot be telling the commander anything specific, however suggestive its
 name is.
@@ -139,12 +173,14 @@ them needs no client release:
 | Crime / security guide | No page found |
 | Odyssey material guide | Only `Engineering Materials` exists, which is ship-side |
 | Mission-type guides | No missions page found |
-| Tech Broker | No page, though `techBroker` appears in 52 station observations |
+| Tech Broker | No page, though `techBroker` appears in 52 station observations — and the journal never says whether it is Guardian or Human |
 | Black market | No page, though `blackmarket` appears in 475 |
 | Apex Interstellar / Frontline Solutions / Bartender | No pages |
 
 `vistagenomics` (872 observations) and `materialtrader` (131) *do* have usable targets
-and are wired up.
+and are wired up. The trader rules deep-link
+`Engineering Materials#Material Traders` rather than the top of the page, since one
+page covers all three kinds; page *and* section existence are both asserted by test.
 
 ## Overlay integration
 

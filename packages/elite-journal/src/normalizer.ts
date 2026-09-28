@@ -349,6 +349,34 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
   },
 
   /**
+   * Material Trader identity.
+   *
+   * `StationServices` says only `materialtrader` -- never which of the three
+   * kinds it is. Measured across the corpus: 141 docks at trader stations, and no
+   * field in any event names the type. `MaterialTrade` does name it
+   * (`TraderType`: encoded / raw / manufactured), but only once the commander has
+   * actually traded there.
+   *
+   * So the type is learned per station and remembered, exactly like a carrier
+   * name. Two measurements justify that:
+   *
+   *  - It is stable. Across 29 stations where trades were observed, not one ever
+   *    reported a second TraderType.
+   *  - It cannot be inferred instead. The usual economy -> type mapping is wrong
+   *    often enough to matter: High Tech gave `encoded` 7 times but `raw` once,
+   *    Industrial gave `manufactured` 10 times but `raw` twice, and Extraction
+   *    produced all three. Presenting an inference as fact is precisely what §2
+   *    forbids, so an untraded station's type stays UNKNOWN.
+   */
+  MaterialTrade: {
+    kind: 'trader-identity',
+    fn: (r) => ({
+      marketId: num(r, 'MarketID'),
+      traderType: str(r, 'TraderType'),
+    }),
+  },
+
+  /**
    * FSD target and route progress.
    *
    * `RemainingJumpsInRoute` is present on 94.5% of these (n=4157). Its absence

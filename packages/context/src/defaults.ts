@@ -150,13 +150,115 @@ export const BUNDLED_RULES: ContextRuleSet = {
         { label: 'Engineer Unlock Guide', page: 'Engineer Unlock Guide' },
       ],
     },
+    /*
+     * Material Traders, by kind.
+     *
+     * `StationServices` carries only the bare token `materialtrader` and never
+     * says which of the three kinds the station has -- measured over 141 docks at
+     * trader stations, with no field in any event naming the type. The type comes
+     * from `MaterialTrade.TraderType`, so it is known for stations the commander
+     * has actually traded at and UNKNOWN elsewhere. See `learnTrader`.
+     *
+     * Inferring it from station economy was measured and rejected: High Tech gave
+     * `encoded` 7 times but `raw` once, Industrial gave `manufactured` 10 times
+     * but `raw` twice, and Extraction produced all three. A rule built on that
+     * would confidently name the wrong trader.
+     *
+     * Hence four rules rather than one. The typed three are worth the duplication
+     * because which kind it is, is the whole question a commander has when they see
+     * a trader -- and the untyped rule still fires when the answer is not known,
+     * so nothing is lost by not knowing.
+     */
+    {
+      id: 'station-material-trader-encoded',
+      title: 'Encoded Material Trader',
+      subtitle: 'Trades encoded materials',
+      when: {
+        kind: 'all',
+        of: [
+          { kind: 'service', id: 'materialtrader' },
+          { kind: 'state', path: 'traderType', op: 'eq', value: 'encoded' },
+        ],
+      },
+      // Above the untyped rule so the specific entry wins when both could match.
+      // They are mutually exclusive by construction, but the ordering documents
+      // the intent rather than relying on it.
+      priority: 58,
+      ttlSeconds: 1800,
+      resources: [
+        {
+          label: 'Material Traders',
+          page: 'Engineering Materials#Material Traders',
+        },
+      ],
+    },
+    {
+      id: 'station-material-trader-raw',
+      title: 'Raw Material Trader',
+      subtitle: 'Trades raw materials',
+      when: {
+        kind: 'all',
+        of: [
+          { kind: 'service', id: 'materialtrader' },
+          { kind: 'state', path: 'traderType', op: 'eq', value: 'raw' },
+        ],
+      },
+      // Above the untyped rule so the specific entry wins when both could match.
+      // They are mutually exclusive by construction, but the ordering documents
+      // the intent rather than relying on it.
+      priority: 58,
+      ttlSeconds: 1800,
+      resources: [
+        {
+          label: 'Material Traders',
+          page: 'Engineering Materials#Material Traders',
+        },
+      ],
+    },
+    {
+      id: 'station-material-trader-manufactured',
+      title: 'Manufactured Material Trader',
+      subtitle: 'Trades manufactured materials',
+      when: {
+        kind: 'all',
+        of: [
+          { kind: 'service', id: 'materialtrader' },
+          { kind: 'state', path: 'traderType', op: 'eq', value: 'manufactured' },
+        ],
+      },
+      // Above the untyped rule so the specific entry wins when both could match.
+      // They are mutually exclusive by construction, but the ordering documents
+      // the intent rather than relying on it.
+      priority: 58,
+      ttlSeconds: 1800,
+      resources: [
+        {
+          label: 'Material Traders',
+          page: 'Engineering Materials#Material Traders',
+        },
+      ],
+    },
     {
       id: 'station-material-trader',
       title: 'Material Trader available',
-      when: { kind: 'service', id: 'materialtrader' },
+      // Deliberately does not name a kind. Fires only while the kind is genuinely
+      // unestablished, so it degrades to the honest statement rather than guessing.
+      subtitle: 'Kind unknown until you trade here once',
+      when: {
+        kind: 'all',
+        of: [
+          { kind: 'service', id: 'materialtrader' },
+          { kind: 'not', of: { kind: 'state', path: 'traderType', op: 'exists' } },
+        ],
+      },
       priority: 55,
       ttlSeconds: 1800,
-      resources: [{ label: 'Engineering Materials', page: 'Engineering Materials' }],
+      resources: [
+        {
+          label: 'Material Traders',
+          page: 'Engineering Materials#Material Traders',
+        },
+      ],
     },
 
     /* ------------------------------------------------------------- mining */

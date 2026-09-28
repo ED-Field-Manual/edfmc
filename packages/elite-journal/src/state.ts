@@ -91,6 +91,19 @@ export interface CommanderState {
   /** CarrierID -> name, accumulated from CarrierStats / CarrierNameChange. */
   knownCarriers: Record<number, string>;
 
+  /**
+   * Which kind of Material Trader the current station has: `encoded`, `raw` or
+   * `manufactured`.
+   *
+   * UNKNOWN whenever the station has a trader whose type has not been established,
+   * which is the common case -- `StationServices` never names the type, and only a
+   * `MaterialTrade` does. "Has a trader, kind unknown" and "has no trader" are
+   * different facts, and the `stationServices` list is what distinguishes them.
+   */
+  traderType: Known<string>;
+  /** MarketID -> TraderType, accumulated from MaterialTrade. Stable per station. */
+  knownTraders: Record<number, string>;
+
   travel: TravelState;
 
   /**
@@ -149,6 +162,8 @@ export function initialState(): CommanderState {
     stationServices: UNKNOWN,
     carrierName: UNKNOWN,
     knownCarriers: {},
+    traderType: UNKNOWN,
+    knownTraders: {},
     docking: 'unknown',
     travel: 'unknown',
     jumpTarget: UNKNOWN,
@@ -198,12 +213,55 @@ export function learnCarrier(state: CommanderState, carrierId: number, name: str
   if (isKnown(state.marketId) && state.marketId === carrierId) state.carrierName = name;
 }
 
+/** Trader kinds the journal actually emits, lowercase as `TraderType` reports them. */
+const TRADER_TYPES = new Set(['encoded', 'raw', 'manufactured']);
+
+/**
+ * Resolve the current station's Material Trader kind from what has been learned.
+ *
+ * Only set when the station actually advertises a trader. A remembered MarketID is
+ * not sufficient on its own: a station could in principle lose the service, and
+ * reporting a trader that is no longer listed would be asserting something the
+ * game is currently contradicting.
+ */
+function resolveTraderType(s: CommanderState): void {
+  // Always recomputed, never inherited. `traderType` is a projection of
+  // (marketId, stationServices, knownTraders) rather than accumulated state, so it
+  // is cleared first: docking is reported without an intervening Undocked often
+  // enough -- a Location event after a carrier jump, or simply a missed event --
+  // and a leftover value would confidently name the previous station's trader.
+  s.traderType = UNKNOWN;
+  if (!isKnown(s.marketId) || !isKnown(s.stationServices)) return;
+  if (!s.stationServices.some((svc) => svc.id === 'materialtrader')) return;
+  const type = s.knownTraders[s.marketId];
+  if (type) s.traderType = type;
+}
+
+/**
+ * Record a station's Material Trader kind and re-resolve if it is the current one.
+ *
+ * Separate from `applyEvent` for the same reason as `learnCarrier`: identities are
+ * loaded from storage and replayed from historical journals, and those old events
+ * must not overwrite `lastEvent*` and make the dashboard report stale activity.
+ */
+export function learnTrader(state: CommanderState, marketId: number, traderType: string): void {
+  if (!Number.isFinite(marketId)) return;
+  const type = traderType.toLowerCase();
+  // Unrecognised kinds are dropped rather than stored. A rule keys on these
+  // values, and a future fourth kind should read as UNKNOWN until it is measured
+  // rather than silently flowing through to the UI as a raw token.
+  if (!TRADER_TYPES.has(type)) return;
+  state.knownTraders[marketId] = type;
+  if (isKnown(state.marketId) && state.marketId === marketId) resolveTraderType(state);
+}
+
 function clearLocation(s: CommanderState): void {
   s.stationName = UNKNOWN;
   s.stationType = UNKNOWN;
   s.marketId = UNKNOWN;
   s.stationServices = UNKNOWN;
   s.carrierName = UNKNOWN;
+  s.traderType = UNKNOWN;
 }
 
 /**
@@ -287,6 +345,17 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       break;
     }
 
+    case 'trader-identity': {
+      const d = event.data as {
+        marketId: Known<number>;
+        traderType: Known<string>;
+      };
+      if (isKnown(d.marketId) && isKnown(d.traderType)) {
+        learnTrader(state, d.marketId, d.traderType);
+      }
+      break;
+    }
+
     case 'docked': {
       const d = event.data as DockedData;
       state.docking = 'docked';
@@ -298,6 +367,7 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
       state.systemAddress = set(state.systemAddress, d.systemAddress);
       if (d.services !== UNKNOWN) state.stationServices = d.services;
       resolveCarrierName(state);
+      resolveTraderType(state);
       break;
     }
 
@@ -435,6 +505,7 @@ function applyLocationLike(state: CommanderState, d: LocationData): void {
       if (d.services !== UNKNOWN) state.stationServices = d.services as readonly StationService[];
       // Covers starting the session already docked, and CarrierJump.
       resolveCarrierName(state);
+      resolveTraderType(state);
     } else {
       clearLocation(state);
     }

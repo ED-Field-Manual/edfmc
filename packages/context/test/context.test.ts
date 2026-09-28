@@ -3,6 +3,7 @@ import {
   JournalSessionContext,
   applyEvent,
   initialState,
+  isKnown,
   normalize,
   parseLine,
   type CommanderState,
@@ -60,6 +61,17 @@ const ENGINEER_PROGRESS_CHANGE =
 const ENGINEER_CRAFT =
   '{ "timestamp":"2026-08-15T10:00:00Z", "event":"EngineerCraft", "Slot":"PowerPlant", "Module":"int_powerplant_size6_class5", "Ingredients":[ { "Name":"iron", "Count":1 } ], "Engineer":"Felicity Farseer", "EngineerID":300100, "BlueprintID":128673738, "BlueprintName":"PowerPlant_Armoured", "Level":1, "Quality":0.412000 }';
 
+/**
+ * Verbatim Docked at Ray Gateway, which has both a material trader and a tech
+ * broker. Note what StationServices does NOT say: which kind of trader it is.
+ */
+const DOCKED_TRADER_STATION =
+  '{ "timestamp":"2026-06-20T22:48:43Z", "event":"Docked", "StationName":"Ray Gateway", "StationType":"Coriolis", "Taxi":false, "Multicrew":false, "StarSystem":"Diaguandri", "SystemAddress":670417429889, "MarketID":3223343616, "StationFaction":{ "Name":"EXO" }, "StationGovernment":"$government_Democracy;", "StationServices":[ "dock", "autodock", "blackmarket", "commodities", "contacts", "exploration", "missions", "outfitting", "crewlounge", "rearm", "refuel", "repair", "shipyard", "tuning", "engineer", "missionsgenerated", "flightcontroller", "stationoperations", "powerplay", "searchrescue", "materialtrader", "techBroker", "stationMenu", "shop" ], "StationEconomy":"$economy_HighTech;", "StationEconomies":[], "DistFromStarLS":20.0 }';
+
+/** Verbatim MaterialTrade at that same MarketID. This is the only thing that names the kind. */
+const MATERIAL_TRADE_ENCODED =
+  '{ "timestamp":"2026-06-20T22:53:15Z", "event":"MaterialTrade", "MarketID":3223343616, "TraderType":"encoded", "Paid":{ "Material":"adaptiveencryptors", "Category":"Encoded", "Quantity":2 }, "Received":{ "Material":"disruptedwakeechoes", "Category":"Encoded", "Quantity":27 } }';
+
 function stateWith(line?: string): CommanderState {
   const s = initialState();
   if (line) applyEvent(s, ev(line));
@@ -83,6 +95,19 @@ describe('wiki URLs', () => {
 
   it('encodes characters that would otherwise break the URL', () => {
     expect(pageUrl('Tod "The Blaster" McQuinn')).toContain('%22');
+  });
+
+  it('treats # as a section anchor, not part of the title', () => {
+    // MediaWiki forbids # in titles, so this is unambiguous. Percent-encoding it
+    // would produce a URL that lands on a nonexistent page instead of a heading.
+    expect(pageUrl('Engineering Materials#Material Traders')).toBe(
+      'https://edfieldmanual.com/wiki/Engineering_Materials#Material_Traders',
+    );
+  });
+
+  it('drops an empty fragment rather than emitting a bare #', () => {
+    expect(pageUrl('Mining#')).toBe('https://edfieldmanual.com/wiki/Mining');
+    expect(pageUrl('Mining#  ')).toBe('https://edfieldmanual.com/wiki/Mining');
   });
 
   it('refuses non-http schemes from an untrusted rule set', () => {
@@ -403,10 +428,24 @@ describe('bundled rule set', () => {
       'Ship Modules', 'Ships and Equipment', 'Trailblazers',
     ]);
 
+    // Section anchors verified the same way, via action=parse&prop=sections. A
+    // fragment pointing at a heading that does not exist silently lands the reader
+    // at the top of the page, so it is checked rather than trusted.
+    const VERIFIED_SECTIONS = new Set([
+      'Engineering Materials#Material Traders',
+    ]);
+
     for (const rule of BUNDLED_RULES.rules) {
       for (const resource of rule.resources) {
         if (!resource.page) continue;
-        expect(VERIFIED_PAGES.has(resource.page), `${rule.id} -> "${resource.page}"`).toBe(true);
+        const [title, fragment] = resource.page.split('#');
+        expect(VERIFIED_PAGES.has(title), `${rule.id} -> "${title}"`).toBe(true);
+        if (fragment !== undefined) {
+          expect(
+            VERIFIED_SECTIONS.has(resource.page),
+            `${rule.id} -> unverified section "${resource.page}"`,
+          ).toBe(true);
+        }
       }
     }
   });
@@ -449,5 +488,75 @@ describe('bundled rule set', () => {
   it('assigns distinct priorities to the top contexts so ranking is stable', () => {
     const top = [...BUNDLED_RULES.rules].sort((a, b) => b.priority - a.priority).slice(0, 5);
     expect(new Set(top.map((r) => r.priority)).size).toBe(top.length);
+  });
+});
+
+describe('Material Trader kind', () => {
+  function resolver(now: () => number) {
+    return new ContextResolver(BUNDLED_RULES, { now, maxActive: 5 });
+  }
+
+  it('does not name a kind before the commander has traded there', () => {
+    // StationServices says only `materialtrader` -- measured over 141 docks with no
+    // field naming the type. Claiming a kind here would be a guess.
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), stateWith(DOCKED_TRADER_STATION));
+
+    const ids = r.current().map((a) => a.rule.id);
+    expect(ids).toContain('station-material-trader');
+    expect(ids).not.toContain('station-material-trader-encoded');
+    expect(ids).not.toContain('station-material-trader-raw');
+    expect(ids).not.toContain('station-material-trader-manufactured');
+  });
+
+  it('names the kind once a MaterialTrade has revealed it', () => {
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), state);
+
+    const ids = r.current().map((a) => a.rule.id);
+    expect(ids).toContain('station-material-trader-encoded');
+    // The untyped rule must step aside, or the panel says both at once.
+    expect(ids).not.toContain('station-material-trader');
+  });
+
+  it('remembers the kind across a later visit', () => {
+    // The whole point of persisting it: the trade may have been months ago.
+    const first = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(first, ev(MATERIAL_TRADE_ENCODED));
+
+    // Undock, then dock at the same station again with no trade this time.
+    const second = initialState();
+    second.knownTraders = { ...first.knownTraders };
+    applyEvent(second, ev(DOCKED_TRADER_STATION));
+
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), second);
+    expect(r.current().map((a) => a.rule.id)).toContain('station-material-trader-encoded');
+  });
+
+  it('does not carry a kind to a different station', () => {
+    // Regression risk: knownTraders is keyed by MarketID, and a stale traderType
+    // left on state would name the wrong trader at the next station.
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+    expect(state.traderType).toBe('encoded');
+
+    applyEvent(state, ev(DOCKED_FLEET_CARRIER));
+    expect(isKnown(state.traderType)).toBe(false);
+  });
+
+  it('links the Material Traders section, not the top of the page', () => {
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+
+    const r = resolver(() => 1000);
+    r.observe(ev(MUSIC), state);
+    const active = r.current().find((a) => a.rule.id === 'station-material-trader-encoded');
+    expect(resourceUrl(active!.rule.resources[0])).toBe(
+      'https://edfieldmanual.com/wiki/Engineering_Materials#Material_Traders',
+    );
   });
 });

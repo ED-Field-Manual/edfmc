@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { JournalSessionContext, parseLine } from '../src/parser.js';
 import { normalize } from '../src/normalizer.js';
-import { applyEvent, initialState, learnCarrier, type CommanderState } from '../src/state.js';
+import {
+  applyEvent,
+  initialState,
+  learnCarrier,
+  learnTrader,
+  type CommanderState,
+} from '../src/state.js';
 import { UNKNOWN } from '../src/types.js';
 
 const ctx = new JournalSessionContext();
@@ -338,5 +344,43 @@ describe('CommanderState', () => {
     expect(s.shutdown).toBe(false);
     expect(s.ship).toBe('Python');
     expect(s.gameMode).toBe('Solo');
+  });
+});
+
+describe('material trader kinds', () => {
+  it('keeps the three kinds the journal actually reports', () => {
+    const s = initialState();
+    learnTrader(s, 111, 'encoded');
+    learnTrader(s, 222, 'raw');
+    learnTrader(s, 333, 'manufactured');
+    expect(s.knownTraders).toEqual({ 111: 'encoded', 222: 'raw', 333: 'manufactured' });
+  });
+
+  it('case-folds, because TraderType casing is not ours to depend on', () => {
+    const s = initialState();
+    learnTrader(s, 111, 'Encoded');
+    expect(s.knownTraders[111]).toBe('encoded');
+  });
+
+  it('drops a kind it does not recognise rather than storing it', () => {
+    // Context rules compare against these values. A future fourth kind should read
+    // as "not established" until it has been measured, not leak through as a raw
+    // token that the UI then presents as though it were understood.
+    const s = initialState();
+    learnTrader(s, 111, 'guardian');
+    learnTrader(s, 222, '');
+    expect(s.knownTraders).toEqual({});
+  });
+
+  it('does not resolve a kind for a station with no trader service', () => {
+    // Remembering a MarketID is not enough. If the station no longer lists the
+    // service, reporting a trader contradicts what the game is currently saying.
+    const s = initialState();
+    s.knownTraders[3703420416] = 'encoded';
+    feed(
+      s,
+      '{ "timestamp":"2026-09-01T20:00:00Z", "event":"Docked", "StationName":"HBN-TXN", "StationType":"FleetCarrier", "StarSystem":"Wregoe JO-G c24-27", "SystemAddress":7506361389778, "MarketID":3703420416, "StationServices":[ "dock", "commodities", "contacts" ] }',
+    );
+    expect(s.traderType).toBe(UNKNOWN);
   });
 });

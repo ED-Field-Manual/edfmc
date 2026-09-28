@@ -25,11 +25,28 @@ export const EDFM_WIKI: WikiConfig = {
  * MediaWiki maps spaces to underscores. Everything else is percent-encoded, but
  * `/` and `:` are left intact because they are meaningful in titles such as
  * `CMDR Fima/Privacy Policy`.
+ *
+ * A `#` separates an optional section anchor, as in
+ * `Engineering Materials#Material Traders`. This is unambiguous: MediaWiki
+ * forbids `#` in page titles outright, so it can only ever be a fragment. Linking
+ * to the relevant section matters when one page covers several situations the
+ * rules distinguish -- the three kinds of Material Trader share a page.
  */
 export function pageUrl(title: string, config: WikiConfig = EDFM_WIKI): string {
-  const normalised = title.trim().replace(/\s+/g, '_');
-  const encoded = encodeURIComponent(normalised).replace(/%2F/g, '/').replace(/%3A/g, ':');
-  return config.base + config.articlePath.replace('$1', encoded);
+  const hash = title.indexOf('#');
+  const titlePart = hash === -1 ? title : title.slice(0, hash);
+  const fragment = hash === -1 ? '' : title.slice(hash + 1);
+
+  const encoded = encodePart(titlePart);
+  // An empty fragment (`Page#`) is dropped rather than emitting a bare trailing
+  // `#`, which would be a URL that looks broken for no benefit.
+  const suffix = fragment.trim().length > 0 ? '#' + encodePart(fragment) : '';
+  return config.base + config.articlePath.replace('$1', encoded) + suffix;
+}
+
+function encodePart(part: string): string {
+  const normalised = part.trim().replace(/\s+/g, '_');
+  return encodeURIComponent(normalised).replace(/%2F/g, '/').replace(/%3A/g, ':');
 }
 
 /** Resolve a resource to a URL, preferring an explicit absolute URL. */

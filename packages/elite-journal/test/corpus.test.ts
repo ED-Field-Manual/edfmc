@@ -120,4 +120,70 @@ suite('real journal corpus', () => {
     // Informational: this list is the Phase 3+ normalization backlog.
     expect(unknown.size).toBeGreaterThanOrEqual(0);
   });
+
+  /* ------------------------------------------------- material trader kinds */
+
+  it('learns material trader kinds, and they stay stable per station', async () => {
+    // The design rests on two measured claims. This test is what stops either
+    // silently becoming false after a game update.
+    const files = await listJournalFiles(DIR);
+    const all = files.filter((f) => f.sizeBytes > 0);
+
+    const typesByMarket = new Map<number, Set<string>>();
+    for (const f of all) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        if (e.kind !== 'trader-identity') continue;
+        const d = e.data as { marketId: unknown; traderType: unknown };
+        if (typeof d.marketId !== 'number' || typeof d.traderType !== 'string') continue;
+        const set = typesByMarket.get(d.marketId) ?? new Set<string>();
+        set.add(d.traderType);
+        typesByMarket.set(d.marketId, set);
+      }
+    }
+
+    // A commander who has never traded has nothing to assert about.
+    if (typesByMarket.size === 0) return;
+
+    for (const [marketId, types] of typesByMarket) {
+      // Claim 1: only the three known kinds are ever reported. A fourth would mean
+      // learnTrader is silently dropping a real trader kind.
+      for (const t of types) expect(['encoded', 'raw', 'manufactured']).toContain(t);
+      // Claim 2: a station's kind is stable. Remembering it across restarts is only
+      // sound if it does not change, so this asserts it rather than assuming it.
+      expect(types.size, `MarketID ${marketId} reported ${[...types].join(', ')}`).toBe(1);
+    }
+  });
+
+  it('cannot determine a trader kind from StationServices alone', async () => {
+    // The premise of the whole feature: the docking event never names the kind. If
+    // a game update ever starts reporting it, this test fails and the much simpler
+    // approach becomes available.
+    const files = await listJournalFiles(DIR);
+    const recent = files.filter((f) => f.sizeBytes > 0).slice(-40);
+
+    let traderStations = 0;
+    for (const f of recent) {
+      const r = await replayFile(f.fullPath);
+      for (const e of r.events) {
+        if (e.kind !== 'docked' && e.kind !== 'location') continue;
+        const raw = e.source.raw as Record<string, unknown>;
+        const services = raw['StationServices'];
+        if (!Array.isArray(services) || !services.includes('materialtrader')) continue;
+        traderStations += 1;
+
+        // No service token distinguishes a kind: the list carries the bare token
+        // and nothing more specific alongside it.
+        const traderTokens = services.filter((t) => /materialtrader/i.test(String(t)));
+        expect(traderTokens).toEqual(['materialtrader']);
+        // And no sibling field names one either.
+        expect(
+          Object.keys(raw).some((k) => /tradertype/i.test(k)),
+          'a docking event now names the trader kind',
+        ).toBe(false);
+      }
+    }
+
+    expect(traderStations).toBeGreaterThanOrEqual(0);
+  });
 });

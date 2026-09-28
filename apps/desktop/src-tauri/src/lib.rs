@@ -335,6 +335,31 @@ fn migrations() -> Vec<Migration> {
                 ON construction_sites (complete, failed, updated_at DESC);
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 9,
+        description: "remember material trader kinds",
+        sql: r#"
+            -- Which kind of Material Trader a station has is not in
+            -- StationServices, which says only `materialtrader` -- measured over
+            -- 141 docks with no field naming the type anywhere. Only
+            -- MaterialTrade.TraderType names it, so it is known for stations the
+            -- commander has traded at and must stay unknown for the rest.
+            --
+            -- Worth persisting for the same reason as known_carriers: the trade
+            -- that revealed it may have been months ago, and without this the
+            -- answer is lost every restart.
+            --
+            -- Stable in practice: across 29 stations with observed trades, none
+            -- ever reported a second TraderType. Stored as a plain upsert on that
+            -- basis, with updated_at kept so a future change is at least visible.
+            CREATE TABLE IF NOT EXISTS known_traders (
+                market_id   INTEGER PRIMARY KEY,
+                trader_type TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 
