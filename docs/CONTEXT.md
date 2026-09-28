@@ -206,6 +206,43 @@ and are wired up. The trader rules deep-link
 `Engineering Materials#Material Traders` rather than the top of the page, since one
 page covers all three kinds; page *and* section existence are both asserted by test.
 
+## A context has to be able to end
+
+The commander knows what they just did. What deserves the screen is what is true
+**now** — so the hard part is not ranking a finished activity lower, it is noticing
+that it finished at all.
+
+Originally a TTL was the only thing that could end a context, and TTL was being used
+as "how long to keep talking about it". `engineering-activity` had fifteen minutes of
+it, so it followed a commander out of the Engineer's station, through supercruise and
+across three jumps, and sat on the overlay at a station that has no Engineer —
+covering up the Material Trader that was actually there.
+
+`endsOn` fixes the cause: a rule lists the journal events that end it outright,
+whatever the TTL says.
+
+| Rule | TTL | Ends on |
+|---|---|---|
+| `interdicted` | 180s | `EscapeInterdiction`, `SupercruiseEntry`, `Docked`, `FSDJump`, `Died` |
+| `engineering-activity` | 300s | `Undocked`, `Liftoff`, `FSDJump`, `SupercruiseEntry` |
+| `exobiology-scan` | 600s | `Liftoff`, `FSDJump`, `Docked`, `SellOrganicData` |
+| `mining-*` | 600s | `Docked`, `FSDJump`, `SupercruiseEntry` |
+| `colonisation-depot` | 900s | `Undocked`, `FSDJump`, `SupercruiseEntry` |
+| `powerplay-activity` | 600s | `FSDJump` |
+
+TTL is now the fallback for when nothing announces the end, and every activity TTL
+came down accordingly.
+
+Two things this deliberately does **not** do. Station rules get no `endsOn` at all —
+they are state-scoped, held open by their condition, and where the commander *is* has
+no business being ended by an event. And `endsOn` is not a blunt list of "any movement
+event": trading materials at an Engineer is part of engineering, so `MaterialTrade`
+stays out of its list.
+
+Every event name was checked against the corpus before being used. `AsteroidCracked`,
+a plausible-looking candidate for the mining rules, is emitted **zero** times and would
+have been dead config.
+
 ## Relevance decays for what happened; it does not for where you are
 
 The two kinds of rule make different claims, and one static priority number cannot
@@ -229,8 +266,13 @@ overlay read "Engineering" at a station that has no Engineer.
 
 Actively doing the thing still keeps it on top: each new `EngineerCraft` refreshes
 `matchedAt` and restores full priority, so someone mid-session at an Engineer is
-unaffected. With these numbers the crossover is about 3.4 minutes after the last
-engineering event.
+unaffected.
+
+Decay alone was not enough, and it is worth being clear why. It changed *which*
+context won while still assuming a finished activity deserved screen space for as
+long as its TTL allowed. It is the right mechanism for the genuinely ambiguous middle
+— someone who stopped engineering but has not left yet — and the wrong one for an
+activity that is simply over. `endsOn` handles that case, and decay handles the rest.
 
 ## Overlay integration
 

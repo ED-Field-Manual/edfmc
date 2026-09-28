@@ -85,6 +85,12 @@ const SELL_ORGANIC_ONE =
 
 const DIED = '{ "timestamp":"2026-09-18T05:00:00Z", "event":"Died" }';
 
+const UNDOCKED =
+  '{ "timestamp":"2026-09-18T07:00:00Z", "event":"Undocked", "StationName":"Bering port", "StationType":"Coriolis", "MarketID":3223343616, "Taxi":false, "Multicrew":false }';
+
+const FSD_JUMP =
+  '{ "timestamp":"2026-09-18T07:05:00Z", "event":"FSDJump", "Taxi":false, "Multicrew":false, "StarSystem":"Diaguandri", "SystemAddress":670417429889, "StarPos":[-41.06,-62.15,-103.25], "SystemAllegiance":"Independent", "JumpDist":8.523, "FuelUsed":0.62, "FuelLevel":31.2 }';
+
 const INTERDICTED =
   '{ "timestamp":"2026-09-18T06:00:00Z", "event":"Interdicted", "Submitted":false, "Interdictor":"Cory Reynolds", "IsPlayer":false, "Faction":"Sirius Special Forces", "Power":"Li Yong-Rui" }';
 
@@ -729,5 +735,95 @@ describe('relevance decay', () => {
     r.observe(ev(MUSIC), state);
     r.observe(ev(INTERDICTED), state);
     expect(r.current()[0]!.rule.id).toBe('interdicted');
+  });
+});
+
+describe('an activity ends when the commander moves on', () => {
+  function resolver(now: () => number) {
+    return new ContextResolver(BUNDLED_RULES, { now, maxActive: 5 });
+  }
+
+  it('drops Engineering the moment the commander undocks', () => {
+    // The reported case, at its root. Engineering happens docked or landed, so
+    // undocking is proof it is over. Previously only the TTL could end it, so it
+    // followed the commander across three systems and covered up where they were.
+    const r = resolver(() => 1000);
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+
+    r.observe(ev(ENGINEER_CRAFT), state);
+    expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
+
+    // Same instant -- far inside the TTL, and before any decay could matter.
+    r.observe(ev(UNDOCKED), state);
+    expect(r.current().map((a) => a.rule.id)).not.toContain('engineering-activity');
+  });
+
+  it('drops it on a jump too, for an activity left behind in another system', () => {
+    const r = resolver(() => 1000);
+    r.observe(ev(ENGINEER_CRAFT), initialState());
+    expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
+
+    r.observe(ev(FSD_JUMP), initialState());
+    expect(r.current().map((a) => a.rule.id)).not.toContain('engineering-activity');
+  });
+
+  it('leaves the station context alone -- it is not an activity', () => {
+    // endsOn must not become a blunt instrument. Where the commander IS is held
+    // open by its condition and has no business being ended by an event.
+    const r = resolver(() => 1000);
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+
+    r.observe(ev(ENGINEER_CRAFT), state);
+    r.observe(ev(UNDOCKED), state);
+
+    // Still reported as docked by this state fixture, so the trader is still true.
+    expect(r.current().map((a) => a.rule.id)).toContain('station-material-trader-encoded');
+  });
+
+  it('does not end an activity that is still going', () => {
+    // MaterialTrade is not in engineering's endsOn list, and must not end it:
+    // trading materials at the Engineer is part of engineering, not leaving.
+    const r = resolver(() => 1000);
+    const state = stateWith(DOCKED_TRADER_STATION);
+
+    r.observe(ev(ENGINEER_CRAFT), state);
+    r.observe(ev(MATERIAL_TRADE_ENCODED), state);
+    expect(r.current().map((a) => a.rule.id)).toContain('engineering-activity');
+  });
+
+  it('sanitises endsOn from an untrusted rule set', () => {
+    // Rule sets arrive from the server and from plugins.
+    const dirty = {
+      version: 1,
+      updatedAt: '2026-09-18T00:00:00Z',
+      source: 'remote' as const,
+      rules: [
+        {
+          id: 'x',
+          title: 'X',
+          when: { kind: 'event' as const, name: 'Music' },
+          priority: 10,
+          ttlSeconds: 60,
+          resources: [],
+          endsOn: [
+            'Docked',
+            '',
+            42 as unknown as string,
+            null as unknown as string,
+            'a'.repeat(9999),
+            'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+          ],
+        },
+      ],
+    };
+
+    const clean = sanitise(dirty).rules[0]!;
+    expect(clean.endsOn).toBeDefined();
+    expect(clean.endsOn!.length).toBeLessThanOrEqual(8);
+    expect(clean.endsOn).not.toContain('');
+    expect(clean.endsOn!.every((e) => typeof e === 'string')).toBe(true);
+    expect(clean.endsOn!.every((e) => e.length <= 512)).toBe(true);
   });
 });

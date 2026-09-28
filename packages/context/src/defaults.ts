@@ -37,7 +37,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
       when: { kind: 'event', name: 'Interdicted' },
       // Highest priority in the set: it is the only entry that is time-critical.
       priority: 95,
-      ttlSeconds: 300,
+      ttlSeconds: 180,
+      // Over the moment it resolves: escaped, back in supercruise, docked, jumped, or dead.
+      endsOn: ['EscapeInterdiction', 'SupercruiseEntry', 'Docked', 'FSDJump', 'Died'],
       resources: [{ label: 'Frame Shift Drive Interdictor', page: 'Frame Shift Drive Interdictor' }],
       actions: [
         'Follow the blue circle to fight the interdiction.',
@@ -55,7 +57,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
       subtitle: 'Delivering to a colonisation depot',
       when: { kind: 'event', name: 'ColonisationConstructionDepot' },
       priority: 85,
-      ttlSeconds: 1800,
+      ttlSeconds: 900,
+      // Leaving the depot ends it; while still there the event keeps re-firing.
+      endsOn: ['Undocked', 'FSDJump', 'SupercruiseEntry'],
       resources: [
         { label: 'Colonisation', page: 'Colonisation' },
         { label: 'Trailblazers', page: 'Trailblazers' },
@@ -81,7 +85,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
       subtitle: 'Scanning organic life on foot',
       when: { kind: 'event', name: 'ScanOrganic' },
       priority: 80,
-      ttlSeconds: 900,
+      ttlSeconds: 600,
+      // Lifting off ends the sampling run. Embark does not -- the next patch may be a short hop away.
+      endsOn: ['Liftoff', 'FSDJump', 'Docked', 'SellOrganicData'],
       resources: [{ label: 'Exobiology', page: 'Exobiology' }],
     },
     /*
@@ -162,7 +168,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
         ],
       },
       priority: 75,
-      ttlSeconds: 900,
+      ttlSeconds: 300,
+      // Engineering happens docked or landed, so leaving ends it. This is the case that was reported: "Engineering" shown at a station three systems from the Engineer.
+      endsOn: ['Undocked', 'Liftoff', 'FSDJump', 'SupercruiseEntry'],
       resources: [
         { label: 'Engineering', page: 'Engineering' },
         { label: 'Engineering Blueprints', page: 'Engineering Blueprints' },
@@ -288,7 +296,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
       subtitle: 'Assessing an asteroid',
       when: { kind: 'event', name: 'ProspectedAsteroid' },
       priority: 70,
-      ttlSeconds: 900,
+      ttlSeconds: 600,
+      // Leaving the ring ends the mining session.
+      endsOn: ['Docked', 'FSDJump', 'SupercruiseEntry'],
       resources: [
         { label: 'Mining', page: 'Mining' },
         { label: 'Laser Mining', page: 'Laser Mining' },
@@ -302,7 +312,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
       subtitle: 'Hotspot signals found',
       when: { kind: 'event', name: 'SAASignalsFound' },
       priority: 60,
-      ttlSeconds: 900,
+      ttlSeconds: 600,
+      // Leaving the ring ends the mining session.
+      endsOn: ['Docked', 'FSDJump', 'SupercruiseEntry'],
       resources: [
         { label: 'Mining Hotspot', page: 'Mining Hotspot' },
         { label: 'How to Find a Mining Hotspot', page: 'How to Find a Mining Hotspot' },
@@ -315,6 +327,8 @@ export const BUNDLED_RULES: ContextRuleSet = {
       when: { kind: 'event', name: 'MiningRefined' },
       priority: 50,
       ttlSeconds: 600,
+      // Leaving the ring ends the mining session.
+      endsOn: ['Docked', 'FSDJump', 'SupercruiseEntry'],
       resources: [
         { label: 'Refinery', page: 'Refinery' },
         { label: 'How to Use a Refinery', page: 'How to Use a Refinery' },
@@ -354,7 +368,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
         name: ['PowerplayMerits', 'PowerplayCollect', 'PowerplayDeliver', 'PowerplayRank'],
       },
       priority: 40,
-      ttlSeconds: 900,
+      ttlSeconds: 600,
+      // Powerplay work is per-system; leaving the system ends its relevance.
+      endsOn: ['FSDJump'],
       resources: [{ label: 'Powerplay', page: 'Powerplay' }],
     },
 

@@ -114,12 +114,35 @@ be told, not have their plugin quietly altered into something else.
         },
         "priority": 80,
         "ttlSeconds": 240,
+        "endsOn": ["Docked", "FSDJump", "SupercruiseEntry"],
         "resources": [{ "label": "Core Mining", "page": "Mining" }]
       }
     ]
   }
 }
 ```
+
+### Say what ends your context, not just how long it lasts
+
+`ttlSeconds` is a **fallback**, for when nothing tells us the activity finished.
+`endsOn` is the real answer: a list of journal event names that end the context
+outright, however much TTL is left.
+
+Get this wrong and your rule outstays its welcome. A commander already knows what
+they just did — a context that lingers is not informing them, it is occupying the
+space where something currently true should be. This is not hypothetical: before
+`endsOn` existed, the bundled "Engineering" rule had a fifteen-minute TTL and
+followed commanders across three systems, hiding the station they were actually
+docked at.
+
+Pick the events that prove the commander moved on. For something done in a ring,
+that is `Docked`, `FSDJump`, `SupercruiseEntry`. For something done docked, it is
+`Undocked` and `Liftoff`. Then be careful not to over-list: trading materials at an
+Engineer is *part of* engineering, so `MaterialTrade` does not belong in its
+`endsOn`.
+
+Names are matched exactly against raw journal event names, so check yours actually
+exists — `scripts/profile-journal.ps1` will tell you. At most 8 are kept.
 
 ### Telling people how to use it
 

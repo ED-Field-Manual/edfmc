@@ -103,9 +103,24 @@ export interface ContextRule {
   readonly priority: number;
   /**
    * How long this context stays relevant after it last matched, in seconds.
-   * Without decay, a context triggered once would linger for the whole session.
+   *
+   * This is "how long the situation plausibly continues", NOT "how long to keep
+   * talking about it". A commander knows what they just did; the TTL is a fallback
+   * for when nothing tells us the activity ended, not a licence to keep a finished
+   * one on screen.
    */
   readonly ttlSeconds: number;
+  /**
+   * Events that end this context outright, whatever its TTL says.
+   *
+   * An activity is over when the commander demonstrably moves on: undocking from
+   * the Engineer, leaving the ring, jumping to another system. Without this the TTL
+   * was the only thing that could end a context, so "Engineering" followed the
+   * commander across three systems and covered up where they actually were.
+   *
+   * Names are raw journal event names, matched exactly.
+   */
+  readonly endsOn?: readonly string[];
   readonly resources: readonly ContextResource[];
   /**
    * Short imperative steps the commander can act on right now, e.g. "Follow the
@@ -154,4 +169,6 @@ export const RULE_LIMITS = {
   maxStringLength: 512,
   /** Enough for a short numbered checklist; more than that is not readable mid-flight. */
   maxActions: 4,
+  /** A handful of "you have moved on" events is plenty; more suggests a modelling error. */
+  maxEndsOn: 8,
 } as const;

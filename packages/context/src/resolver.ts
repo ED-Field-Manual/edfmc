@@ -62,6 +62,17 @@ export class ContextResolver {
     const now = this.now();
     let changed = this.expire(now);
 
+    // End contexts the commander has demonstrably moved on from, before anything
+    // is matched. A finished activity is not competing for attention with where
+    // they are now: they already know what they did, and the TTL is only a
+    // fallback for when nothing says the activity ended.
+    //
+    // Deleting the current entry while iterating a Map is well defined.
+    const eventName = event.source.event;
+    for (const [id, ctx] of this.active) {
+      if (ctx.rule.endsOn?.includes(eventName) && this.active.delete(id)) changed = true;
+    }
+
     for (const rule of this.ruleSet.rules) {
       const matches = evaluate(rule.when, { event, state });
 
@@ -179,7 +190,7 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
     if (typeof rule.title !== 'string' || !rule.when) continue;
 
     seen.add(rule.id);
-    const { actions: rawActions, note: rawNote, ...restRule } = rule;
+    const { actions: rawActions, note: rawNote, endsOn: rawEndsOn, ...restRule } = rule;
 
     // Present only when there is something to show — exactOptionalPropertyTypes
     // forbids `actions: undefined`, and an absent field is the correct signal
@@ -192,6 +203,13 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
       : undefined;
     const note = typeof rawNote === 'string' ? rawNote.slice(0, RULE_LIMITS.maxStringLength) : undefined;
 
+    const endsOn = Array.isArray(rawEndsOn)
+      ? rawEndsOn
+          .filter((e): e is string => typeof e === 'string' && e.length > 0)
+          .slice(0, RULE_LIMITS.maxEndsOn)
+          .map((e) => e.slice(0, RULE_LIMITS.maxStringLength))
+      : undefined;
+
     rules.push({
       ...restRule,
       priority: Number.isFinite(rule.priority) ? rule.priority : 0,
@@ -203,6 +221,7 @@ export function sanitise(ruleSet: ContextRuleSet): ContextRuleSet {
       resources: (rule.resources ?? []).slice(0, RULE_LIMITS.maxResourcesPerRule),
       ...(actions && actions.length > 0 ? { actions } : {}),
       ...(note ? { note } : {}),
+      ...(endsOn && endsOn.length > 0 ? { endsOn } : {}),
     });
   }
 
