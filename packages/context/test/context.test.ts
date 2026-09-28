@@ -85,6 +85,9 @@ const SELL_ORGANIC_ONE =
 
 const DIED = '{ "timestamp":"2026-09-18T05:00:00Z", "event":"Died" }';
 
+const INTERDICTED =
+  '{ "timestamp":"2026-09-18T06:00:00Z", "event":"Interdicted", "Submitted":false, "Interdictor":"Cory Reynolds", "IsPlayer":false, "Faction":"Sirius Special Forces", "Power":"Li Yong-Rui" }';
+
 function stateWith(line?: string): CommanderState {
   const s = initialState();
   if (line) applyEvent(s, ev(line));
@@ -658,5 +661,73 @@ describe('Vista Genomics gating', () => {
     const r = resolver(() => 1000);
     r.observe(ev(SCAN_ANALYSE), initialState());
     expect(r.current().map((a) => a.rule.id)).toContain('exobiology-scan');
+  });
+});
+
+describe('relevance decay', () => {
+  /** Docked at a known Material Trader, as the commander would actually be. */
+  function dockedAtTrader(): CommanderState {
+    const state = stateWith(DOCKED_TRADER_STATION);
+    applyEvent(state, ev(MATERIAL_TRADE_ENCODED));
+    return state;
+  }
+
+  it('lets a present station fact overtake a past activity', () => {
+    // Reported from the game: docked at a station with a Material Trader, and the
+    // overlay showed only "Engineering" -- an activity from another system. The
+    // overlay renders current()[0], so a stale context hid a live one entirely.
+    let t = 0;
+    const r = new ContextResolver(BUNDLED_RULES, { now: () => t, maxActive: 3 });
+    const state = dockedAtTrader();
+
+    r.observe(ev(ENGINEER_CRAFT), state);
+    expect(r.current()[0]!.rule.id).toBe('engineering-activity');
+
+    // Four minutes later, still docked and not engineering. Engineering (75 over a
+    // 900s TTL) has decayed past the trader (58), which has not decayed at all.
+    t = 4 * 60 * 1000;
+    r.observe(ev(MUSIC), state);
+    expect(r.current()[0]!.rule.id).toBe('station-material-trader-encoded');
+  });
+
+  it('keeps an activity on top while it is actually still happening', () => {
+    // The decay must not punish someone mid-session at an Engineer: every new
+    // EngineerCraft refreshes matchedAt and restores full priority.
+    let t = 0;
+    const r = new ContextResolver(BUNDLED_RULES, { now: () => t, maxActive: 3 });
+    const state = dockedAtTrader();
+
+    for (let minute = 0; minute <= 10; minute += 1) {
+      t = minute * 60 * 1000;
+      r.observe(ev(ENGINEER_CRAFT), state);
+      expect(r.current()[0]!.rule.id, `at minute ${minute}`).toBe('engineering-activity');
+    }
+  });
+
+  it('does not decay a context that describes where the commander is', () => {
+    // Being docked at a trader is exactly as true after half an hour as on arrival.
+    let t = 0;
+    const r = new ContextResolver(BUNDLED_RULES, { now: () => t, maxActive: 3 });
+    const state = dockedAtTrader();
+
+    r.observe(ev(MUSIC), state);
+    const first = r.current()[0]!.rule.id;
+    expect(first).toBe('station-material-trader-encoded');
+
+    t = 30 * 60 * 1000;
+    r.observe(ev(MUSIC), state);
+    expect(r.current()[0]!.rule.id).toBe(first);
+  });
+
+  it('still ranks a fresh high-priority event above a station fact', () => {
+    // Decay must not invert the ordering that priority exists to express. Being
+    // interdicted right now outranks anything about the station you left.
+    let t = 0;
+    const r = new ContextResolver(BUNDLED_RULES, { now: () => t, maxActive: 3 });
+    const state = dockedAtTrader();
+
+    r.observe(ev(MUSIC), state);
+    r.observe(ev(INTERDICTED), state);
+    expect(r.current()[0]!.rule.id).toBe('interdicted');
   });
 });

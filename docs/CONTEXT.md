@@ -206,6 +206,32 @@ and are wired up. The trader rules deep-link
 `Engineering Materials#Material Traders` rather than the top of the page, since one
 page covers all three kinds; page *and* section existence are both asserted by test.
 
+## Relevance decays for what happened; it does not for where you are
+
+The two kinds of rule make different claims, and one static priority number cannot
+carry both:
+
+- **Event-scoped** rules describe something that *happened*. "Recent engineering
+  activity" is by definition in the past and is worth saying less with every minute.
+- **State-scoped** rules describe where the commander *is*. They are held open by
+  their condition rather than a clock, and being docked at a Material Trader is
+  exactly as true after twenty minutes as it was on arrival.
+
+So an event-scoped context's priority decays linearly across its own TTL, and a
+state-scoped one does not decay at all. A rule therefore declares how long its
+subject stays interesting by choosing its TTL.
+
+This was a real defect, not a refinement. `engineering-activity` (priority 75, TTL
+900s) outranked a Material Trader (58) for a full fifteen minutes after the commander
+had flown to another system and docked — and because **the overlay renders only the
+top-ranked context**, the trader was not merely below it, it was invisible. The
+overlay read "Engineering" at a station that has no Engineer.
+
+Actively doing the thing still keeps it on top: each new `EngineerCraft` refreshes
+`matchedAt` and restores full priority, so someone mid-session at an Engineer is
+unaffected. With these numbers the crossover is about 3.4 minutes after the last
+engineering event.
+
 ## Overlay integration
 
 The overlay receives only the single highest-ranked context, and its links are

@@ -95,14 +95,48 @@ export class ContextResolver {
   /**
    * Currently relevant contexts, most relevant first.
    *
-   * Ranked by priority, then by recency. Recency breaks ties because two rules of
-   * equal priority are best ordered by what the commander just did.
+   * Ranked by *decayed* priority, then by recency. Recency still breaks ties,
+   * because two equally relevant rules are best ordered by what happened last.
    */
   current(): readonly ActiveContext[] {
-    this.expire(this.now());
+    const now = this.now();
+    this.expire(now);
     return [...this.active.values()]
-      .sort((a, b) => b.rule.priority - a.rule.priority || b.matchedAt - a.matchedAt)
+      .sort((a, b) => this.relevance(b, now) - this.relevance(a, now) || b.matchedAt - a.matchedAt)
       .slice(0, this.maxActive);
+  }
+
+  /**
+   * How relevant an active context is *right now*.
+   *
+   * The two kinds of rule make different claims and cannot share one static number:
+   *
+   *  - **Event-scoped** rules describe something that *happened*. "Recent
+   *    engineering activity" is by definition in the past, and gets less worth
+   *    saying every minute. Their priority decays linearly across their own TTL, so
+   *    a rule states how long its subject stays interesting by choosing that TTL.
+   *  - **State-scoped** rules describe where the commander *is*. They are held open
+   *    by their condition rather than a clock and are re-matched on every event, so
+   *    they do not decay -- being docked at a Material Trader is exactly as true
+   *    after twenty minutes as it was on arrival.
+   *
+   * Without this, static priority let a past activity hide a present fact:
+   * `engineering-activity` (75, 15-minute TTL) outranked a Material Trader (58) for
+   * a full quarter of an hour after the commander had flown to another system and
+   * docked -- and since the overlay shows only the top context, the trader was
+   * invisible the whole time.
+   *
+   * Actively doing the thing keeps it on top regardless: each new EngineerCraft
+   * refreshes `matchedAt`, restoring full priority.
+   */
+  private relevance(ctx: ActiveContext, now: number): number {
+    if (this.stateScoped.has(ctx.rule.id)) return ctx.rule.priority;
+
+    const ttlMs = ctx.rule.ttlSeconds * 1000;
+    if (ttlMs <= 0) return 0;
+    const elapsed = Math.max(0, now - ctx.matchedAt);
+    // Reaches zero exactly at expiry, which is when the context disappears anyway.
+    return ctx.rule.priority * Math.max(0, 1 - elapsed / ttlMs);
   }
 
   /** Everything active, unranked and untruncated — for diagnostics, not the UI. */
