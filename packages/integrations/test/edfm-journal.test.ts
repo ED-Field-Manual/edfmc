@@ -23,6 +23,7 @@ import {
 import {
   applyBatchOutcome,
   classifyFailure,
+  describeRejection,
   isAcknowledged,
   isPermanentRejection,
   parseBatchOutcome,
@@ -588,5 +589,58 @@ describe('applying a batch outcome to the queue', () => {
       ),
     );
     expect(applied.permanent.map((p) => p.id)).toEqual(['second']);
+  });
+});
+
+describe('a rejection code as something a person can read', () => {
+  it('explains the codes this client knows', () => {
+    expect(describeRejection('unsupported_category')).toBe(
+      'EDFM is not accepting this kind of activity yet',
+    );
+    expect(describeRejection('data_too_large')).toBe('the entry held more detail than EDFM accepts');
+    expect(describeRejection('raw_journal_not_allowed')).toContain('raw journal');
+  });
+
+  it('returns an unknown code unchanged rather than inventing a sentence', () => {
+    /*
+     * A friendly sentence for a code nobody has diagnosed would describe a
+     * failure mode that may not exist. The raw code is at least searchable and
+     * quotable in a bug report.
+     */
+    expect(describeRejection('some_future_code')).toBe('some_future_code');
+  });
+
+  it('says so when the server gave no code at all', () => {
+    expect(describeRejection(undefined)).toBe('EDFM gave no reason');
+  });
+
+  it('never returns an empty string, whatever it is given', () => {
+    // It is rendered directly into a list; a blank row is a row that says
+    // nothing happened.
+    for (const code of ['unsupported_category', 'x', undefined]) {
+      expect(describeRejection(code).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('reasons stored by an earlier build still read properly', () => {
+  it('translates the machine tokens that are already in databases', () => {
+    /*
+     * These were written as `failure.kind` before reasons were ever shown, so
+     * they exist in commanders' queues right now. Without translating on the
+     * way out, the first thing this feature ever displays is the string it was
+     * built to replace.
+     */
+    expect(describeRejection('rejected-request')).toBe(
+      'EDFM refused the whole batch this was sent in',
+    );
+    expect(describeRejection('invalid-credential')).toContain('token');
+    expect(describeRejection('profile-missing')).toContain('profile');
+  });
+
+  it('passes a sentence through unchanged, so translating twice is safe', () => {
+    // Applied on write AND on read; the second pass must be a no-op.
+    const once = describeRejection('unsupported_category');
+    expect(describeRejection(once)).toBe(once);
   });
 });

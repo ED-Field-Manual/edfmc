@@ -765,3 +765,81 @@ describe('no build artefacts leaked into the source', () => {
     }
   });
 });
+
+describe('a failure a commander can act on', () => {
+  it('shows why entries were refused, not only how many', () => {
+    /*
+     * `last_error` was written on every rejected row and read back by nothing,
+     * so the card showed a count with no cause and no remedy -- the one state in
+     * this feature that could be neither understood nor cleared.
+     */
+    expect(syncSection).toMatch(/SELECT last_error AS reason, COUNT\(\*\) AS n/);
+    expect(syncSection).toContain("status = 'rejected'");
+    expect(uiSrc).toContain('sync.failures.map');
+    expect(uiProse).toMatch(/refused by EDFM/i);
+  });
+
+  it('offers a retry, because a reason can stop applying', () => {
+    /*
+     * Rejection is permanent for the CONTENT, but its cause need not be: a
+     * category the wiki has since enabled, a limit since raised. Without this
+     * the only remedy was deleting the database.
+     */
+    expect(syncSection).toMatch(/UPDATE integration_queue[\s\S]{0,200}SET status = 'queued'/);
+    expect(syncSection).toMatch(/last_error = NULL/);
+    expect(uiSrc).toContain('snap.retryFailedJournalEntries');
+  });
+
+  it('clears the backoff when requeueing, so a retry is not stuck waiting', () => {
+    // A row returning with its old attempt count and next_attempt_at would be
+    // "retried" into a wait the commander cannot see.
+    expect(syncSection).toMatch(/attempts = 0, next_attempt_at = NULL/);
+  });
+
+  it('says a batch refusal was about the batch, not about that entry', () => {
+    /*
+     * A request-level 4xx condemns every entry that was in flight -- up to a
+     * hundred of them -- and is very probably not a fact about any single one.
+     * A commander seeing a round number of identical failures should be able to
+     * tell they share one cause.
+     */
+    expect(syncSection).toContain('EDFM refused the whole batch this was sent in');
+    // The machine token is not what gets stored as the reason.
+    expect(syncSection).not.toMatch(/markJournalRejected\(id, failure\.kind\)/);
+  });
+
+  it('turns a server code into a sentence rather than showing the code', () => {
+    expect(syncSection).toContain('describeRejection(row.reason)');
+  });
+});
+
+describe('nothing is queued that EDFM would refuse', () => {
+  it('gates the automatic path on the subtype, not only on the watermark', () => {
+    /*
+     * The bug this closes: the automatic path filtered on the watermark alone,
+     * so every new entry was queued whatever its category. Adding a category the
+     * wiki does not accept therefore turned each one into a permanent rejection
+     * -- quietly, while playing. The backfill had this gate from the start.
+     */
+    expect(syncSection).toMatch(/entries\.filter\(\s*\(e\) => this\.isSyncable\(e\)/);
+  });
+
+  it('asks the server which categories it takes, rather than assuming', () => {
+    /*
+     * `/status` returns `allowedCategories` and this client was parsing it and
+     * ignoring it, deciding from a compiled-in constant instead. A wiki with a
+     * narrower set produced a steady trickle of permanent rejections; a wiki
+     * that later widens its set now starts working with no new build.
+     */
+    expect(companionSrc).toContain('this.journalServer?.allowedCategories');
+    expect(companionSrc).toMatch(/allowed\.includes\(entry\.category\)/);
+    // The constant remains, but only as the answer before /status has replied.
+    expect(companionSrc).toContain('EDFM_JOURNAL_CATEGORIES');
+  });
+
+  it('keeps the subtype judgement local, because it is not the server’s', () => {
+    // What EDFM will STORE is the server's call; what is worth publishing at
+    // all is this app's. The two gates are separate on purpose.
+    expect(companionSrc).toMatch(/SYNCABLE_SUBTYPES as readonly string\[\]\)\.includes\(entry\.subtype\)/);
+  });
+});

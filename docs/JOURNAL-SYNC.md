@@ -127,7 +127,7 @@ in memory — so pending work survives a restart.
 | Outcome | What happens |
 |---|---|
 | Acknowledged (`created`, `updated`, `unchanged`) | Removed from the queue |
-| Rejected for its content | Marked failed; never retried |
+| Rejected for its content | Marked failed, with the reason shown on the card |
 | `duplicate_in_batch` | Retried — that is *our* batching mistake, not a bad entry |
 | Network failure, 5xx, 429 | Retried with a stored backoff |
 | Response unreadable | **Nothing is marked synced**; everything stays queued |
@@ -161,6 +161,50 @@ the owner from the token alone — the app cannot name an owner in a request eve
 if it wanted to.
 
 ---
+
+## When entries fail
+
+A rejected entry is one EDFM will not accept as it stands. The card shows **why**,
+grouped by reason with a count, because a Failed number on its own is something a
+commander can neither understand nor act on — the reason was being recorded
+against every rejected entry from the start and displayed nowhere.
+
+Two causes are worth telling apart, and the wording does:
+
+- **A per-entry rejection** names what EDFM objected to, as a sentence rather
+  than a code: *"EDFM is not accepting this kind of activity yet"* rather than
+  `unsupported_category`. An unrecognised code is shown unchanged, because
+  inventing a friendly sentence for a failure nobody has diagnosed would describe
+  something that may not exist.
+- **A request-level refusal** condemns every entry in the batch, which can be a
+  hundred of them and is very probably not a fact about any one. It says so:
+  *"EDFM refused the whole batch this was sent in."* A round number of identical
+  failures is the signature of this, and **Try again** is the sensible response.
+
+**Try again** puts rejected entries back in the queue with their attempt count
+and backoff cleared. Rejection is permanent for the *content*, but its cause need
+not be — a category the wiki has since enabled, a limit since raised — and
+without this the only remedy was deleting the database. It is safe at any time:
+the queue id is the entry id, so the server answers `unchanged` for anything it
+already holds, and an entry still unacceptable simply returns with its reason.
+
+### What is never queued in the first place
+
+An entry the server would refuse is better not sent than sent and permanently
+failed. Two gates decide, and they answer different questions:
+
+- **Does EDFM take this category?** Asked of the server, from the
+  `allowedCategories` that `/status` returns. This was being parsed and ignored
+  in favour of a compiled-in list, so a wiki configured with a narrower set
+  produced a steady trickle of permanent rejections. Reading the live list also
+  means a category enabled on the wiki starts working with no new client build.
+- **Is this worth publishing at all?** Asked locally, from `SYNCABLE_SUBTYPES`.
+  That is this app's judgement rather than the server's, which is why it stays
+  here.
+
+The automatic path was missing the second gate — it filtered on the watermark
+alone, so every new entry was queued whatever its category. That is the harder
+failure to notice, because it fills up quietly while you play.
 
 ## If the token stops working
 
@@ -288,16 +332,14 @@ never the other way round — nothing is marked sent that was not.
 - **No date or category ranges on an upload.** It is all of the syncable
   categories or none. Ranges are a real request and nothing here blocks them;
   they are simply not built.
-- **Missions are recorded locally but cannot be sent.** The Activity Journal now
+- **Missions are recorded locally but cannot be sent.** The Activity Journal
   records a `mission-completed` entry when a mission is handed in, with the
   reward the game paid. EDFM's journal extension allowlists four categories —
   `exobiology`, `exploration`, `mining`, `colonisation` — and `missions` is a
-  fifth, so the server would answer `unsupported_category` and the entry would be
-  marked permanently rejected. Queueing work that cannot succeed would fill the
-  Failed count with entries nothing the commander does can fix, so it is not
-  queued at all. Adding the category to the wiki extension and then adding
-  `mission-completed` to `SYNCABLE_SUBTYPES` is the whole change; the entries are
-  already being recorded and stored against that day.
+  fifth, so the server answers `unsupported_category`. Adding the category to the
+  wiki extension is the whole change; the entries are already being recorded and
+  stored against that day, and the client will start sending them as soon as
+  `/status` reports the category, without a new build.
 - **No session grouping.** The server supports `sessionId`, but EDFMC does not
   populate sessions — an automatic boundary rule would be a guess presented as a
   fact, which this project avoids.

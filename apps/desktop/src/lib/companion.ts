@@ -138,7 +138,9 @@ import {
   toInaraLocation,
   type InaraEvent as InaraLocationEvent,
   classifyFailure,
+  describeRejection,
   isWithinPhaseOne,
+  EDFM_JOURNAL_CATEGORIES,
   looksLikeJournalToken,
   parseBatchOutcome,
   parseStatus,
@@ -432,6 +434,8 @@ export interface CompanionSnapshot {
   ) => Promise<string | null>;
   /** Stop a running backfill at the end of the batch in flight. */
   readonly cancelJournalBackfill: () => void;
+  /** Put rejected entries back in the queue, for when their reason has lapsed. */
+  readonly retryFailedJournalEntries: () => Promise<void>;
   /**
    * Rebuild the local Activity Journal from the journal files on disk.
    *
@@ -594,6 +598,14 @@ export interface JournalSyncView {
   readonly pending: number;
   /** Entries the server will never accept. */
   readonly failed: number;
+  /**
+   * Why they failed, commonest first.
+   *
+   * Shown because a Failed count on its own is the one number here a commander
+   * can neither act on nor understand. Each reason is already sanitised where it
+   * is written -- a category name or an error code, never a server body.
+   */
+  readonly failures: ReadonlyArray<{ readonly reason: string; readonly count: number }>;
   /** ISO 8601 of the last acknowledged sync, or null. */
   readonly lastSuccessAt: string | null;
   readonly lastAttemptAt: string | null;
@@ -1516,6 +1528,7 @@ export class Companion {
   private journalLastAttempt: string | null = null;
   private journalPending = 0;
   private journalFailed = 0;
+  private journalFailures: ReadonlyArray<{ reason: string; count: number }> = [];
   private journalWatermark: string | null = null;
   private journalSyncing = false;
 
@@ -1702,11 +1715,53 @@ export class Companion {
    * Called as entries are recorded. Never awaited by ingest: the field journal
    * is a record, and syncing it must not gate reading the game's.
    */
+  /**
+   * Whether EDFM would accept this entry at all.
+   *
+   * Checked against the server's OWN allowlist when `/status` has reported one,
+   * falling back to the compiled-in list before the first successful check.
+   * `/status` returns `allowedCategories` and this client was ignoring it,
+   * deciding from a constant instead -- so a wiki configured with a narrower set
+   * than the client assumed produced a steady trickle of `unsupported_category`
+   * rejections, each one permanent, with no indication of why.
+   *
+   * Asking the server is also what makes the opposite direction work: the day a
+   * category is enabled there, these entries start flowing with no new build.
+   *
+   * The subtype list is separate and stays local, because it is this app's
+   * judgement about what is worth publishing rather than the server's about what
+   * it will store. See `SYNCABLE_SUBTYPES`.
+   */
+  private isSyncable(entry: ActivityEntry): boolean {
+    const allowed = this.journalServer?.allowedCategories;
+    const categoryOk =
+      allowed && allowed.length > 0
+        ? allowed.includes(entry.category)
+        : (EDFM_JOURNAL_CATEGORIES as readonly string[]).includes(entry.category);
+
+    return (
+      categoryOk && (SYNCABLE_SUBTYPES as readonly string[]).includes(entry.subtype)
+    );
+  }
+
   private async enqueueJournalEntries(entries: readonly ActivityEntry[]): Promise<void> {
     if (!this.db || this.discoveryFid === null) return;
     if (this.journalState === 'not-connected') return;
 
-    const eligible = entries.filter((e) => isWithinPhaseOne(e.occurredAt, this.journalWatermark));
+    /*
+     * Two gates, and the second was missing.
+     *
+     * The watermark decides WHEN; `isSyncable` decides WHETHER the server will
+     * take it at all. Without the second, every new entry was queued whatever
+     * its category -- so adding a category the wiki does not accept turned every
+     * one of those entries into a permanent rejection the commander could see a
+     * count of and do nothing about. The backfill had this gate from the start;
+     * the automatic path did not, which is the harder one to notice because it
+     * fills up quietly while you play.
+     */
+    const eligible = entries.filter(
+      (e) => this.isSyncable(e) && isWithinPhaseOne(e.occurredAt, this.journalWatermark),
+    );
     if (eligible.length === 0) return;
 
     const now = new Date().toISOString();
@@ -1930,10 +1985,76 @@ export class Companion {
       const at = (s: string) => Number(rows.find((r) => r.status === s)?.n ?? 0);
       this.journalPending = at('queued') + at('retryable');
       this.journalFailed = at('rejected');
+
+      /*
+       * Why they failed, not just how many.
+       *
+       * `last_error` was being written on every rejected row and read back by
+       * nothing, so the card showed a number with no cause and no action -- the
+       * one state in this feature a commander could neither understand nor
+       * clear. The reason is already sanitised at write time (a category, a
+       * code, never a server body), so it is safe to show as it stands.
+       */
+      const reasons = await this.db.select<Array<{ reason: string | null; n: number }>>(
+        `SELECT last_error AS reason, COUNT(*) AS n FROM integration_queue
+          WHERE integration = 'edfm-journal' AND commander_fid = $1 AND status = 'rejected'
+          GROUP BY last_error
+          ORDER BY n DESC`,
+        [this.discoveryFid],
+      );
+      /*
+       * Translated on the way OUT as well as in. Rows rejected by an earlier
+       * build hold the machine token, and they are already in commanders'
+       * databases -- so without this the first thing this ever shows somebody is
+       * the `rejected-request` it exists to replace. A reason that is already a
+       * sentence passes through unchanged.
+       */
+      const merged = new Map<string, number>();
+      for (const r of reasons) {
+        const text = r.reason === null ? 'no reason was recorded' : describeRejection(r.reason);
+        // Coalesced AFTER translating, because the grouping was done in SQL on
+        // the stored value: two codes that mean the same thing to a commander
+        // (`invalid_category` and `unsupported_category`, or a token and the
+        // sentence a later build stored for it) would otherwise be two rows
+        // saying the same words.
+        merged.set(text, (merged.get(text) ?? 0) + Number(r.n));
+      }
+      this.journalFailures = [...merged]
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count);
     } catch {
       // Counts are informational; a failed read must not break the screen.
     }
   }
+
+  /**
+   * Put rejected entries back in the queue.
+   *
+   * Rejection is permanent by design -- the content will not become acceptable
+   * by being resent -- but the REASON can stop applying: a category the wiki has
+   * since enabled, a limit the server has since raised. Without this the only
+   * remedy was to delete the database.
+   *
+   * Safe to press at any time. The queue id is the entry id, so the server
+   * answers `unchanged` for anything it already holds, and an entry that is
+   * still unacceptable simply returns to rejected with its reason.
+   */
+  readonly retryFailedJournalEntries = async (): Promise<void> => {
+    if (!this.db || this.discoveryFid === null) return;
+    try {
+      await this.db.execute(
+        `UPDATE integration_queue
+            SET status = 'queued', attempts = 0, next_attempt_at = NULL,
+                last_error = NULL, updated_at = $2
+          WHERE integration = 'edfm-journal' AND commander_fid = $1 AND status = 'rejected'`,
+        [this.discoveryFid, new Date().toISOString()],
+      );
+      await this.refreshJournalCounts();
+      this.notify();
+    } catch (err) {
+      logger.warn('edfm-journal', 'Could not requeue rejected entries', { error: String(err) });
+    }
+  };
 
   /**
    * Push what is waiting.
@@ -2057,7 +2178,18 @@ export class Companion {
       }
       this.journalState = 'unavailable';
       if (failure.retryable) await this.backoffJournal(sentIds, failure.retryAfterSeconds);
-      else for (const id of sentIds) await this.markJournalRejected(id, failure.kind);
+      else {
+        /*
+         * A request-level refusal condemns every entry that was in the batch,
+         * which may be a hundred of them and is very probably not a fact about
+         * any single one. Said that way rather than as a per-entry verdict, so
+         * a commander reading a round number of failures knows they share one
+         * cause and that Try again is the sensible response to it.
+         */
+        for (const id of sentIds) {
+          await this.markJournalRejected(id, 'EDFM refused the whole batch this was sent in');
+        }
+      }
       return;
     }
 
@@ -2095,7 +2227,8 @@ export class Companion {
       );
     }
     for (const row of applied.permanent) {
-      await this.markJournalRejected(row.id, row.reason);
+      // The code turned into a sentence. The code itself stays in the log.
+      await this.markJournalRejected(row.id, describeRejection(row.reason));
     }
     if (applied.retryable.length > 0 || applied.unanswered.length > 0) {
       await this.backoffJournal([...applied.retryable, ...applied.unanswered]);
@@ -2152,6 +2285,7 @@ export class Companion {
       hasCredential: this.integrationState['edfm-journal'].hasCredential,
       pending: this.journalPending,
       failed: this.journalFailed,
+      failures: this.journalFailures,
       lastSuccessAt: this.journalLastSuccess,
       lastAttemptAt: this.journalLastAttempt,
       message: this.journalMessage,
@@ -3393,6 +3527,7 @@ export class Companion {
         journalBackfillPreview: this.journalBackfillPreview,
         backfillJournalSync: this.backfillJournalSync,
         cancelJournalBackfill: this.cancelJournalBackfill,
+        retryFailedJournalEntries: this.retryFailedJournalEntries,
         rebuildActivityHistory: this.rebuildActivityHistory,
         cancelActivityRebuild: this.cancelActivityRebuild,
         captureScreenshot: this.captureScreenshot,

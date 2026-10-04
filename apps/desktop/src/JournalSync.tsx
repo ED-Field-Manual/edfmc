@@ -233,6 +233,43 @@ export function JournalSync({ snap }: { snap: CompanionSnapshot }) {
           </dl>
 
           {/*
+            A Failed count on its own is the one number on this card a commander
+            can neither understand nor act on. The reason was being recorded on
+            every rejected entry and shown nowhere, so this says what EDFM
+            actually objected to and offers the one action that can help.
+          */}
+          {sync.failures.length > 0 && (
+            <div className="note">
+              <strong>
+                {sync.failed} {sync.failed === 1 ? 'entry was' : 'entries were'} refused by EDFM:
+              </strong>
+              <ul className="failure-reasons">
+                {sync.failures.map((f) => (
+                  <li key={f.reason}>
+                    <span className="failure-count">{f.count}</span> {f.reason}
+                  </li>
+                ))}
+              </ul>
+              <p className="field-hint">
+                Nothing local was lost — these are still in your Journal, and the game files they
+                came from are untouched. Retrying is worth it when the cause has since changed, such
+                as a category being enabled on EDFM; an entry EDFM still will not take simply
+                returns here.
+              </p>
+              <p className="audit-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void snap.retryFailedJournalEntries()}
+                  disabled={workingOnHistory || sync.state === 'syncing'}
+                >
+                  Try these {sync.failed} again
+                </button>
+              </p>
+            </div>
+          )}
+
+          {/*
             Said plainly rather than left to be discovered: connecting an account
             did not upload the back catalogue, and visibility is not ours to set.
           */}

@@ -257,6 +257,56 @@ export function isAcknowledged(result: EntryResult): boolean {
 }
 
 /**
+ * A rejection code as a sentence a commander can act on.
+ *
+ * These are stored against the entry and shown on the Connections card, where a
+ * raw `unsupported_category` is a string to go and search for rather than an
+ * answer. The code is kept alongside the sentence, not replaced by it, because
+ * it is the precise thing to quote in a bug report.
+ *
+ * An unknown code is returned as-is. Inventing a friendly sentence for a code
+ * this client has never seen would describe a failure nobody has diagnosed.
+ */
+export function describeRejection(code: string | undefined): string {
+  switch (code) {
+    case 'unsupported_category':
+    case 'invalid_category':
+      return 'EDFM is not accepting this kind of activity yet';
+    case 'raw_journal_not_allowed':
+      return 'the entry looked like raw journal data, which EDFM refuses';
+    case 'data_too_large':
+    case 'data_too_deep':
+      return 'the entry held more detail than EDFM accepts';
+    case 'invalid_timestamp':
+      return 'EDFM did not accept the timestamp';
+    case 'invalid_id':
+      return 'EDFM did not accept the entry identifier';
+    case 'invalid_kind':
+      return 'EDFM does not recognise this activity type';
+    case 'unknown_field':
+      return 'the entry carried a field EDFM does not know';
+
+    /*
+     * Reasons stored by earlier builds, which wrote the machine token. They are
+     * already in commanders' databases, so they are translated on the way OUT as
+     * well as on the way in -- otherwise the first thing this feature ever shows
+     * someone is the string it was meant to replace.
+     */
+    case 'rejected-request':
+      return 'EDFM refused the whole batch this was sent in';
+    case 'invalid-credential':
+      return 'the journal sync token was not accepted';
+    case 'profile-missing':
+      return 'the EDFM journal profile was unavailable';
+
+    case undefined:
+      return 'EDFM gave no reason';
+    default:
+      return code;
+  }
+}
+
+/**
  * Turn an HTTP status and body into a failure a commander can act on.
  *
  * Deliberately never surfaces the server's own message for a 5xx: the extension
