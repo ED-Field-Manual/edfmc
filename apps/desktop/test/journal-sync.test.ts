@@ -445,6 +445,18 @@ describe('a history upload is not repeated', () => {
     expect(syncSection).toContain('a.subtype IN (${holes})');
   });
 
+  it('queues new activity against the same list as an upload', () => {
+    /*
+     * Live queueing once skipped this list. Every handed-in mission was queued,
+     * EDFM answered `unsupported_category`, and 24 entries sat in a real
+     * commander's Failed count with nothing they could do about it.
+     */
+    const start = companionSrc.indexOf('private async enqueueJournalEntries');
+    expect(start).toBeGreaterThan(-1);
+    const enqueue = companionSrc.slice(start, companionSrc.indexOf('INSERT OR IGNORE', start));
+    expect(enqueue).toMatch(/SYNCABLE_SUBTYPES[\s\S]{0,200}includes\(e\.subtype\)/);
+  });
+
   it('paces itself and stops when it stops making progress', () => {
     /*
      * A backfill is the only sustained traffic this client produces. It also

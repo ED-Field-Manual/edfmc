@@ -574,3 +574,50 @@ describe('the screenshot catalog', () => {
     db.close();
   });
 });
+
+describe('journal entries EDFM will never accept', () => {
+  function entry(db: DatabaseSync, id: string, subtype: string, fid = 'F1'): void {
+    db.prepare(
+      `INSERT INTO activity_entries
+         (id, commander_fid, occurred_at, category, subtype, title, data, sources, created_at)
+       VALUES (?, ?, '2026-10-03T00:00:00Z', 'x', ?, 't', '{}', '[]', '2026-10-03T00:00:00Z')`,
+    ).run(id, fid, subtype);
+  }
+  function queued(db: DatabaseSync, id: string, status: string, fid = 'F1', integration = 'edfm-journal'): void {
+    db.prepare(
+      `INSERT INTO integration_queue
+         (id, integration, commander_fid, status, payload, attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '{}', 0, '2026-10-03T00:00:00Z', '2026-10-03T00:00:00Z')`,
+    ).run(id, integration, fid, status);
+  }
+  const ids = (db: DatabaseSync) =>
+    (db.prepare('SELECT id FROM integration_queue ORDER BY id').all() as Array<{ id: string }>).map((r) => r.id);
+
+  it('clears queued missions but keeps the entries and every real answer', () => {
+    /*
+     * Live queueing once skipped the syncable list, so handed-in missions were
+     * sent, refused as an unsupported category, and stuck in Failed for good.
+     */
+    const db = new DatabaseSync(':memory:');
+    migrate(db, 15);
+    entry(db, 'mission', 'mission-completed');
+    entry(db, 'mission-pending', 'mission-completed');
+    entry(db, 'sample', 'sample-completed');
+    queued(db, 'mission', 'rejected');
+    queued(db, 'mission-pending', 'queued');
+    queued(db, 'sample', 'rejected');
+    // Another integration's row that happens to share an id is not touched.
+    queued(db, 'mission', 'queued', 'F1', 'edsm');
+    migrate(db, 16);
+
+    expect(ids(db)).toEqual(['mission', 'sample']);
+    expect(
+      (db.prepare(`SELECT integration FROM integration_queue WHERE id = 'mission'`).get() as {
+        integration: string;
+      }).integration,
+    ).toBe('edsm');
+    const n = db.prepare('SELECT COUNT(*) AS n FROM activity_entries').get() as { n: number };
+    expect(n.n).toBe(3);
+    db.close();
+  });
+});

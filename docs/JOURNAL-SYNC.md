@@ -128,6 +128,7 @@ in memory — so pending work survives a restart.
 |---|---|
 | Acknowledged (`created`, `updated`, `unchanged`) | Removed from the queue |
 | Rejected for its content | Marked failed; never retried |
+| Not in `SYNCABLE_SUBTYPES` | Never queued, live or by upload |
 | `duplicate_in_batch` | Retried — that is *our* batching mistake, not a bad entry |
 | Network failure, 5xx, 429 | Retried with a stored backoff |
 | Response unreadable | **Nothing is marked synced**; everything stays queued |
@@ -298,6 +299,13 @@ never the other way round — nothing is marked sent that was not.
   queued at all. Adding the category to the wiki extension and then adding
   `mission-completed` to `SYNCABLE_SUBTYPES` is the whole change; the entries are
   already being recorded and stored against that day.
+
+  Until migration 16 that held for an upload but not for new activity: live
+  queueing skipped `SYNCABLE_SUBTYPES` and queued every entry, so each handed-in
+  mission was refused (the server's message: the category is not enabled) and
+  sat in Failed for good. Live queueing now uses the same list. Migration 16
+  removes the queue rows for entries outside it; the entries themselves stay,
+  unsynced, ready for an upload once the category is accepted.
 - **No session grouping.** The server supports `sessionId`, but EDFMC does not
   populate sessions — an automatic boundary rule would be a guess presented as a
   fact, which this project avoids.

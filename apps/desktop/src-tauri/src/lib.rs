@@ -753,6 +753,29 @@ fn migrations() -> Vec<Migration> {
                 ON activity_entries (commander_fid, synced_at, occurred_at);
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 16,
+        description: "drop queued journal entries EDFM will never accept",
+        sql: r#"
+            -- Live queueing skipped the subtype list a backfill honours, so
+            -- every handed-in mission was queued, refused by EDFM as an
+            -- unsupported category, and left in the Failed count for good.
+            -- Nothing the commander could do would clear it.
+            --
+            -- Only the queue row goes. The Activity Journal entry stays, with
+            -- `synced_at` still NULL, so once EDFM accepts the category an
+            -- upload will pick it up. Rejections of entries this app does send
+            -- are kept: those are real answers about real content.
+            DELETE FROM integration_queue
+             WHERE integration = 'edfm-journal'
+               AND id IN (
+                   SELECT a.id FROM activity_entries a
+                    WHERE a.commander_fid = integration_queue.commander_fid
+                      AND a.subtype NOT IN ('sample-completed', 'signals-detected', 'data-sold')
+               );
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 

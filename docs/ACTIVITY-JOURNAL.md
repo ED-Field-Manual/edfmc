@@ -277,7 +277,8 @@ id that arrives rounded is one that cannot be matched back to its mission.
 than a choice here. The journal extension allowlists four categories and
 `missions` is the fifth, so it would answer `unsupported_category`. They are
 recorded and shown locally, and `SYNCABLE_SUBTYPES` is the single line that
-changes the day the wiki accepts them. See [JOURNAL-SYNC.md](JOURNAL-SYNC.md).
+changes the day the wiki accepts them. They are not queued either, so they never
+show up in the sync card's Failed count. See [JOURNAL-SYNC.md](JOURNAL-SYNC.md).
 
 ### First discovery is not claimed, and the reason is the data
 
