@@ -1705,7 +1705,14 @@ export class Companion {
     if (!this.db || this.discoveryFid === null) return;
     if (this.journalState === 'not-connected') return;
 
-    const eligible = entries.filter((e) => isWithinPhaseOne(e.occurredAt, this.journalWatermark));
+    // The same list a backfill uses. Without it every new entry was queued,
+    // and each handed-in mission came back `unsupported_category` and sat in
+    // the Failed count for good.
+    const syncable: readonly string[] = SYNCABLE_SUBTYPES;
+    const eligible = entries.filter(
+      (e) =>
+        syncable.includes(e.subtype) && isWithinPhaseOne(e.occurredAt, this.journalWatermark),
+    );
     if (eligible.length === 0) return;
 
     const now = new Date().toISOString();
