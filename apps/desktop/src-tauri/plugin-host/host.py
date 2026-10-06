@@ -707,6 +707,16 @@ class Host:
 
 def main() -> int:
     setup_logging()
+    # A crash inside Tk itself (an access violation in tk86t.dll) leaves no
+    # Python traceback in the log. faulthandler writes the Python stack of
+    # every thread at the moment of the crash, which is what says which plugin
+    # call led there.
+    import faulthandler
+    try:
+        _crash_log = open(os.path.join(config.app_dir_path, 'plugin-host-crash.log'), 'a', encoding='utf-8')
+        faulthandler.enable(_crash_log, all_threads=True)
+    except OSError:
+        pass
     if not config.default_journal_dir_path:
         emit({'type': 'error', 'message': 'No journal folder was given.'})
         return 2
