@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# Written at runtime: the commander's current route.
+route.json
+route.json.tmp
