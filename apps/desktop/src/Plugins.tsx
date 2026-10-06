@@ -56,7 +56,7 @@ function Readme({ text }: { text: string | null }) {
 }
 
 /** One Python plugin, laid out like a declarative plugin's card. */
-function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus; hostRunning: boolean }) {
+export function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus; hostRunning: boolean }) {
   const on = !plugin.disabled;
   return (
     <section className="card">
@@ -100,7 +100,7 @@ function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus;
   );
 }
 
-function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled: boolean }) {
+export function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled: boolean }) {
   const m = plugin.manifest;
 
   return (

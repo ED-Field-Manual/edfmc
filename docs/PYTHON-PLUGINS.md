@@ -85,6 +85,28 @@ showed an empty area. Placing through Tk keeps the two in agreement. This was
 checked against a stand-in parent window: the panel appeared at the requested
 size with all of the plugin's widgets inside, stayed there, and hid on request.
 
+**The web view has to be clipped.** The panel did end up above the app's web
+view, at the right place, and the tab still looked empty. The web view is a
+sibling window covering the whole client area, and it was created without
+`WS_CLIPSIBLINGS`, so it painted over the panel regardless of z-order. When the
+host makes a panel a child of the app window, it adds `WS_CLIPSIBLINGS` to the
+panel and to the app window's other direct children.
+
+**Commands never stop the loop.** Each command from the app is handled on its
+own, and the next poll is always scheduled. In an earlier build, one failing
+command (Plugin settings, see below) ended the loop for good. Every later
+command, including "hide this panel", was ignored, and a panel stayed on top of
+every other tab. Journal delivery is protected the same way.
+
+**Settings pages get the notebook.** `plugin_prefs` is called with the settings
+notebook itself, and the frame it returns becomes the tab. ConstructionTracker
+builds `nb.Frame(parent)` and returns it. When it was handed a page inside the
+notebook instead, the notebook refused to add a grandchild as a tab.
+
+**Every plugin has a tab.** Declarative plugins, and Python plugins with no panel
+or that did not start, get a tab too. It shows the plugin's card instead of a
+panel.
+
 **Closing the app** waits, off the main thread, for plugins to save before
 exiting. The app's message loop has to keep running while the host closes,
 because its panels are child windows of the app window. Blocking the main thread
