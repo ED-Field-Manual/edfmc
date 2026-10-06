@@ -327,6 +327,7 @@ input[type='text']:focus { border-color: var(--accent); }
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   color: var(--accent);
 }
+.badge.ok { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); color: var(--ok); }
 
 /* ------------------------------------------------------------ data tables */
 

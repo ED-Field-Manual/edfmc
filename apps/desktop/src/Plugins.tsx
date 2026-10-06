@@ -110,6 +110,120 @@ function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled: boolea
   );
 }
 
+/**
+ * Python plugins: real programs, run by a separate process.
+ *
+ * The warning sits above the switch and is always visible, not a dialog that is
+ * clicked through once and forgotten: what these plugins can do does not change
+ * after they are switched on.
+ */
+function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
+  const py = snap.pythonPlugins;
+  const failed = py.plugins.filter((p) => !p.loaded);
+  const loaded = py.plugins.filter((p) => p.loaded);
+
+  return (
+    <section className="card">
+      <div className="row spread">
+        <h2>Python plugins</h2>
+        <span className={`badge ${py.running ? 'ok' : ''}`}>
+          {py.running ? 'Running' : py.enabled ? 'Stopped' : 'Off'}
+        </span>
+      </div>
+      <p className="muted">
+        Community plugins written in Python: route planners, trackers and other tools that add
+        their own panel. Each one is a folder with a <code>load.py</code> in it. They run in a
+        separate plugin window, so a plugin that crashes cannot take the Companion with it.
+      </p>
+
+      <div className="note">
+        <strong>Python plugins are programs, not data.</strong> Once switched on, every plugin
+        in the folder runs with the same access to this PC that you have: it can read and change
+        your files, use the internet, and start other programs. Only install plugins from people
+        you trust, and switch this off if you are not sure what a plugin does.
+      </div>
+
+      <label htmlFor="python-plugins-toggle">
+        <input
+          id="python-plugins-toggle"
+          type="checkbox"
+          checked={py.enabled}
+          onChange={(e) => void companion.setPythonPluginsEnabled(e.target.checked)}
+        />{' '}
+        I understand. Run Python plugins.
+      </label>
+
+      {py.python === null && (
+        <p className="note">
+          No Python 3 was found on this PC. Install Python 3 from python.org, then restart
+          plugins.
+        </p>
+      )}
+      {py.problem && <p className="note">{py.problem}</p>}
+
+      {py.folder && (
+        <p className="muted">
+          Folder: <code>{py.folder}</code>
+        </p>
+      )}
+
+      <div className="row">
+        <button type="button" onClick={() => void companion.openPythonPluginsFolder()}>
+          Open plugins folder
+        </button>
+        {py.enabled && (
+          <button type="button" onClick={() => void companion.restartPythonPlugins()}>
+            Restart plugins
+          </button>
+        )}
+        {py.running && (
+          <>
+            <button type="button" onClick={() => void companion.showPythonPluginWindow()}>
+              Show plugin window
+            </button>
+            <button type="button" onClick={() => void companion.openPythonPluginSettings()}>
+              Plugin settings
+            </button>
+          </>
+        )}
+      </div>
+
+      {loaded.length > 0 && (
+        <>
+          <h3>Running</h3>
+          <ul className="muted">
+            {loaded.map((p) => (
+              <li key={p.folder}>
+                {p.name}
+                {p.name !== p.folder && <span> ({p.folder})</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {failed.length > 0 && (
+        <>
+          <h3>Could not start</h3>
+          <ul className="note">
+            {failed.map((p) => (
+              <li key={p.folder}>
+                <strong>{p.folder}</strong>: {p.error}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {py.running && py.plugins.length === 0 && (
+        <p className="muted">
+          No plugins in the folder yet. Put a plugin's folder there, then restart plugins.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function Plugins({ snap }: { snap: CompanionSnapshot }) {
   const p = snap.plugins;
   const disabled = new Set(p.disabledIds);
@@ -160,11 +274,13 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
         </div>
 
         <p className="muted">
-          Plugins are plain data, never code. The Companion cannot run anything a plugin
+          These plugins are plain data, never code. The Companion cannot run anything one
           contains, so an installed plugin cannot read your journal, reach the network, or see
-          anything the spoiler protection hides from you.
+          anything the spoiler protection hides from you. Python plugins, below, are different.
         </p>
       </section>
+
+      <PythonPluginsCard snap={snap} />
 
       {nothingInstalled && (
         <section className="card">

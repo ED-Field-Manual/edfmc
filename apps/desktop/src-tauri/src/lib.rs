@@ -11,6 +11,7 @@ mod edsm;
 mod inara;
 mod journal;
 mod overlay;
+mod plugin_host;
 mod plugins;
 mod screenshot;
 
@@ -802,6 +803,7 @@ pub fn run() {
         )
         .manage(journal::WatcherState::default())
         .manage(overlay::OverlayState::default())
+        .manage(plugin_host::PluginHostState::default())
         .setup(|app| {
             // Arm click-through at creation, before the overlay can ever be shown.
             // The overlay is sized to the whole game window, so an interactive one
@@ -847,6 +849,11 @@ pub fn run() {
                     .editing
                     .store(false, std::sync::atomic::Ordering::SeqCst);
             }
+            // Let plugins save before the process goes. Bounded: a plugin that
+            // hangs on stop is killed rather than holding the app open.
+            if let Some(state) = app.try_state::<plugin_host::PluginHostState>() {
+                plugin_host::stop(&state);
+            }
             app.exit(0);
         })
         .invoke_handler(tauri::generate_handler![
@@ -881,6 +888,11 @@ pub fn run() {
             edsm::edsm_submit,
             edsm::edsm_discard,
             inara::inara_submit,
+            plugin_host::plugin_host_info,
+            plugin_host::plugin_host_start,
+            plugin_host::plugin_host_stop,
+            plugin_host::plugin_host_send,
+            plugin_host::python_plugins_open_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running EDFM Companion");

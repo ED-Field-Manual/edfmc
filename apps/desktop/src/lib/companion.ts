@@ -175,6 +175,7 @@ import {
   type OverlayWidgets,
 } from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
+import { PythonPlugins, type PythonPluginView } from './pythonPlugins.js';
 
 /**
  * Events that fire constantly and carry no dashboard value.
@@ -407,6 +408,8 @@ export interface CompanionSnapshot {
   readonly contributions: ContributionView;
   readonly logistics: LogisticsView;
   readonly plugins: PluginView;
+  /** Python plugins, run by a separate host process when switched on. */
+  readonly pythonPlugins: PythonPluginView;
   readonly screenshots: ScreenshotView;
   readonly journalSync: JournalSyncView;
   /** Store a token, verify it against `/status`, and connect. */
@@ -3464,6 +3467,7 @@ export class Companion {
         verificationEnabled: this.verificationEnabled,
         research: this.researchView(),
         plugins: this.pluginView,
+        pythonPlugins: this.pythonPlugins.view(),
         screenshots: this.screenshotView(),
         journalSync: this.journalSyncView(),
         connectJournalSync: this.connectJournalSync,
@@ -3668,6 +3672,8 @@ export class Companion {
 
     this.directory = resolution.directory;
     this.directoryDetail = resolution.detail;
+    // Not awaited: Python plugins starting must never delay reading the game.
+    void this.pythonPlugins.init(resolution.directory);
     logger.info('journal', 'Directory resolution', {
       strategy: resolution.strategy,
       found: resolution.directory !== null,
@@ -5137,6 +5143,34 @@ export class Companion {
 
   isPluginEnabled(id: string): boolean {
     return !this.disabledPlugins.has(id);
+  }
+
+  /* --------------------------------------------------------- Python plugins */
+
+  private readonly pythonPlugins = new PythonPlugins({
+    getSetting: (key) => this.getSetting(key),
+    setSetting: (key, value) => this.setSetting(key, value),
+    changed: () => this.notify(),
+  });
+
+  setPythonPluginsEnabled(enabled: boolean): Promise<void> {
+    return this.pythonPlugins.setEnabled(enabled);
+  }
+
+  restartPythonPlugins(): Promise<void> {
+    return this.pythonPlugins.restart();
+  }
+
+  showPythonPluginWindow(): Promise<void> {
+    return this.pythonPlugins.showWindow();
+  }
+
+  openPythonPluginSettings(): Promise<void> {
+    return this.pythonPlugins.openSettings();
+  }
+
+  openPythonPluginsFolder(): Promise<void> {
+    return this.pythonPlugins.openFolder();
   }
 
   async openPluginsFolder(): Promise<void> {

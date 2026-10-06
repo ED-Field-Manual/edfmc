@@ -53,6 +53,10 @@ nothing is downloaded or executed.
 
 ## Why it is safe to install a stranger's plugin
 
+Everything on this page is about **declarative plugins**. Python plugins are a
+separate, opt-in feature that does run code, with its own folder and warning;
+see [PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
+
 **A plugin is data, not code.** There is no way to ship JavaScript through this
 system and no code path that would run it if you did. A plugin contributes
 declarative rules that the engines already evaluate.
