@@ -51,6 +51,8 @@ export class PythonPlugins {
   private listening = false;
   /** Set while we are the ones stopping it, so its exit is not reported as a crash. */
   private stopping = false;
+  /** The host process we started. Messages from any other (an old one exiting after a restart) are ignored. */
+  private pid: number | null = null;
 
   constructor(private readonly deps: Deps) {}
 
@@ -135,6 +137,7 @@ export class PythonPlugins {
   }
 
   private onMessage(message: Record<string, unknown>): void {
+    if (message['pid'] !== this.pid) return;
     switch (message['type']) {
       case 'status':
         this.plugins = Array.isArray(message['plugins'])
@@ -146,6 +149,7 @@ export class PythonPlugins {
         break;
       case 'exited':
         this.running = false;
+        this.pid = null;
         if (!this.stopping && this.enabled && this.problem === null) {
           this.problem = 'Plugins stopped unexpectedly. Restart them to try again.';
         }
@@ -165,7 +169,7 @@ export class PythonPlugins {
     this.problem = null;
     this.stopping = false;
     try {
-      await invoke('plugin_host_start', { journalDir: this.journalDir });
+      this.pid = await invoke<number>('plugin_host_start', { journalDir: this.journalDir });
       this.running = true;
       logger.info('plugins', 'Python plugin host started');
     } catch (err) {
@@ -183,6 +187,7 @@ export class PythonPlugins {
       // Not running is the outcome we wanted.
     }
     this.running = false;
+    this.pid = null;
     this.plugins = [];
     this.problem = null;
   }

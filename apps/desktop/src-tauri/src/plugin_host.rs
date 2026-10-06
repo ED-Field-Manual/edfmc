@@ -4,6 +4,8 @@
 //! this one. A plugin that crashes, hangs or leaks takes down only that process,
 //! and the app keeps working.
 //!
+//! Python plugins share `Documents/EDFMC/plugins` with declarative plugins.
+//!
 //! **This runs code the commander installed, with their full permissions.**
 //! That is the point of the feature and the reason it is off until they switch
 //! it on past a warning (see `docs/PYTHON-PLUGINS.md`). Nothing here starts it
@@ -34,14 +36,25 @@ struct Running {
     stdin: ChildStdin,
 }
 
-/// Where Python plugins live: a folder of its own, next to the app's data.
-///
-/// Deliberately not the declarative plugins folder. Those are data the app
-/// validates; these are programs, and mixing the two would blur exactly the
-/// line the warning asks the commander to understand.
+/// Where Python plugins live: the same plugins folder as every other plugin,
+/// `Documents/EDFMC/plugins`. A folder with a `load.py` is a Python plugin and
+/// one with a `plugin.json` is a declarative one; each loader ignores the
+/// other kind.
 fn python_plugins_path(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_data_dir().ok()?.join("python-plugins");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = crate::plugins::plugins_path(app)?;
+    // Earlier builds kept Python plugins in app data. Anything put there moves
+    // over, once, and only where the name is not already taken.
+    if let Ok(old) = app.path().app_data_dir().map(|d| d.join("python-plugins")) {
+        if let Ok(entries) = std::fs::read_dir(&old) {
+            for entry in entries.flatten() {
+                let target = dir.join(entry.file_name());
+                if !target.exists() {
+                    let _ = std::fs::rename(entry.path(), target);
+                }
+            }
+            let _ = std::fs::remove_dir(&old);
+        }
+    }
     Some(dir)
 }
 
@@ -131,9 +144,10 @@ pub fn plugin_host_start(
     app: AppHandle,
     state: State<'_, PluginHostState>,
     journal_dir: String,
-) -> Result<(), String> {
+) -> Result<u32, String> {
     if is_running(&state) {
-        return Ok(());
+        let guard = state.inner.lock().unwrap();
+        return Ok(guard.as_ref().map(|r| r.child.id()).unwrap_or(0));
     }
     let script = host_script(&app).ok_or("The plugin host is missing from this install.")?;
     let (python, pre_args) = find_python(&app).ok_or(
@@ -167,21 +181,28 @@ pub fn plugin_host_start(
     let mut child = command.spawn().map_err(|e| format!("Python could not be started: {e}"))?;
     let stdin = child.stdin.take().ok_or("No stdin")?;
     let stdout = child.stdout.take().ok_or("No stdout")?;
+    // Every message names the process it came from. After a restart the old
+    // process's exit arrives while the new one is running, and without this
+    // it read as the new one crashing.
+    let pid = child.id();
 
     let handle = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
             // Only well-formed JSON is forwarded; anything else is not protocol.
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                let _ = handle.emit(EVENT, value);
+            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("pid".into(), pid.into());
+                    let _ = handle.emit(EVENT, value);
+                }
             }
         }
-        let _ = handle.emit(EVENT, serde_json::json!({ "type": "exited" }));
+        let _ = handle.emit(EVENT, serde_json::json!({ "type": "exited", "pid": pid }));
     });
 
     *state.inner.lock().unwrap() = Some(Running { child, stdin });
-    Ok(())
+    Ok(pid)
 }
 
 fn send_line(state: &State<'_, PluginHostState>, message: &serde_json::Value) -> Result<(), String> {

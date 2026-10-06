@@ -132,8 +132,9 @@ function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
       </div>
       <p className="muted">
         Community plugins written in Python: route planners, trackers and other tools that add
-        their own panel. Each one is a folder with a <code>load.py</code> in it. They run in a
-        separate plugin window, so a plugin that crashes cannot take the Companion with it.
+        their own panel. Each one is a folder with a <code>load.py</code> in it, kept in the same
+        plugins folder as above. They run in a separate plugin window, so a plugin that crashes
+        cannot take the Companion with it.
       </p>
 
       <div className="note">
@@ -161,16 +162,7 @@ function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
       )}
       {py.problem && <p className="note">{py.problem}</p>}
 
-      {py.folder && (
-        <p className="muted">
-          Folder: <code>{py.folder}</code>
-        </p>
-      )}
-
       <div className="row">
-        <button type="button" onClick={() => void companion.openPythonPluginsFolder()}>
-          Open plugins folder
-        </button>
         {py.enabled && (
           <button type="button" onClick={() => void companion.restartPythonPlugins()}>
             Restart plugins
@@ -243,8 +235,9 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
       <section className="card">
         <h2>Installing</h2>
         <p className="muted">
-          A plugin is a folder containing a <code>plugin.json</code>. Put it in the plugins
-          folder and press Reload &mdash; nothing is downloaded, compiled or restarted.
+          A plugin is a folder containing a <code>plugin.json</code>, or a <code>load.py</code>{' '}
+          for a Python plugin. Put it in the plugins folder and press Reload (Restart plugins for
+          Python ones) &mdash; nothing is downloaded or compiled.
         </p>
 
         {p.directory ? (

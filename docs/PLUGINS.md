@@ -13,7 +13,7 @@ that folder in the plugins directory.
    straight to it:
 
    ```
-   Documents\EDFM Companion\plugins
+   Documents\EDFMC\plugins
    ```
 
    The folder is created the first time the app runs, so it is always there.
@@ -32,7 +32,7 @@ that folder in the plugins directory.
 The full path on a typical Windows machine:
 
 ```
-C:\Users\<you>\Documents\EDFM Companion\plugins\deep-core-mining\plugin.json
+C:\Users\<you>\Documents\EDFMC\plugins\deep-core-mining\plugin.json
 ```
 
 The Plugins screen then shows a card for it: description, version, author, the
@@ -360,10 +360,15 @@ already uses, not in this system.
 - `plugins.rs` reads one directory, one level deep, and returns text. Recursing
   would let a plugin hide manifests inside another plugin's folder, which makes
   "which plugin contributed this" unanswerable.
-- The folder is `Documents/EDFM Companion/plugins`, not app data, and is named
-  for people rather than by bundle identifier. Installing a plugin means someone
-  putting a folder somewhere, and somewhere they can find unaided beats
-  somewhere technically tidier — `Documents\EDFM Companion\plugins` can be
+- The folder is `Documents/EDFMC/plugins`, not app data, and is named for people
+  rather than by bundle identifier. Everything the app keeps for a commander is
+  under `Documents/EDFMC` (plugins and screenshots), and Python plugins share
+  this same folder: a `plugin.json` makes a declarative plugin, a `load.py` a
+  Python one, and each loader ignores the other kind. Earlier builds used
+  `Documents/EDFM Companion/plugins`, which is moved here once if the new folder
+  does not exist yet. Installing a plugin means someone putting a folder
+  somewhere, and somewhere they can find unaided beats somewhere technically
+  tidier — `Documents\EDFMC\plugins` can be
   described over voice chat; `%APPDATA%\com.edfieldmanual.companion\plugins`
   cannot. It falls back to app data on a platform with no Documents folder. The
   SQLite database stays in app data either way, since nobody should be

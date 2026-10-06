@@ -492,6 +492,49 @@ pub fn folder_writable(path: String) -> bool {
     }
 }
 
+/// The default screenshot folder: `Documents/EDFMC/screenshots`, beside the
+/// plugins folder, so everything the app keeps for a commander is in one place.
+#[tauri::command]
+pub fn screenshots_default_dir(app: tauri::AppHandle) -> Option<String> {
+    crate::plugins::edfmc_documents(&app).map(|d| d.join("screenshots").to_string_lossy().into_owned())
+}
+
+/// Move the images in one folder into another, returning `[old, new]` for each
+/// file moved so the catalog can be updated to match.
+///
+/// Only files directly in `from`, and never over an existing file: a name that
+/// is already taken in `to` is left where it is rather than overwritten. The
+/// old folder is removed only if that leaves it empty.
+#[tauri::command]
+pub fn move_screenshots(from: String, to: String) -> Result<Vec<[String; 2]>, String> {
+    let from = PathBuf::from(from);
+    let to = PathBuf::from(to);
+    std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+    let mut moved = Vec::new();
+    for entry in std::fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let target = to.join(entry.file_name());
+        if target.exists() {
+            continue;
+        }
+        if std::fs::rename(&path, &target).is_ok() {
+            moved.push([
+                path.to_string_lossy().into_owned(),
+                target.to_string_lossy().into_owned(),
+            ]);
+        }
+    }
+    if std::fs::remove_dir(&from).is_ok() {
+        if let Some(parent) = from.parent() {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+    Ok(moved)
+}
+
 /// Delete an image the commander explicitly asked to delete.
 ///
 /// Separate from removing a catalog row on purpose: §16 requires the two to be

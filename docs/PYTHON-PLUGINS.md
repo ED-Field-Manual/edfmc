@@ -27,9 +27,12 @@ the reversal visible:
   clicked through once and forgotten.
 - **A separate process.** Plugins run in `plugin-host/host.py`, never inside the
   app. A plugin that crashes, hangs or leaks memory takes down only the host.
-- **A separate folder.** `%APPDATA%\com.edfieldmanual.companion\python-plugins`,
-  not the declarative plugins folder, so a data plugin and a program are never
-  confused for each other.
+- **One plugins folder.** `Documents\EDFMC\plugins`, shared with declarative
+  plugins, so everything the app keeps is under `Documents\EDFMC`. A
+  folder with a `load.py` is a Python plugin and one with a `plugin.json` is a
+  declarative plugin. Each loader skips the other kind, so the two cannot be
+  mistaken for each other. The first build put Python plugins in app data, and
+  anything placed there is moved over once.
 - **Read-only toward the game.** The host reads the journal folder and nothing
   else of the game's. It writes nothing there.
 
@@ -74,6 +77,11 @@ outer folder and failed.
 **Plugin output** (`print`, uncaught errors) goes to
 `python-host/plugin-host.log`. stdout is reserved for the protocol, so a stray
 `print` cannot corrupt it.
+
+**Restarting.** Every message from the host carries its process id, and the app
+ignores messages from any process but the one it last started. Without this,
+after a restart the old process's exit arrived while the new one was running and
+was reported as "Plugins stopped unexpectedly".
 
 **Stopping.** The host is asked to quit, which lets plugins save in
 `plugin_stop`, and is killed after five seconds if it has not exited. Closing the

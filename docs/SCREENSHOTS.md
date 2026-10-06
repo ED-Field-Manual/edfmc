@@ -207,10 +207,17 @@ The rules:
 
 ## Where the files live
 
-Default: **`Pictures\EDFM Companion\Screenshots`**, resolved through the Windows
-known-folder API rather than by appending "Pictures" to your user profile — the
+Default: **`Documents\EDFMC\screenshots`**, beside the plugins folder, so
+everything the app keeps for you is in one place. Resolved through the Windows
+known-folder API rather than by appending "Documents" to your user profile — the
 folder is relocatable, and on a machine where it has been moved a string-built
 path is simply wrong.
+
+Earlier builds defaulted to `Pictures\EDFM Companion\Screenshots`. If you were
+still on that default, the app moves your existing images to the new folder once
+and updates the catalog to match. A file whose name is already taken in the new
+folder is left where it was rather than overwritten. If you chose a folder of
+your own, it is kept.
 
 You can change it in Settings. The folder is tested by actually writing to it: a
 disconnected network drive reads as plausible and fails on use.
