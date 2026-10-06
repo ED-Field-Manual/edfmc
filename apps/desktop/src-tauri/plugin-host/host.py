@@ -1,0 +1,472 @@
+"""
+Python plugin host for EDFM Companion.
+
+Runs community Python plugins that were written for the de-facto standard
+plugin interface used by Elite Dangerous companion tools: a folder holding a
+`load.py` that defines `plugin_start3`, `journal_entry` and friends. The modules
+those plugins import (`config`, `monitor`, `theme`, `myNotebook`, `l10n`, ...)
+are provided by `compat/`, written for this app rather than copied.
+
+Started by the desktop app (`src-tauri/src/plugin_host.rs`) as a separate
+process, so a plugin that crashes or hangs cannot take the app down with it.
+
+## How it talks to the app
+
+- **stdout** carries one JSON object per line, and nothing else: plugin output
+  is redirected to the log so a stray `print` cannot corrupt the protocol.
+- **stdin** takes one JSON command per line: `show`, `settings`, `quit`.
+
+## Where game data comes from
+
+The host reads the journal folder itself, the same way plugins expect a host
+to: on start it reads the newest journal to learn the current state without
+replaying any of it to plugins, then delivers each new line as it is written.
+`Status.json` is watched the same way and delivered as `dashboard_entry`.
+
+The journal is only ever read. Nothing here writes to the game's folder.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import logging
+import os
+import queue
+import sys
+import threading
+import traceback
+from typing import Any
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, 'compat'))
+
+import tkinter as tk  # noqa: E402
+from tkinter import ttk  # noqa: E402
+
+import host_bridge  # noqa: E402
+from config import config  # noqa: E402
+from monitor import monitor  # noqa: E402
+from theme import ACCENT, MUTED, SURFACE, TEXT, theme  # noqa: E402
+
+POLL_MS = 250
+
+# The protocol channel. Captured before plugins load, then sys.stdout is
+# pointed at the log so plugin prints cannot interleave with it.
+_protocol = sys.stdout
+_protocol_lock = threading.Lock()
+
+
+def emit(message: dict[str, Any]) -> None:
+    with _protocol_lock:
+        try:
+            _protocol.write(json.dumps(message) + '\n')
+            _protocol.flush()
+        except (OSError, ValueError):
+            pass
+
+
+def setup_logging() -> None:
+    os.makedirs(config.app_dir_path, exist_ok=True)
+    handler = logging.FileHandler(os.path.join(config.app_dir_path, 'plugin-host.log'), 'w', encoding='utf-8')
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+    class _ToLog:
+        def __init__(self, level: int) -> None:
+            self.level = level
+
+        def write(self, text: str) -> None:
+            text = text.rstrip()
+            if text:
+                logging.getLogger('plugin-output').log(self.level, text)
+
+        def flush(self) -> None:
+            pass
+
+    sys.stdout = _ToLog(logging.INFO)  # type: ignore[assignment]
+    sys.stderr = _ToLog(logging.WARNING)  # type: ignore[assignment]
+
+
+log = logging.getLogger('host')
+
+
+class Plugin:
+    def __init__(self, folder: str, path: str) -> None:
+        self.folder = folder
+        self.path = path
+        self.name = folder
+        self.module: Any = None
+        self.error: str | None = None
+        self.frame: tk.Frame | None = None
+
+    def call(self, hook: str, *args: Any) -> Any:
+        fn = getattr(self.module, hook, None) if self.module else None
+        if not callable(fn):
+            return None
+        try:
+            return fn(*args)
+        except Exception:
+            log.error('%s.%s failed:\n%s', self.folder, hook, traceback.format_exc())
+            return None
+
+    def has(self, hook: str) -> bool:
+        return self.module is not None and callable(getattr(self.module, hook, None))
+
+    def describe(self) -> dict[str, Any]:
+        return {'folder': self.folder, 'name': self.name, 'loaded': self.module is not None, 'error': self.error}
+
+
+def discover(plugin_dir: str) -> list[Plugin]:
+    """Every folder holding a `load.py`, skipping hidden and `.disabled` ones."""
+    found: list[Plugin] = []
+    try:
+        names = sorted(os.listdir(plugin_dir), key=str.lower)
+    except OSError:
+        return found
+    for name in names:
+        path = os.path.join(plugin_dir, name)
+        if name.startswith(('.', '_')) or name.endswith('.disabled'):
+            continue
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, 'load.py')):
+            found.append(Plugin(name, path))
+    return found
+
+
+def load(plugin: Plugin) -> None:
+    safe = ''.join(c if c.isalnum() else '_' for c in plugin.folder)
+    # A plugin's own folder goes on the path too: SpanshRouter's `load.py` does
+    # `from SpanshRouter.SpanshRouter import ...`, which must find the package
+    # *inside* its folder, not the folder itself.
+    if plugin.path not in sys.path:
+        sys.path.append(plugin.path)
+    try:
+        spec = importlib.util.spec_from_file_location(f'plugin_{safe}', os.path.join(plugin.path, 'load.py'))
+        if spec is None or spec.loader is None:
+            raise ImportError('load.py could not be read')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        plugin.error = f'{type(exc).__name__}: {exc}'
+        log.error('Could not load %s:\n%s', plugin.folder, traceback.format_exc())
+        return
+
+    start = getattr(module, 'plugin_start3', None)
+    if not callable(start):
+        plugin.error = 'No plugin_start3: written for an older, unsupported version of the interface.'
+        return
+    plugin.module = module
+    try:
+        name = start(plugin.path)
+    except Exception as exc:
+        plugin.module = None
+        plugin.error = f'Failed to start: {type(exc).__name__}: {exc}'
+        log.error('%s.plugin_start3 failed:\n%s', plugin.folder, traceback.format_exc())
+        return
+    if isinstance(name, str) and name:
+        plugin.name = name
+
+
+class JournalTail:
+    """Follows the newest journal file and Status.json."""
+
+    def __init__(self, journal_dir: str) -> None:
+        self.dir = journal_dir
+        self.file: str | None = None
+        self.offset = 0
+        self.partial = b''
+        self.status_mtime: float | None = None
+
+    def newest(self) -> str | None:
+        try:
+            names = [n for n in os.listdir(self.dir) if n.startswith('Journal.') and n.endswith('.log')]
+        except OSError:
+            return None
+        return os.path.join(self.dir, max(names)) if names else None
+
+    def _read_new(self) -> list[dict[str, Any]]:
+        if self.file is None:
+            return []
+        try:
+            with open(self.file, 'rb') as f:
+                f.seek(self.offset)
+                data = f.read()
+        except OSError:
+            return []
+        self.offset += len(data)
+        data = self.partial + data
+        lines = data.split(b'\n')
+        self.partial = lines.pop()  # incomplete until the game writes the newline
+        entries = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict) and 'event' in entry:
+                entries.append(entry)
+        return entries
+
+    def prime(self) -> None:
+        """Learn the current state from the newest journal, delivering nothing."""
+        self.file = self.newest()
+        monitor.currentdir = self.dir
+        monitor.state['JournalDir'] = self.dir
+        if self.file:
+            monitor.logfile = self.file
+            for entry in self._read_new():
+                monitor.fold(entry)
+            monitor.state['JournalDir'] = self.dir
+
+    def poll(self) -> list[dict[str, Any]]:
+        out = self._read_new()
+        newest = self.newest()
+        if newest and newest != self.file:
+            # Finish the old file first; the game may have written its last
+            # lines just before starting the new one.
+            self.file, self.offset, self.partial = newest, 0, b''
+            monitor.logfile = newest
+            out.extend(self._read_new())
+        return out
+
+    def status(self) -> dict[str, Any] | None:
+        path = os.path.join(self.dir, 'Status.json')
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return None
+        if mtime == self.status_mtime:
+            return None
+        self.status_mtime = mtime
+        try:
+            with open(path, encoding='utf-8') as f:
+                entry = json.load(f)
+        except (OSError, ValueError):
+            # Caught mid-write; the next change re-reads it.
+            self.status_mtime = None
+            return None
+        return entry if isinstance(entry, dict) else None
+
+
+class Host:
+    def __init__(self) -> None:
+        self.commands: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.plugins: list[Plugin] = []
+        self.tail = JournalTail(config.default_journal_dir_path)
+        self.settings_window: tk.Toplevel | None = None
+        self.stopping = False
+
+        self.root = tk.Tk()
+        self.root.title('EDFM Companion Plugins')
+        self.root.minsize(320, 120)
+        theme.initialize(self.root)
+        self.root.protocol('WM_DELETE_WINDOW', self.root.withdraw)
+        icon = os.environ.get('EDFMC_ICON')
+        if icon and os.path.isfile(icon):
+            try:
+                self.root.iconbitmap(icon)
+            except tk.TclError:
+                pass
+
+        bar = tk.Frame(self.root, background=SURFACE)
+        bar.grid(row=0, column=0, sticky=tk.EW, padx=8, pady=(8, 4))
+        bar.columnconfigure(0, weight=1)
+        self.status_var = tk.StringVar(value='')
+        tk.Label(bar, textvariable=self.status_var, foreground=MUTED, background=SURFACE,
+                 anchor=tk.W, wraplength=260, justify=tk.LEFT).grid(row=0, column=0, sticky=tk.EW)
+        ttk.Button(bar, text='Settings', command=self.open_settings).grid(row=0, column=1, sticky=tk.E)
+
+        self.body = tk.Frame(self.root, background=SURFACE)
+        self.body.grid(row=1, column=0, sticky=tk.NSEW, padx=8, pady=(0, 8))
+        self.body.columnconfigure(0, weight=1)
+        self.body.columnconfigure(1, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=1)
+
+        host_bridge.set_status_handler(lambda message: self.status_var.set(message))
+
+    # -- startup ---------------------------------------------------------
+
+    def start(self) -> None:
+        plugin_dir = config.plugin_dir_path
+        os.makedirs(plugin_dir, exist_ok=True)
+        # Plugins import each other, and their own packages, by folder name.
+        if plugin_dir not in sys.path:
+            sys.path.append(plugin_dir)
+
+        self.tail.prime()
+        self.plugins = discover(plugin_dir)
+        for plugin in self.plugins:
+            load(plugin)
+            log.info('%s: %s', plugin.folder, 'loaded' if plugin.module else plugin.error)
+
+        row = 0
+        for plugin in self.plugins:
+            if not plugin.has('plugin_app'):
+                continue
+            row = self._add_app(plugin, row)
+
+        if not any(p.module for p in self.plugins):
+            tk.Label(self.body, text='No plugins are running. Put a plugin folder in the plugins folder, then restart plugins.',
+                     foreground=MUTED, background=SURFACE, wraplength=280, justify=tk.LEFT
+                     ).grid(row=row, column=0, columnspan=2, sticky=tk.W)
+
+        theme.apply(self.root)
+        self.report()
+        threading.Thread(target=self._read_commands, daemon=True).start()
+        self.root.after(POLL_MS, self._tick)
+
+    def _add_app(self, plugin: Plugin, row: int) -> int:
+        # A separator above each plugin, like the rows of a single window.
+        if row > 0:
+            ttk.Separator(self.body, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2,
+                                                               sticky=tk.EW, pady=4)
+            row += 1
+        frame = tk.Frame(self.body, background=SURFACE)
+        frame.grid(row=row, column=0, columnspan=2, sticky=tk.NSEW)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        plugin.frame = frame
+        result = plugin.call('plugin_app', frame)
+        # Either one widget spanning the row, or a (label, value) pair.
+        try:
+            if isinstance(result, tuple) and len(result) == 2:
+                result[0].grid(row=0, column=0, sticky=tk.W)
+                result[1].grid(row=0, column=1, sticky=tk.EW)
+            elif isinstance(result, tk.Misc) and result.master is frame and not result.grid_info():
+                result.grid(row=0, column=0, columnspan=2, sticky=tk.EW)
+        except tk.TclError:
+            log.error('%s returned a widget that could not be placed:\n%s', plugin.folder, traceback.format_exc())
+        return row + 1
+
+    def report(self) -> None:
+        emit({'type': 'status', 'plugins': [p.describe() for p in self.plugins]})
+
+    # -- the loop --------------------------------------------------------
+
+    def _tick(self) -> None:
+        try:
+            while not self.stopping:
+                self._command(self.commands.get_nowait())
+        except queue.Empty:
+            pass
+        if self.stopping:
+            return
+
+        for entry in self.tail.poll():
+            monitor.fold(entry)
+            self._dispatch_journal(entry)
+
+        status = self.tail.status()
+        if status is not None:
+            for plugin in self.plugins:
+                if plugin.has('dashboard_entry'):
+                    plugin.call('dashboard_entry', monitor.cmdr, monitor.is_beta, status)
+
+        self.root.after(POLL_MS, self._tick)
+
+    def _dispatch_journal(self, entry: dict[str, Any]) -> None:
+        for plugin in self.plugins:
+            if not plugin.has('journal_entry'):
+                continue
+            result = plugin.call('journal_entry', monitor.cmdr, monitor.is_beta, monitor.system,
+                                 monitor.station, dict(entry), monitor.snapshot())
+            # A returned string is the plugin reporting a problem to the user.
+            if isinstance(result, str) and result:
+                self.status_var.set(f'{plugin.name}: {result}')
+
+    def _read_commands(self) -> None:
+        for line in sys.stdin:
+            try:
+                command = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(command, dict):
+                self.commands.put(command)
+        # The app went away without saying goodbye; don't outlive it.
+        self.commands.put({'type': 'quit'})
+
+    def _command(self, command: dict[str, Any]) -> None:
+        kind = command.get('type')
+        if kind == 'show':
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        elif kind == 'settings':
+            self.open_settings()
+        elif kind == 'quit':
+            self.quit()
+
+    # -- settings --------------------------------------------------------
+
+    def open_settings(self) -> None:
+        if self.settings_window is not None and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            return
+        with_prefs = [p for p in self.plugins if p.has('plugin_prefs')]
+        win = tk.Toplevel(self.root)
+        win.title('Plugin settings')
+        win.configure(background=SURFACE)
+        self.settings_window = win
+
+        if not with_prefs:
+            tk.Label(win, text='None of the running plugins has settings.', foreground=TEXT,
+                     background=SURFACE).grid(padx=16, pady=16)
+        else:
+            import myNotebook as nb
+            book = nb.Notebook(win)
+            for plugin in with_prefs:
+                page = nb.Frame(book)
+                result = plugin.call('plugin_prefs', page, monitor.cmdr, monitor.is_beta)
+                tab = result if isinstance(result, tk.Misc) else page
+                book.add(tab, text=plugin.name)
+
+        def done() -> None:
+            for plugin in self.plugins:
+                if plugin.has('prefs_changed'):
+                    plugin.call('prefs_changed', monitor.cmdr, monitor.is_beta)
+            config.save()
+            win.destroy()
+
+        ttk.Button(win, text='OK', command=done).grid(padx=10, pady=(0, 10), sticky=tk.E)
+        win.protocol('WM_DELETE_WINDOW', done)
+        theme.apply(win)
+
+    # -- shutdown --------------------------------------------------------
+
+    def quit(self) -> None:
+        if self.stopping:
+            return
+        self.stopping = True
+        config.set_shutdown()
+        for plugin in self.plugins:
+            plugin.call('plugin_stop')
+        config.save()
+        emit({'type': 'stopped'})
+        self.root.destroy()
+
+
+def main() -> int:
+    setup_logging()
+    if not config.default_journal_dir_path:
+        emit({'type': 'error', 'message': 'No journal folder was given.'})
+        return 2
+    host = Host()
+    try:
+        host.start()
+    except Exception:
+        log.error('Host failed to start:\n%s', traceback.format_exc())
+        emit({'type': 'error', 'message': 'The plugin host failed to start. See plugin-host.log.'})
+        return 1
+    host.root.mainloop()
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
