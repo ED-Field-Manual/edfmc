@@ -407,6 +407,92 @@ def reparent(child: int, parent: int) -> None:
     user32.EnumChildWindows(parent, enum_proc(clip), 0)
 
 
+class Responsive:
+    """Keep the plugin windows responding while a plugin waits on its own thread.
+
+    Plugins often block the one thread that draws them: SpanshRouter's Plot
+    Route posts to Spansh and then polls with `sleep(1)` up to twenty times,
+    all on the main thread. In a standalone window that freezes the plugin.
+    Here the panels are child windows of the app window, which shares their
+    input with the app, so the whole app froze with it.
+
+    So, on the main thread only, `time.sleep` and `requests` calls keep the
+    windows responding while they wait. The sleep still lasts as long, and the
+    request still returns the same response or raises the same error; the only
+    difference is that the window is redrawn and answers clicks meanwhile.
+    Journal delivery is held back until the plugin's wait is over, so a plugin
+    is never handed a journal entry in the middle of its own work.
+    """
+
+    STEP = 0.02
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.main = threading.get_ident()
+        self.depth = 0
+
+    def _pump(self) -> None:
+        self.depth += 1
+        try:
+            self.root.update()
+        except tk.TclError:
+            pass
+        finally:
+            self.depth -= 1
+
+    @property
+    def waiting(self) -> bool:
+        return self.depth > 0
+
+    def install(self) -> None:
+        import time as _time
+
+        real_sleep = _time.sleep
+        responsive = self
+
+        def sleep(seconds: float) -> None:
+            if threading.get_ident() != responsive.main or seconds <= 0:
+                real_sleep(seconds)
+                return
+            end = _time.monotonic() + seconds
+            while True:
+                left = end - _time.monotonic()
+                if left <= 0:
+                    return
+                responsive._pump()
+                real_sleep(min(responsive.STEP, max(left, 0)))
+
+        _time.sleep = sleep
+
+        try:
+            import requests.sessions
+        except ImportError:
+            return
+        real_request = requests.sessions.Session.request
+
+        def request(session: Any, *args: Any, **kwargs: Any) -> Any:
+            if threading.get_ident() != responsive.main:
+                return real_request(session, *args, **kwargs)
+            box: dict[str, Any] = {}
+
+            def run() -> None:
+                try:
+                    box['value'] = real_request(session, *args, **kwargs)
+                except BaseException as exc:  # handed back to the caller below
+                    box['error'] = exc
+
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            while worker.is_alive():
+                responsive._pump()
+                worker.join(responsive.STEP)
+            if 'error' in box:
+                raise box['error']
+            return box['value']
+
+        requests.sessions.Session.request = request
+
+
 class Host:
     def __init__(self) -> None:
         self.commands: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -423,6 +509,7 @@ class Host:
         self.root.title('EDFM Companion Plugins')
         theme.initialize(self.root)
         self.root.withdraw()
+        self.responsive = Responsive(self.root)
 
         host_bridge.set_status_handler(self._status_all)
 
@@ -439,6 +526,9 @@ class Host:
         if plugin_dir not in sys.path:
             sys.path.append(plugin_dir)
 
+        # Before any plugin is imported, so `from time import sleep` in a
+        # plugin picks up the responsive version.
+        self.responsive.install()
         self.tail.prime()
         self.plugins = discover(plugin_dir)
         try:
@@ -493,6 +583,10 @@ class Host:
 
     def _tick(self) -> None:
         if self.stopping:
+            return
+        if self.responsive.waiting:
+            # A plugin is mid-wait further down the stack; deliver afterwards.
+            self.root.after(POLL_MS, self._tick)
             return
         # Same rule as the command loop: one bad entry must not stop delivery.
         try:

@@ -166,6 +166,29 @@ class LoadingTest(unittest.TestCase):
         self.assertNotIn('NoLoad', folders)
 
 
+class ResponsiveTest(unittest.TestCase):
+    """SpanshRouter's Plot Route sleeps on the main thread while Spansh works."""
+
+    def test_sleep_keeps_the_window_responding_and_still_waits(self) -> None:
+        import time
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        real_sleep = time.sleep
+        try:
+            host.Responsive(root).install()
+            fired = []
+            root.after(20, lambda: fired.append(True))
+            start = time.monotonic()
+            time.sleep(0.3)
+            self.assertGreaterEqual(time.monotonic() - start, 0.29)
+            self.assertEqual(fired, [True])  # an event ran during the wait
+        finally:
+            time.sleep = real_sleep
+            root.destroy()
+
+
 class TailTest(unittest.TestCase):
     def test_primes_without_delivering_then_delivers_new_lines(self) -> None:
         jdir = os.path.join(_TMP, 'tail')

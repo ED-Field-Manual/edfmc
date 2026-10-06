@@ -107,6 +107,19 @@ notebook instead, the notebook refused to add a grandchild as a tab.
 or that did not start, get a tab too. It shows the plugin's card instead of a
 panel.
 
+**A plugin that waits cannot freeze the app.** SpanshRouter's Plot Route posts to
+Spansh and then polls with `sleep(1)` up to twenty times, all on the one thread
+that draws plugins. Because the panels are child windows of the app window,
+Windows shares their input with the app, so the app froze for as long as the
+plugin waited. On the main thread only, the host makes `time.sleep` and
+`requests` calls keep the windows responding while they wait. The wait is just as
+long, and the result or error is the same, but windows are redrawn and answer
+clicks in the meantime. Journal delivery is held until the plugin's wait is
+over, so a plugin never receives an entry in the middle of its own work.
+Measured with SpanshRouter plotting Sol to Colonia: the plot took 17 seconds,
+with the windows serviced at least every 0.22 seconds throughout, and the route
+came back with 129 waypoints.
+
 **Closing the app** waits, off the main thread, for plugins to save before
 exiting. The app's message loop has to keep running while the host closes,
 because its panels are child windows of the app window. Blocking the main thread
