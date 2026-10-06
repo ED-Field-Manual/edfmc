@@ -202,22 +202,26 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
       */}
       <section className="card">
         <div className="row spread">
-          <h2>Installing</h2>
+          <h2>Installing plugins</h2>
           {py.plugins.length > 0 && (
             <span className={`badge ${py.running ? 'ok' : ''}`}>
               Python plugins {py.running ? 'running' : 'stopped'}
             </span>
           )}
         </div>
-        <p className="muted">
-          Put a plugin's folder in the plugins folder and press Reload. The Companion works out
-          what kind of plugin it is and runs it the right way.
+        <p>
+          To install a plugin, place its folder in the plugin directory below, then click{' '}
+          <strong>Reload plugins</strong>. EDFM Companion will automatically detect the plugin type
+          and load it appropriately.
         </p>
 
         {p.directory ? (
-          <p className="muted">
-            Folder: <code>{p.directory}</code>
-          </p>
+          <div>
+            <p>
+              <strong>Plugin folder:</strong>
+            </p>
+            <code>{p.directory}</code>
+          </div>
         ) : (
           <p className="note">
             No usable plugins folder on this system.
@@ -231,9 +235,9 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
           </p>
         )}
 
-        <p className="muted">
-          Like any program you install, a Python plugin can use your files and the internet, so
-          add plugins from sources you trust.
+        <p>
+          Plugins may be able to access files on your computer and connect to the internet. Only
+          install plugins from sources you trust.
         </p>
 
         {py.python === null && py.plugins.length > 0 && (
