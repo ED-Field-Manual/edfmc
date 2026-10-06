@@ -91,6 +91,10 @@ class _Config:
         # Values plugins commonly read that the host itself owns.
         self._values.setdefault('theme', THEME_DARK)
         self._values.setdefault('journaldir', self.default_journal_dir_path)
+        # Dark-theme colours plugins read for their own text (SpanshRouter's
+        # placeholders do). Matched to the app's palette.
+        self._values.setdefault('dark_text', '#ededed')
+        self._values.setdefault('dark_highlight', '#ff7d20')
 
     # -- typed getters ---------------------------------------------------
 
