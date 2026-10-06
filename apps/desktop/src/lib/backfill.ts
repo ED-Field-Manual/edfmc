@@ -1,7 +1,7 @@
 /**
  * Recovering state from journals the app was not running for.
  *
- * Four routines that share one shape and one hazard. Each walks recent journal
+ * Routines that share one shape and one hazard. Each walks recent journal
  * files, applies a `learn*`-style mutation, and tells the UI something changed.
  *
  * **The hazard, stated once here rather than four times:** none of these may go
@@ -33,6 +33,7 @@ import {
   type CommanderState,
   type NormalizedEvent,
 } from '@edfm/elite-journal';
+import type { MissionStore } from '@edfm/missions';
 
 import { logger } from './logger.js';
 import { tauriFs } from './tauriFs.js';
@@ -251,5 +252,63 @@ export async function backfillExobiologyHoldings(
     }
   } catch (err) {
     logger.warn('journal', 'Exobiology holdings backfill failed', { error: String(err) });
+  }
+}
+
+/**
+ * Recover the details of missions accepted while the app was not running.
+ *
+ * The `Missions` snapshot at login lists every active mission, but only by id and
+ * type. A mission accepted in a session the app missed therefore appeared with no
+ * destination, reward or expiry -- or, before the store kept such missions at
+ * all, not at all: the overlay said "No active missions" while the game showed
+ * two still to hand in.
+ *
+ * Walks newest file first and stops once every missing acceptance is found, so
+ * the usual cost is one or two files. Later redirections and depot progress for
+ * those missions are collected on the way and applied in journal order.
+ *
+ * Returns true when anything was recovered, so the caller can persist it.
+ */
+export async function backfillMissionAcceptances(
+  missions: MissionStore,
+  directory: string,
+  maxFiles = 60,
+): Promise<boolean> {
+  try {
+    const wanted = new Set(missions.awaitingRecovery());
+    if (wanted.size === 0) return false;
+
+    const relevant = new Set(['MissionAccepted', 'MissionRedirected', 'CargoDepot']);
+    const files = (await listJournalFiles(directory, tauriFs)).filter((f) => f.sizeBytes > 0);
+    const recent = files.slice(-maxFiles).reverse(); // newest first
+    const perFile: NormalizedEvent[][] = [];
+    const missing = new Set(wanted);
+
+    for (const file of recent) {
+      const result = await replayFile(file.fullPath, tauriFs);
+      const events = result.events.filter((event) => {
+        const id = event.source.raw['MissionID'];
+        return relevant.has(event.source.event) && typeof id === 'number' && wanted.has(id);
+      });
+      perFile.push(events);
+      for (const event of events) {
+        if (event.source.event === 'MissionAccepted') {
+          missing.delete(event.source.raw['MissionID'] as number);
+        }
+      }
+      if (missing.size === 0) break;
+    }
+
+    // Collected newest file first; applied oldest first.
+    const changed = missions.recover(perFile.reverse().flat());
+    logger.info('missions', 'Recovered missions accepted while the app was closed', {
+      wanted: wanted.size,
+      notFound: missing.size,
+    });
+    return changed;
+  } catch (err) {
+    logger.warn('missions', 'Mission acceptance backfill failed', { error: String(err) });
+    return false;
   }
 }
