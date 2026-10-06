@@ -139,10 +139,11 @@ export function Contributions({ snap }: { snap: CompanionSnapshot }) {
           journal event and its byte offset, your game version and build.
         </p>
         <p className="muted">
-          There is no telemetry and no analytics in any configuration. Contribution is the only
-          network traffic this application makes; with it off, the Companion makes none at all.
-          Your journals are never uploaded, and chat, friends, private groups and travel history
-          are never sent anywhere.
+          There is no telemetry and no analytics in any configuration. Besides contribution, the
+          Companion only reaches the network for the services you switch on under Connections
+          and, if you have Python plugins installed, a daily check of their GitHub pages for
+          updates. Your journals are never uploaded, and chat, friends, private groups and travel
+          history are never sent anywhere.
         </p>
       </section>
     </>

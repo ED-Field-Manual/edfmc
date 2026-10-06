@@ -19,8 +19,76 @@
 
 import { useState } from 'react';
 import type { LoadedPlugin } from '@edfm/plugins';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { companion, type CompanionSnapshot } from './lib/companion';
+import type { UpdateResult } from './lib/pluginUpdates';
 import type { PythonPluginStatus } from './lib/pythonPlugins';
+
+/**
+ * What the last GitHub check found for one plugin. Notify-only: the commander
+ * updates the plugin themselves, from the link, because replacing a plugin's
+ * folder would also replace data it keeps there.
+ */
+function UpdateLine({ folder, update }: { folder: string; update: UpdateResult | undefined }) {
+  const [link, setLink] = useState('');
+  if (!update) return null;
+  const repoUrl = update.repo ? `https://github.com/${update.repo.owner}/${update.repo.name}` : null;
+  const open = repoUrl && (
+    <button type="button" className="link" onClick={() => void openUrl(repoUrl).catch(() => undefined)}>
+      {update.repo!.owner}/{update.repo!.name}
+    </button>
+  );
+
+  switch (update.state) {
+    case 'update':
+      return (
+        <p className="update-available">
+          <strong>Update available: {update.latest}</strong> (you have {update.installed}). Get it
+          from {open}.
+        </p>
+      );
+    case 'current':
+      return (
+        <p className="muted">
+          Up to date with {open} ({update.latest}).
+        </p>
+      );
+    case 'ahead':
+      return (
+        <p className="muted">
+          This copy ({update.installed}) is newer than {open} ({update.latest}), so it has probably
+          been changed locally.
+        </p>
+      );
+    default:
+      return (
+        <div className="muted">
+          <p>
+            Update check: {update.reason}
+            {open && <> Repository: {open}.</>}
+          </p>
+          {!update.repo && (
+            <div className="row">
+              <input
+                type="text"
+                placeholder="Paste the plugin's GitHub link"
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+                aria-label={`GitHub link for ${folder}`}
+              />
+              <button
+                type="button"
+                disabled={!link.trim()}
+                onClick={() => void companion.setPluginRepo(folder, link)}
+              >
+                Save
+              </button>
+            </div>
+          )}
+        </div>
+      );
+  }
+}
 
 function Instructions({ plugin }: { plugin: LoadedPlugin }) {
   const [open, setOpen] = useState(false);
@@ -59,10 +127,12 @@ function Readme({ text }: { text: string | null }) {
 export function PythonPluginCard({
   plugin,
   hostRunning,
+  update,
   showToggle = true,
 }: {
   plugin: PythonPluginStatus;
   hostRunning: boolean;
+  update?: UpdateResult;
   /** The Enabled switch lives on the Plugins page only, not on a plugin's own tab. */
   showToggle?: boolean;
 }) {
@@ -105,6 +175,8 @@ export function PythonPluginCard({
       ) : (
         <p className="note">Could not start: {plugin.error ?? 'no reason given.'}</p>
       )}
+
+      <UpdateLine folder={plugin.folder} update={update} />
 
       <Readme text={plugin.readme} />
     </section>
@@ -267,6 +339,16 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
         )}
         {py.problem && <p className="note">{py.problem}</p>}
 
+        <label htmlFor="plugin-update-checks">
+          <input
+            id="plugin-update-checks"
+            type="checkbox"
+            checked={py.updateChecks}
+            onChange={(e) => void companion.setPluginUpdateChecks(e.target.checked)}
+          />{' '}
+          Check plugins for updates on GitHub, once a day
+        </label>
+
         <div className="row">
           <button type="button" onClick={() => void companion.openPluginsFolder()}>
             Open plugins folder
@@ -279,6 +361,15 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
               Plugin settings
             </button>
           )}
+          {py.updateChecks && py.plugins.length > 0 && (
+            <button
+              type="button"
+              disabled={py.checking}
+              onClick={() => void companion.checkPluginUpdates()}
+            >
+              {py.checking ? 'Checking…' : 'Check for updates'}
+            </button>
+          )}
         </div>
       </section>
 
@@ -287,6 +378,7 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
           key={plugin.folder}
           plugin={plugin}
           hostRunning={snap.pythonPlugins.running}
+          update={snap.pythonPlugins.updates[plugin.folder]}
         />
       ))}
 

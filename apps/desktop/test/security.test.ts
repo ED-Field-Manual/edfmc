@@ -57,7 +57,7 @@ describe('capabilities', () => {
   const dir = join(TAURI, 'capabilities');
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
 
-  it('grants HTTP only to the EDFM API, and only to the main window', () => {
+  it('grants HTTP only to named destinations, and only to the main window', () => {
     const main = json(join(dir, 'default.json'));
     expect(main['windows']).toEqual(['main']);
 
@@ -67,12 +67,16 @@ describe('capabilities', () => {
 
     expect(http, 'the main window needs scoped http:default').toBeDefined();
     const allow = http!['allow'] as Array<{ url: string }>;
-    // Exactly two destinations, both named. The EDDN one is the community relay
+    // Exactly these destinations, all named. The EDDN one is the community relay
     // and is deliberately the full path rather than a wildcard, so the capability
-    // cannot be used to reach anything else on that host.
+    // cannot be used to reach anything else on that host. The two GitHub ones
+    // are for plugin update checks: repository metadata, and raw files read to
+    // find a plugin's stated version. Both are read-only GETs.
     expect(allow).toEqual([
       { url: `${API_ORIGIN}/*` },
       { url: 'https://eddn.edcd.io:4430/upload/' },
+      { url: 'https://api.github.com/repos/*' },
+      { url: 'https://raw.githubusercontent.com/*' },
     ]);
   });
 

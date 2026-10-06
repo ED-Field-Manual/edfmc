@@ -162,6 +162,54 @@ off, because Python cannot un-import a plugin that has already run.
 Cards appear while the host is running, since it is the host that reads the
 plugin folders.
 
+## Update checks
+
+Each Python plugin's card shows whether GitHub has a newer version
+(`src/lib/pluginUpdates.ts`). The check is notify-only and nothing is
+downloaded into the plugin folder, because replacing a plugin's folder would also
+replace data it keeps there. ConstructionTracker keeps its construction sites
+there.
+
+**Which repository.** Tried in order:
+
+1. A link the commander pasted on the card. Used when nothing else finds one.
+2. The `origin` in the plugin's `.git/config`, if it was installed with `git clone`.
+3. EDMC's wiki "Plugins" page, the community index, matched by link text or
+   repository name. This is how SpanshRouter resolves, to `norohind/EDMC_SpanshRouter`.
+4. A GitHub link in the plugin's README, but only one whose repository name
+   matches the plugin. READMEs link EDMC and other tools too, so an unrelated
+   link is never taken. ConstructionTracker's README links only EDMC, so it needs
+   a pasted link (`Greybaer/EDMC-ConstructionTracker`).
+
+Names are compared case-insensitively, without punctuation or a leading `EDMC`,
+so `EDMC_SpanshRouter`, `SpanshRouter` and `EDMC-ConstructionTracker` /
+`Construction Tracker` match.
+
+**Which version.** The latest GitHub release if there is one. Otherwise the
+version the plugin states on its default branch: a `version.json` (bare text or
+`{"version": ...}`), or `plugin_version`/`__version__` in `load.py`. Either file
+is found anywhere in the repository via the git tree, shallowest first. Neither of
+the commander's plugins publishes releases, and ConstructionTracker's repo keeps
+`load.py` one folder deeper than it installs.
+
+**Results.** *Update available*, *Up to date*, *newer than GitHub* (the
+commander's ConstructionTracker is 1.4.0 against GitHub's 1.3.0 because it was
+changed locally, and it is not reported as out of date), or *unknown* with the
+reason. Versions are compared numerically, part by part. A scheme that is not
+dotted numbers is reported as unknown rather than ordered by guesswork.
+
+**When.** At most once a day, once the plugin host has reported what is installed,
+plus a "Check for updates" button. Results are stored in the
+`pythonPlugins.updates` setting, so a restart does not ask GitHub again. GitHub
+allows 60 unauthenticated requests an hour, and a check costs at most four per
+plugin plus one for the index. The setting is on by default and can be turned off
+on the Plugins page. See `docs/PRIVACY.md`.
+
+Checked live on 2026-10-06: SpanshRouter resolved through the index and was up
+to date (3.1.0 from `version.json`). ConstructionTracker was unknown until its
+link was pasted, then reported as newer than GitHub (1.4.0 against 1.3.0 from
+`load.py`).
+
 ## Python
 
 **A Python runtime ships with the app**, at `resources/python/`, and is always

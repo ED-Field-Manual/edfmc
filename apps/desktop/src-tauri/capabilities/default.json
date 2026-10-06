@@ -26,6 +26,12 @@
         },
         {
           "url": "https://eddn.edcd.io:4430/upload/"
+        },
+        {
+          "url": "https://api.github.com/repos/*"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/*"
         }
       ]
     },

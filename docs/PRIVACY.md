@@ -24,10 +24,18 @@ have been the most reassuring sentence on the page and the least accurate:
 | **EDSM** | Off | Your flight log, under your own API key |
 | **Inara** | Off | Your current location, under your own API key |
 | **EDFM Commander Journal** | Off | Derived Activity Journal entries, to your own EDFM account |
+| **Plugin update checks** | On, only if Python plugins are installed | Nothing about you: read-only requests to GitHub for each plugin's repository |
 
-With **all of them off**, which is how the app ships, it makes no network request
-on its own. The one exception is an action you take yourself: see *Contribution
-being off* below. `docs/INTEGRATIONS.md` and `docs/JOURNAL-SYNC.md` are the full
+With **all of them off**, the app makes no network request on its own. The one
+exception is an action you take yourself: see *Contribution being off* below.
+
+**Plugin update checks are the one switch that ships on**, at the user's request,
+and only do anything once a Python plugin is installed. At most once a day the app
+reads EDMC's public plugin list and, for each plugin, its GitHub repository's
+latest release or stated version. The requests go to `api.github.com/repos/*` and
+`raw.githubusercontent.com/*` (both named in the HTTP allowlist) and carry
+nothing about you or your game. GitHub sees your IP address, as with any web
+request. Turn it off on the Plugins page and no request is made. `docs/INTEGRATIONS.md` and `docs/JOURNAL-SYNC.md` are the full
 account of the last four.
 
 With verification **on**, exactly two things happen, both only for stations you dock
