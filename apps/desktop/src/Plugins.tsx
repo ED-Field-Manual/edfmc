@@ -184,7 +184,7 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
   // restart, which is the only way to pick up a new or changed one.
   const reloadAll = async () => {
     await companion.reloadPlugins();
-    if (py.enabled) await companion.restartPythonPlugins();
+    await companion.restartPythonPlugins();
   };
 
   return (
@@ -197,35 +197,22 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
       </header>
 
       {/*
-        One card for both kinds. They share a folder and are installed the same
-        way; what differs is only whether they can run code, which the warning
-        and the switch below cover.
+        One card for both kinds, and no need to say which is which: the app
+        tells a rule plugin (plugin.json) from a Python one (load.py) itself.
       */}
       <section className="card">
         <div className="row spread">
           <h2>Installing</h2>
-          {py.enabled && (
+          {py.plugins.length > 0 && (
             <span className={`badge ${py.running ? 'ok' : ''}`}>
               Python plugins {py.running ? 'running' : 'stopped'}
             </span>
           )}
         </div>
         <p className="muted">
-          A plugin is a folder. Put it in the plugins folder and press Reload &mdash; nothing is
-          downloaded or compiled. There are two kinds:
+          Put a plugin's folder in the plugins folder and press Reload. The Companion works out
+          what kind of plugin it is and runs it the right way.
         </p>
-        <ul className="muted">
-          <li>
-            <strong>Rule plugins</strong> (a <code>plugin.json</code>) are plain data. The Companion
-            cannot run anything one contains, so it cannot read your journal, reach the network,
-            or see anything the spoiler protection hides from you.
-          </li>
-          <li>
-            <strong>Python plugins</strong> (a <code>load.py</code>) are community tools such as
-            route planners and trackers. Each one's panel gets its own tab under Plugins, and they
-            run in a separate process, so one that crashes cannot take the Companion with it.
-          </li>
-        </ul>
 
         {p.directory ? (
           <p className="muted">
@@ -244,24 +231,12 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
           </p>
         )}
 
-        <div className="note">
-          <strong>Python plugins are programs, not data.</strong> Once switched on, every Python
-          plugin in the folder runs with the same access to this PC that you have: it can read and
-          change your files, use the internet, and start other programs. Only install plugins from
-          people you trust, and switch this off if you are not sure what a plugin does.
-        </div>
+        <p className="muted">
+          Like any program you install, a Python plugin can use your files and the internet, so
+          add plugins from sources you trust.
+        </p>
 
-        <label htmlFor="python-plugins-toggle">
-          <input
-            id="python-plugins-toggle"
-            type="checkbox"
-            checked={py.enabled}
-            onChange={(e) => void companion.setPythonPluginsEnabled(e.target.checked)}
-          />{' '}
-          I understand. Run Python plugins.
-        </label>
-
-        {py.python === null && py.enabled && (
+        {py.python === null && py.plugins.length > 0 && (
           <p className="note">No Python could be found to run Python plugins.</p>
         )}
         {py.problem && <p className="note">{py.problem}</p>}

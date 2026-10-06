@@ -5,8 +5,13 @@
  * started by `plugin_host.rs`). This side only decides whether it runs, and
  * shows what it says.
  *
- * Off until the commander turns it on. These plugins are programs, and the
- * warning they switch it on past says so plainly; nothing starts them sooner.
+ * Python plugins run whenever there are any in the plugins folder, as they
+ * would in any other plugin host: a commander who put a plugin there wants it
+ * to run. There is no separate global switch; each plugin has its own.
+ *
+ * (An earlier build had an "I understand. Run Python plugins." switch, off by
+ * default. The user asked for it to go: plugins only run if the commander put
+ * them in the folder, which is the same choice other hosts treat as consent.)
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -40,7 +45,6 @@ export interface PythonPluginView {
   readonly problem: string | null;
 }
 
-const SETTING = 'pythonPlugins.enabled';
 const DISABLED_SETTING = 'pythonPlugins.disabled';
 
 interface Deps {
@@ -80,7 +84,8 @@ export class PythonPlugins {
   /** Read the switch and, when it is on, start plugins for this journal folder. */
   async init(journalDir: string | null): Promise<void> {
     this.journalDir = journalDir;
-    this.enabled = (await this.deps.getSetting(SETTING)) === 'true';
+    // Always on. The old setting is no longer read; see the note above.
+    this.enabled = true;
     try {
       const stored = JSON.parse((await this.deps.getSetting(DISABLED_SETTING)) ?? '[]') as unknown;
       if (Array.isArray(stored)) {
@@ -91,14 +96,6 @@ export class PythonPlugins {
     }
     await this.refreshInfo();
     if (this.enabled) await this.start();
-    this.deps.changed();
-  }
-
-  async setEnabled(enabled: boolean): Promise<void> {
-    this.enabled = enabled;
-    await this.deps.setSetting(SETTING, String(enabled));
-    if (enabled) await this.start();
-    else await this.stop();
     this.deps.changed();
   }
 

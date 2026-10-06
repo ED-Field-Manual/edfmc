@@ -1,6 +1,6 @@
 # Python plugins
 
-Status: **working.** Off by default. Runs community Python plugins
+Status: **working.** Runs community Python plugins
 written for the standard companion-tool plugin interface: a folder holding a
 `load.py` that defines `plugin_start3`, `journal_entry` and so on.
 
@@ -22,9 +22,20 @@ change their files, use the network and start programs. This reverses the "data,
 never code" rule that PLUGINS.md is built on, so it is done in a way that keeps
 the reversal visible:
 
-- **Off until switched on.** The Plugins page shows the warning above the switch
-  and keeps showing it while the switch is on. It is not a dialog that gets
-  clicked through once and forgotten.
+- **Runs what the commander installed, and nothing else.** There is no global
+  switch. A Python plugin runs because the commander put its folder in the
+  plugins folder, the same choice other plugin hosts treat as consent. Each
+  plugin can be switched off on its own card. The Plugins page states plainly,
+  without alarm, that a plugin has the same access as any program the
+  commander installs. An earlier build had an "I understand" switch, off by
+  default, with a boxed warning. It was removed at the user's request because
+  it read as alarmist, and other hosts have no such gate.
+- **Checksums do not vet plugins.** The bundled Python runtime and its
+  libraries are pinned to their publishers' SHA-256 hashes, which proves they
+  are exactly what was released. A plugin has no publisher hash to check
+  against, and a harmful plugin with a correct hash would still be harmful. The
+  only protection against a bad plugin is installing plugins from sources you
+  trust.
 - **A separate process.** Plugins run in `plugin-host/host.py`, never inside the
   app. A plugin that crashes, hangs or leaks memory takes down only the host.
 - **One plugins folder.** `Documents\EDFMC\plugins`, shared with declarative
