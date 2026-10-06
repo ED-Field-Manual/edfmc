@@ -1118,6 +1118,12 @@ export class Companion {
   private inaraSending = false;
   /** The location Inara was last told about, so it is not told twice. */
   private inaraLastSent: string | null = null;
+  /**
+   * Set when Inara refuses the key or this app's name. Such a refusal repeats on
+   * every request, and Inara's guide reserves the right to cut off keys that
+   * keep producing errors. Cleared by saving a key or toggling the switch.
+   */
+  private inaraHalted = false;
 
   /**
    * Keep the Inara profile location current.
@@ -1134,6 +1140,7 @@ export class Companion {
    * actually changed.
    */
   private observeForInara(event: NormalizedEvent): void {
+    if (this.inaraHalted) return;
     if (!this.integrationState.inara.enabled) return;
     if (!INTEGRATIONS.inara.implemented) return;
     if (!this.integrationState.inara.hasCredential) return;
@@ -1223,7 +1230,18 @@ export class Companion {
       }
 
       const outcome = parseInaraResponse(parsed);
+      if (outcome.kind === 'app-not-allowed') {
+        this.inaraHalted = true;
+        await this.recordIntegrationError(
+          'inara',
+          'Inara has not approved this app yet, so it refuses every request. Your key is not the problem. Sending is paused.',
+        );
+        logger.warn('inara', 'App name not white-listed');
+        this.notify();
+        return;
+      }
       if (outcome.kind === 'credential') {
+        this.inaraHalted = true;
         /*
          * A rejected key will not fix itself, and Inara documents that a header
          * level failure cancels the batch. Stop and say so rather than
@@ -3007,6 +3025,7 @@ export class Companion {
       logger.warn(id, 'Could not store the key', { error: String(err) });
       return 'The key could not be saved to the Windows Credential Manager.';
     }
+    if (id === 'inara') this.inaraHalted = false;
     await this.loadIntegrationState();
     this.notify();
     return null;
@@ -3035,6 +3054,7 @@ export class Companion {
 
   readonly setIntegrationEnabled = async (id: IntegrationId, enabled: boolean): Promise<void> => {
     if (!INTEGRATIONS[id]?.implemented) return;
+    if (id === 'inara') this.inaraHalted = false;
     this.integrationState = {
       ...this.integrationState,
       [id]: { ...this.integrationState[id], enabled },

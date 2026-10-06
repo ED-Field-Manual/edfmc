@@ -38,12 +38,22 @@
  * `starsystemName`, `starsystemCoords`, `stationName`, `marketID` and
  * `starsystemBodyName` -- note the lowercase `system` and the uppercase `ID`.
  *
- * ## Credentials, corrected
+ * ## Credentials, and the app white-list
  *
- * An earlier note in this project claimed Inara required an application key
- * registered by the project owner. **That was wrong.** The header carries the
- * *user's personal API key*, from their own Inara settings page; a generic
- * application key exists only for read-only events, which this does not use.
+ * The header carries the *user's personal API key*, from their own Inara
+ * settings page. That part is right.
+ *
+ * But the `appName` is not free to choose. Inara's developer guide asks
+ * developers to send the app name "as it needs to be white-listed first", and
+ * an unlisted name is refused whatever the key. The first real request this
+ * client made came back:
+ *
+ * ```
+ * eventStatus 400, "This application has no access allowed."
+ * ```
+ *
+ * An earlier note here said no registration was needed. That was wrong, and it
+ * is why the app shipped with a name Inara had never been told about.
  */
 
 export const INARA_URL = 'https://inara.cz/inapi/v1/';
@@ -165,6 +175,8 @@ export interface InaraEventResult {
 export type InaraOutcome =
   | { readonly kind: 'accepted'; readonly perEvent: readonly InaraEventResult[] }
   | { readonly kind: 'credential'; readonly message: string }
+  /** The key may be fine; Inara has not white-listed this app's name. */
+  | { readonly kind: 'app-not-allowed'; readonly message: string }
   | { readonly kind: 'retry'; readonly reason: string }
   | { readonly kind: 'malformed'; readonly reason: string };
 
@@ -184,6 +196,9 @@ export function isInaraAccepted(status: number): boolean {
  * what decides the outcome -- `header.eventStatus` is -- and a body this cannot
  * read is never taken as success.
  */
+/** Inara's wording when `appName` is not on its white-list. */
+const APP_NOT_ALLOWED = /application has no access/i;
+
 export function parseInaraResponse(body: unknown): InaraOutcome {
   if (!isRecord(body)) return { kind: 'malformed', reason: 'the reply was not an object' };
 
@@ -196,6 +211,10 @@ export function parseInaraResponse(body: unknown): InaraOutcome {
   }
   const text = typeof header['eventStatusText'] === 'string' ? header['eventStatusText'] : '';
 
+  if (status === INARA_ERROR && APP_NOT_ALLOWED.test(text)) {
+    // Same status as a bad key, so only the text tells them apart.
+    return { kind: 'app-not-allowed', message: text };
+  }
   if (status === INARA_ERROR) {
     /*
      * Documented as possibly meaning failed authorisation, with the whole batch

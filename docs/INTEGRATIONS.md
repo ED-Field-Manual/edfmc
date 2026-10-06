@@ -21,7 +21,7 @@ generate there. It is off until you connect it.
 |---|---|---|
 | **EDDN** | **Built and wired** | Nothing — it is anonymous community sharing |
 | EDSM | Designed | Your API key, and a round of live testing |
-| Inara | Sends your location | Your personal Inara API key |
+| Inara | Sends your location | Your personal Inara API key, and Inara white-listing the app name |
 | **EDFM Commander Journal** | **Built** — push-only, new activity plus an optional history upload | A journal sync token from your EDFM account |
 
 Every one ships **off**. The unbuilt ones report "Not built yet" in the UI
@@ -163,13 +163,24 @@ Two things follow from it being a *set* rather than a log:
 does not send it, because "where you are standing on a planet" is on the
 never-shares list. The body name alone keeps the profile accurate.
 
-**Correction, recorded because this file previously said otherwise.** An earlier
-version of this document claimed an application had to be registered with Inara
-to obtain an application key, and that the registration was the project owner's
-to do. **That is wrong.** Inara's own documentation says the header takes the
-*user's personal API key*; a "generic application key" exists only for
-general read-only events, which is not what this would use. `appName` and
-`appVersion` are strings the client chooses, not issued credentials.
+**Inara has to white-list the app's name first.** Two earlier versions of this
+file got this wrong in opposite directions. The first said the project owner had to
+register for an application key. The correction said `appName` was a free string
+and nothing had to be registered. That correction was also wrong. The header does
+take the commander's *personal* API key, but Inara's developer guide asks
+developers to send the app name "as it needs to be white-listed first". An
+unlisted name is refused whatever the key. This app's first real request, on
+2026-10-06, came back `400 "This application has no access allowed."`
+
+So before Inara will accept anything, the project owner has to send Inara's
+developer the app name exactly as it is sent (`EDFM Companion`), what the app
+does, a short description for Inara's list of apps, and a download URL if there
+is one.
+
+Until then, the app recognises that reply and pauses Inara for the rest of the
+run. Saving a key or switching Inara off and on again lets it try once more.
+Inara's guide reserves the right to cut off keys that keep producing errors, so
+the app does not keep sending refused requests.
 
 **What you need to do:** generate a personal API key at
 `https://inara.cz/elite/cmdr-settings-api/`. It is not your Inara password.

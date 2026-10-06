@@ -133,6 +133,15 @@ describe('reading a reply', () => {
     expect(out.kind).toBe('credential');
   });
 
+  it('tells an app Inara has not white-listed apart from a bad key', () => {
+    // Verbatim from Inara's reply to this app's first real request. Same 400 as
+    // a bad key, but no key the commander enters can fix it.
+    const out = parseInaraResponse({
+      header: { eventStatus: 400, eventStatusText: 'This application has no access allowed.' },
+    });
+    expect(out.kind).toBe('app-not-allowed');
+  });
+
   it('reports each event separately', () => {
     const out = parseInaraResponse({
       header: { eventStatus: 200 },
