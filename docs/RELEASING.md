@@ -39,7 +39,7 @@ Each binary carries a signed attestation produced by
 `actions/attest-build-provenance`, recorded in a public transparency log.
 
 ```bash
-gh attestation verify "EDFM Companion_0.1.0_x64_en-US.msi" --repo xplosivoctopus/edfmc
+gh attestation verify "EDFM Companion_0.1.0_x64_en-US.msi" --repo ED-Field-Manual/edfmc
 ```
 
 **What it proves:** this artifact was built by this workflow, from this repository,
