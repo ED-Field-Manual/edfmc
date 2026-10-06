@@ -1,6 +1,6 @@
 # Python plugins
 
-Status: **working prototype.** Off by default. Runs community Python plugins
+Status: **working.** Off by default. Runs community Python plugins
 written for the standard companion-tool plugin interface: a folder holding a
 `load.py` that defines `plugin_start3`, `journal_entry` and so on.
 
@@ -114,24 +114,38 @@ plugin folders.
 
 ## Python
 
-The host looks for, in order:
+**A Python runtime ships with the app**, at `resources/python/`, and is always
+preferred. Plugins assume the libraries a plugin host normally provides, most
+importantly `requests`, and a standard Python install lacks them. SpanshRouter
+failed with `ModuleNotFoundError: No module named 'requests'` until this was
+bundled.
 
-1. A Python bundled with the app (`resources/python/python.exe`). **Not shipped
-   yet**, see below.
-2. The `py` launcher (`C:\Windows\py.exe -3`).
-3. `python.exe` on `PATH`, skipping the Microsoft Store alias in `WindowsApps`,
-   which opens the Store instead of running Python.
+What is bundled:
 
-### Not done yet: a bundled Python
+| Component | Version | Source |
+|---|---|---|
+| CPython, with tkinter 8.6 | 3.13.16 | Astral's python-build-standalone, release 20261003, `install_only_stripped` |
+| requests | 2.34.2 | PyPI |
+| urllib3 | 2.8.0 | PyPI |
+| idna | 3.20 | PyPI |
+| certifi | 2026.7.22 | PyPI |
+| charset-normalizer | 3.5.2 (cp313, win_amd64) | PyPI |
 
-Plugins assume the libraries a host normally ships with, most importantly
-`requests`. SpanshRouter fails to load without it:
-`ModuleNotFoundError: No module named 'requests'`. A standard Python install does
-not have it.
+`scripts/fetch-python-runtime.mjs` fetches these. Every file is pinned by exact
+name and SHA-256, taken from the publisher (GitHub's release digest, PyPI's
+`digests.sha256`). A download that does not match is deleted and nothing is
+unpacked. The script also drops what plugins do not need (headers, import
+libraries, pip, IDLE), which brings the runtime to about 51 MB. Before it reports
+success, it checks that `tkinter` and `requests` import.
 
-The fix is to ship a Python runtime with tkinter and the usual libraries
-(`requests` and its dependencies) inside the app. Until then, a commander can
-install the library themselves with `py -3 -m pip install requests`.
+`tauri.conf.json` runs the script before every build, and the runtime is cached,
+so later builds skip the download. The `python/` folder is gitignored. To
+upgrade a component, change its pin and its hash in the script.
+
+If the bundled runtime is missing, for example in a development checkout that
+never ran the script, the host falls back to the `py` launcher and then to
+`python.exe` on `PATH`. It skips the Microsoft Store alias in `WindowsApps`,
+which opens the Store instead of running Python.
 
 ### Not supported
 
@@ -146,7 +160,7 @@ install the library themselves with `py -3 -m pip install requests`.
 | Plugin | Result |
 |---|---|
 | ConstructionTracker 1.4.0 | Loads, reads the journal folder and carrier cargo, saves its data on stop |
-| SpanshRouter | Imports resolve; stops at `requests`, see above |
+| SpanshRouter 3.1.0 | Loads with the bundled runtime |
 
 Tests: `npm run test:plugin-host --workspace @edfm/desktop`, which runs
 `plugin-host/tests/test_host.py` with real journal lines.

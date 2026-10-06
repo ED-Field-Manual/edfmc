@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node ../../scripts/fetch-python-runtime.mjs && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -66,7 +66,8 @@
     ],
     "resources": {
       "plugin-host/host.py": "plugin-host/host.py",
-      "plugin-host/compat/": "plugin-host/compat/"
+      "plugin-host/compat/": "plugin-host/compat/",
+      "python/": "python/"
     }
   }
 }
