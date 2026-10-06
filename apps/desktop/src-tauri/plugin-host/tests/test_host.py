@@ -133,6 +133,29 @@ class LoadingTest(unittest.TestCase):
         host.load(plugin)
         self.assertIsNone(plugin.call('journal_entry', 'c', False, None, None, {}, {}))
 
+    def test_describe_reports_what_the_plugin_states(self) -> None:
+        # ConstructionTracker states `plugin_version`; SpanshRouter keeps a
+        # bare version string in version.json. Both are real layouts.
+        stated = self._plugin('Stated', {
+            'load.py': 'plugin_version = "1.4.0"\ndef plugin_start3(d):\n    return "Stated"\ndef plugin_prefs(p, c, b):\n    return None\n',
+            'README.md': '# Stated\nHow to use it.\n',
+        })
+        host.load(stated)
+        info = stated.describe()
+        self.assertEqual(info['version'], '1.4.0')
+        self.assertTrue(info['hasSettings'])
+        self.assertFalse(info['hasPanel'])
+        self.assertIn('How to use it.', info['readme'])
+
+        in_file = self._plugin('InFile', {'load.py': 'def plugin_start3(d):\n    return "InFile"\n', 'version.json': '3.1.0'})
+        host.load(in_file)
+        self.assertEqual(in_file.describe()['version'], '3.1.0')
+
+        silent = self._plugin('Silent', {'load.py': 'def plugin_start3(d):\n    return "Silent"\n'})
+        host.load(silent)
+        self.assertIsNone(silent.describe()['version'])
+        self.assertIsNone(silent.describe()['readme'])
+
     def test_discovery_skips_disabled_and_hidden(self) -> None:
         self._plugin('Skip.disabled', {'load.py': ''})
         self._plugin('.hidden', {'load.py': ''})

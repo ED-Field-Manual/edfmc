@@ -144,6 +144,7 @@ pub fn plugin_host_start(
     app: AppHandle,
     state: State<'_, PluginHostState>,
     journal_dir: String,
+    disabled: Vec<String>,
 ) -> Result<u32, String> {
     if is_running(&state) {
         let guard = state.inner.lock().unwrap();
@@ -165,6 +166,11 @@ pub fn plugin_host_start(
         .env("EDFMC_PLUGIN_DIR", &plugins)
         .env("EDFMC_DATA_DIR", &data)
         .env("EDFMC_VERSION", env!("CARGO_PKG_VERSION"))
+        // Folders the commander switched off: listed, never imported.
+        .env(
+            "EDFMC_DISABLED_PLUGINS",
+            serde_json::to_string(&disabled).unwrap_or_else(|_| "[]".into()),
+        )
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -20,6 +20,7 @@
 import { useState } from 'react';
 import type { LoadedPlugin } from '@edfm/plugins';
 import { companion, type CompanionSnapshot } from './lib/companion';
+import type { PythonPluginStatus } from './lib/pythonPlugins';
 
 function Instructions({ plugin }: { plugin: LoadedPlugin }) {
   const [open, setOpen] = useState(false);
@@ -37,6 +38,65 @@ function Instructions({ plugin }: { plugin: LoadedPlugin }) {
         <pre className="instructions">{text}</pre>
       )}
     </div>
+  );
+}
+
+/** A README, shown on request as plain text, never as markup. */
+function Readme({ text }: { text: string | null }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <div>
+      <button type="button" className="link" onClick={() => setOpen(!open)}>
+        {open ? 'Hide instructions' : 'How to use this'}
+      </button>
+      {open && <pre className="instructions">{text}</pre>}
+    </div>
+  );
+}
+
+/** One Python plugin, laid out like a declarative plugin's card. */
+function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus; hostRunning: boolean }) {
+  const on = !plugin.disabled;
+  return (
+    <section className="card">
+      <div className="row spread">
+        <div>
+          <h2>{plugin.name}</h2>
+          <p className="muted">
+            {plugin.version ?? 'Version not stated'} · Python plugin · <code>{plugin.folder}</code>
+          </p>
+        </div>
+        <label className="stack" htmlFor={`py-toggle-${plugin.folder}`}>
+          <span>
+            <input
+              id={`py-toggle-${plugin.folder}`}
+              type="checkbox"
+              checked={on}
+              onChange={(e) => void companion.setPythonPluginEnabled(plugin.folder, e.target.checked)}
+            />{' '}
+            {on ? 'Enabled' : 'Disabled'}
+          </span>
+        </label>
+      </div>
+
+      {plugin.disabled ? (
+        <p className="muted">
+          Switched off. It stays in the folder, and none of its code runs until you turn it back
+          on.
+        </p>
+      ) : plugin.loaded ? (
+        <p className="muted">
+          {hostRunning ? 'Running.' : 'Loaded.'}
+          {plugin.hasPanel && ' Its panel is in the plugin window.'}
+          {plugin.hasSettings && ' It has settings under Plugin settings.'}
+        </p>
+      ) : (
+        <p className="note">Could not start: {plugin.error ?? 'no reason given.'}</p>
+      )}
+
+      <Readme text={plugin.readme} />
+    </section>
   );
 }
 
@@ -119,8 +179,6 @@ function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled: boolea
  */
 function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
   const py = snap.pythonPlugins;
-  const failed = py.plugins.filter((p) => !p.loaded);
-  const loaded = py.plugins.filter((p) => p.loaded);
 
   return (
     <section className="card">
@@ -179,33 +237,6 @@ function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
           </>
         )}
       </div>
-
-      {loaded.length > 0 && (
-        <>
-          <h3>Running</h3>
-          <ul className="muted">
-            {loaded.map((p) => (
-              <li key={p.folder}>
-                {p.name}
-                {p.name !== p.folder && <span> ({p.folder})</span>}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {failed.length > 0 && (
-        <>
-          <h3>Could not start</h3>
-          <ul className="note">
-            {failed.map((p) => (
-              <li key={p.folder}>
-                <strong>{p.folder}</strong>: {p.error}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
 
       {py.running && py.plugins.length === 0 && (
         <p className="muted">
@@ -274,6 +305,14 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
       </section>
 
       <PythonPluginsCard snap={snap} />
+
+      {snap.pythonPlugins.plugins.map((plugin) => (
+        <PythonPluginCard
+          key={plugin.folder}
+          plugin={plugin}
+          hostRunning={snap.pythonPlugins.running}
+        />
+      ))}
 
       {nothingInstalled && (
         <section className="card">
