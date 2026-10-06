@@ -64,18 +64,31 @@ written for this app, not copied. Copying another tool's modules would bring
 that tool's licence with them, and this project is MIT. Matching the names and
 behaviour plugins call is enough for compatibility.
 
-**The Plugin panels tab.** Each plugin's `plugin_app` frame is stacked in one
-tkinter window, styled with the app's dark palette, and that window lives
-*inside* the app on the Plugin panels tab:
+**A tab per plugin.** Every running plugin that has a panel (`plugin_app`) gets
+its own tab in the sidebar, indented under Plugins. Each panel is its own tkinter
+window, styled with the app's dark palette, and lives *inside* the app:
 
-1. The host starts its window undecorated and off-screen (`EDFMC_EMBED=1`), then
-   reports the window's handle (`{"type":"window","hwnd":...}`).
-2. The tab leaves an empty area and reports its rectangle in physical pixels
-   (`plugin_panel_place`). On the first call, `plugin_host.rs` makes the plugin
-   window a child of the app window (`WS_CHILD`, `SetParent`). After that it
-   just moves it over the area. Leaving the tab hides it.
-3. The host is per-monitor DPI aware, so the panels are drawn at the screen's
-   real resolution and match the area's size exactly.
+1. The host creates each panel window undecorated and hidden (`EDFMC_EMBED=1`).
+2. A plugin's tab leaves an empty area and reports its rectangle in physical
+   pixels (`plugin_panel_place`). `plugin_host.rs` adds the app window's handle
+   and passes it to the host as `{"type":"place", ...}`.
+3. The host makes the panel window a child of the app window (`WS_CHILD`,
+   `SetParent`), then positions it **through Tk's own geometry**. Leaving the tab
+   hides it.
+4. The host is per-monitor DPI aware, so panels are drawn at the screen's real
+   resolution and match the area's size exactly.
+
+The host moves the window, not the app, because of the first version's bug. The
+app moved the window from outside with `SetWindowPos`, and Tk, which keeps its
+own record of where its windows are, put it straight back off-screen. The tab
+showed an empty area. Placing through Tk keeps the two in agreement. This was
+checked against a stand-in parent window: the panel appeared at the requested
+size with all of the plugin's widgets inside, stayed there, and hid on request.
+
+**Closing the app** waits, off the main thread, for plugins to save before
+exiting. The app's message loop has to keep running while the host closes,
+because its panels are child windows of the app window. Blocking the main thread
+stalled the host until the five-second kill.
 
 Why not draw the panels in the page itself: plugins build them with tkinter,
 which draws real native widgets, and a web page cannot contain those. Rewriting
