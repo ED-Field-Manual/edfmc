@@ -157,6 +157,22 @@ class Plugin:
                 continue
         return None
 
+    def git_remote(self) -> str | None:
+        """The `origin` URL if the plugin was installed with `git clone`."""
+        try:
+            with open(os.path.join(self.path, '.git', 'config'), encoding='utf-8') as f:
+                text = f.read(16 * 1024)
+        except OSError:
+            return None
+        section = None
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith('['):
+                section = line
+            elif section == '[remote "origin"]' and line.startswith('url'):
+                return line.split('=', 1)[1].strip()
+        return None
+
     def describe(self) -> dict[str, Any]:
         return {
             'folder': self.folder,
@@ -168,6 +184,7 @@ class Plugin:
             'hasPanel': self.has('plugin_app'),
             'hasSettings': self.has('plugin_prefs'),
             'readme': self.readme(),
+            'gitRemote': self.git_remote(),
         }
 
 

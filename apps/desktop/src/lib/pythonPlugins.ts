@@ -16,7 +16,9 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+import { httpFetch } from './http.js';
 import { logger } from './logger.js';
+import { checkForUpdates, type UpdateResult } from './pluginUpdates.js';
 
 export interface PythonPluginStatus {
   readonly folder: string;
@@ -31,6 +33,8 @@ export interface PythonPluginStatus {
   readonly hasSettings: boolean;
   /** The plugin's README, shown as plain text. */
   readonly readme: string | null;
+  /** `origin` from the plugin's .git/config, when it was cloned. */
+  readonly gitRemote?: string | null;
 }
 
 export interface PythonPluginView {
@@ -43,9 +47,19 @@ export interface PythonPluginView {
   readonly plugins: readonly PythonPluginStatus[];
   /** The last thing that went wrong, in words for the commander. */
   readonly problem: string | null;
+  /** Whether to check GitHub for newer versions, at most once a day. */
+  readonly updateChecks: boolean;
+  readonly checking: boolean;
+  /** The last check's result per plugin folder. */
+  readonly updates: Readonly<Record<string, UpdateResult>>;
 }
 
 const DISABLED_SETTING = 'pythonPlugins.disabled';
+const UPDATE_CHECKS_SETTING = 'pythonPlugins.updateChecks';
+const UPDATES_SETTING = 'pythonPlugins.updates';
+const REPOS_SETTING = 'pythonPlugins.repos';
+/** GitHub allows 60 unauthenticated requests an hour; once a day is plenty. */
+const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 
 interface Deps {
   readonly getSetting: (key: string) => Promise<string | null>;
@@ -67,6 +81,11 @@ export class PythonPlugins {
   /** The host process we started. Messages from any other (an old one exiting after a restart) are ignored. */
   private pid: number | null = null;
   private disabled = new Set<string>();
+  private updateChecks = true;
+  private checking = false;
+  private updates: Record<string, UpdateResult> = {};
+  /** Repos the commander pasted, by plugin folder. */
+  private repos: Record<string, string> = {};
 
   constructor(private readonly deps: Deps) {}
 
@@ -78,6 +97,9 @@ export class PythonPlugins {
       python: this.python,
       plugins: this.plugins,
       problem: this.problem,
+      updateChecks: this.updateChecks,
+      checking: this.checking,
+      updates: this.updates,
     };
   }
 
@@ -94,6 +116,9 @@ export class PythonPlugins {
     } catch {
       this.disabled = new Set();
     }
+    this.updateChecks = (await this.deps.getSetting(UPDATE_CHECKS_SETTING)) !== 'false';
+    this.updates = readJson(await this.deps.getSetting(UPDATES_SETTING)) ?? {};
+    this.repos = readJson(await this.deps.getSetting(REPOS_SETTING)) ?? {};
     await this.refreshInfo();
     if (this.enabled) await this.start();
     this.deps.changed();
@@ -108,6 +133,66 @@ export class PythonPlugins {
     else this.disabled.add(folder);
     await this.deps.setSetting(DISABLED_SETTING, JSON.stringify([...this.disabled]));
     await this.restart();
+  }
+
+  /** Turn the daily GitHub check on or off. Off means no request is made. */
+  async setUpdateChecks(on: boolean): Promise<void> {
+    this.updateChecks = on;
+    await this.deps.setSetting(UPDATE_CHECKS_SETTING, String(on));
+    if (on) void this.checkUpdates(false);
+    this.deps.changed();
+  }
+
+  /**
+   * Tell the check which repo a plugin comes from, when it could not find out.
+   * An empty value forgets it and goes back to finding it automatically.
+   */
+  async setRepo(folder: string, link: string): Promise<void> {
+    const trimmed = link.trim();
+    if (trimmed) this.repos[folder] = trimmed;
+    else delete this.repos[folder];
+    await this.deps.setSetting(REPOS_SETTING, JSON.stringify(this.repos));
+    await this.checkUpdates(true);
+  }
+
+  /**
+   * Check GitHub for newer versions. Without `force`, only when the last check
+   * is over a day old, so restarting the app does not re-ask GitHub.
+   */
+  async checkUpdates(force: boolean): Promise<void> {
+    if (!this.updateChecks || this.checking || this.plugins.length === 0) return;
+    if (!force) {
+      const times = Object.values(this.updates).map((u) => Date.parse(u.checkedAt));
+      const covered = this.plugins.every((p) => this.updates[p.folder]);
+      const oldest = times.length ? Math.min(...times) : 0;
+      if (covered && Date.now() - oldest < CHECK_EVERY_MS) return;
+    }
+    this.checking = true;
+    this.deps.changed();
+    try {
+      const results = await checkForUpdates(
+        (url, init) => httpFetch(url, init),
+        this.plugins.map((p) => ({
+          folder: p.folder,
+          name: p.name,
+          version: p.version,
+          readme: p.readme,
+          gitRemote: p.gitRemote ?? null,
+        })),
+        this.repos,
+      );
+      for (const r of results) this.updates[r.folder] = r;
+      await this.deps.setSetting(UPDATES_SETTING, JSON.stringify(this.updates));
+      logger.info('plugins', 'Checked plugins for updates', {
+        updates: results.filter((r) => r.state === 'update').length,
+        unknown: results.filter((r) => r.state === 'unknown').length,
+      });
+    } catch (err) {
+      logger.warn('plugins', 'Plugin update check failed', { error: String(err) });
+    } finally {
+      this.checking = false;
+      this.deps.changed();
+    }
   }
 
   /** Stop and start again, so newly added plugin folders are picked up. */
@@ -169,6 +254,9 @@ export class PythonPlugins {
         this.plugins = Array.isArray(message['plugins'])
           ? (message['plugins'] as PythonPluginStatus[])
           : [];
+        // Knowing which plugins are installed is what a check needs; it skips
+        // itself when the last one is under a day old.
+        void this.checkUpdates(false);
         break;
       case 'error':
         this.problem = typeof message['message'] === 'string' ? message['message'] : 'Plugins stopped.';
@@ -219,5 +307,14 @@ export class PythonPlugins {
     this.pid = null;
     this.plugins = [];
     this.problem = null;
+  }
+}
+
+function readJson<T>(text: string | null): T | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
   }
 }

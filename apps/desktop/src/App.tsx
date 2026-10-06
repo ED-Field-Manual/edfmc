@@ -1360,7 +1360,12 @@ function PluginTab({ snap, tab }: { snap: Snap; tab: string }) {
       return <PluginPanel snap={snap} folder={folder} />;
     }
     return (
-      <PythonPluginCard plugin={plugin} hostRunning={snap.pythonPlugins.running} showToggle={false} />
+      <PythonPluginCard
+        plugin={plugin}
+        hostRunning={snap.pythonPlugins.running}
+        update={snap.pythonPlugins.updates[plugin.folder]}
+        showToggle={false}
+      />
     );
   }
   const id = tab.slice(5);

@@ -5194,6 +5194,18 @@ export class Companion {
     return this.pythonPlugins.setPluginEnabled(folder, enabled);
   }
 
+  setPluginUpdateChecks(on: boolean): Promise<void> {
+    return this.pythonPlugins.setUpdateChecks(on);
+  }
+
+  checkPluginUpdates(): Promise<void> {
+    return this.pythonPlugins.checkUpdates(true);
+  }
+
+  setPluginRepo(folder: string, link: string): Promise<void> {
+    return this.pythonPlugins.setRepo(folder, link);
+  }
+
   restartPythonPlugins(): Promise<void> {
     return this.pythonPlugins.restart();
   }
