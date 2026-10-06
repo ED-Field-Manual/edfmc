@@ -218,7 +218,7 @@ export class MissionStore {
         return this.depot(raw);
 
       case 'Missions':
-        return this.reconcile(raw);
+        return this.reconcile(raw, event);
 
       default:
         return false;
@@ -373,7 +373,7 @@ export class MissionStore {
    * This is the authoritative answer to "what is actually active", and the only
    * way to notice missions that ended while the application was closed.
    */
-  private reconcile(raw: Readonly<Record<string, unknown>>): boolean {
+  private reconcile(raw: Readonly<Record<string, unknown>>, event: NormalizedEvent): boolean {
     const active = idsFrom(raw['Active']);
     const complete = idsFrom(raw['Complete']);
     const failed = idsFrom(raw['Failed']);
@@ -381,6 +381,22 @@ export class MissionStore {
 
     const known = new Set<number>([...(active ?? []), ...(complete ?? []), ...(failed ?? [])]);
     let changed = false;
+
+    /*
+     * A mission the game lists as active that we never saw accepted -- taken in a
+     * session the application was not running for. Ignoring it left the overlay
+     * saying "No active missions" while the game showed two still to hand in.
+     *
+     * Recorded from what the snapshot does say (its id and type), and nothing
+     * else: destination, reward and expiry stay unknown until `recover()` finds
+     * the original `MissionAccepted` in an older journal.
+     */
+    for (const entry of entriesFrom(raw['Active']) ?? []) {
+      if (this.missions.has(entry.id)) continue;
+      const typeKey = missionTypeKey(entry.name);
+      this.missions.set(entry.id, emptyMission(entry.id, entry.name, typeKey, event));
+      changed = true;
+    }
 
     for (const id of complete ?? []) changed = this.setStatus(id, 'completed') || changed;
     for (const id of failed ?? []) changed = this.setStatus(id, 'failed') || changed;
@@ -392,6 +408,66 @@ export class MissionStore {
       // abandoned or expired — and the journal does not say which. Guessing
       // "completed" would inflate the commander's record.
       changed = this.setStatus(mission.missionId, 'ended-unknown') || changed;
+    }
+
+    return changed;
+  }
+
+  /**
+   * Active missions known only from the `Missions` snapshot, whose acceptance
+   * this application never saw.
+   *
+   * Recognised by a missing `Faction`: `MissionAccepted` carried one on 425 of
+   * 425 events in the corpus, and the snapshot never does. Derived rather than
+   * stored, so it survives a restart without another column.
+   */
+  awaitingRecovery(): readonly number[] {
+    return this.active()
+      .filter((m) => !isKnown(m.faction))
+      .map((m) => m.missionId);
+  }
+
+  /**
+   * Fill in missions known only from the snapshot, from historical events.
+   *
+   * `events` must be in journal order. Only `MissionAccepted`,
+   * `MissionRedirected` and `CargoDepot` are applied, and only to missions that
+   * are still active and still awaiting recovery when their acceptance turns up
+   * -- a history scan must never resurrect a mission that has since been handed
+   * in, nor overwrite one whose acceptance was seen live.
+   */
+  recover(events: readonly NormalizedEvent[]): boolean {
+    const pending = new Set(this.awaitingRecovery());
+    const recovered = new Set<number>();
+    let changed = false;
+
+    for (const event of events) {
+      const id = event.source.raw['MissionID'];
+      if (typeof id !== 'number') continue;
+
+      switch (event.source.event) {
+        case 'MissionAccepted': {
+          if (!pending.has(id)) break;
+          const current = this.missions.get(id);
+          if (!current || current.status !== 'active') break;
+          // The placeholder may already have been redirected live; accept()
+          // resets that, and the redirect replays later in the same history.
+          if (this.accept(event)) {
+            pending.delete(id);
+            recovered.add(id);
+            changed = true;
+          }
+          break;
+        }
+        case 'MissionRedirected':
+          if (recovered.has(id)) changed = this.redirect(event.source.raw) || changed;
+          break;
+        case 'CargoDepot':
+          if (recovered.has(id)) changed = this.depot(event.source.raw) || changed;
+          break;
+        default:
+          break;
+      }
     }
 
     return changed;
@@ -533,14 +609,21 @@ export class MissionStore {
 
 /** Extract MissionIDs from a snapshot array, or null when the field is absent. */
 function idsFrom(value: unknown): number[] | null {
+  return entriesFrom(value)?.map((e) => e.id) ?? null;
+}
+
+/** MissionID and Name from a snapshot array, or null when the field is absent. */
+function entriesFrom(value: unknown): { id: number; name: string }[] | null {
   if (!Array.isArray(value)) return null;
-  const out: number[] = [];
+  const out: { id: number; name: string }[] = [];
   for (const entry of value) {
     if (entry === null || typeof entry !== 'object') continue;
-    const id = (entry as Record<string, unknown>)['MissionID'];
+    const e = entry as Record<string, unknown>;
+    const id = e['MissionID'];
     // The colonisation sentinel is excluded: it is not a mission, and its value
     // has already lost precision by the time it reaches us.
-    if (typeof id === 'number' && Number.isSafeInteger(id)) out.push(id);
+    if (typeof id !== 'number' || !Number.isSafeInteger(id)) continue;
+    out.push({ id, name: typeof e['Name'] === 'string' ? e['Name'] : 'Unknown' });
   }
   return out;
 }

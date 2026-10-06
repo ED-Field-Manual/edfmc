@@ -206,6 +206,39 @@ journal does not say which. Recording it as "completed" would invent an outcome 
 inflate the commander's record, which matters once Phase 5 starts reporting
 contribution history.
 
+## Missions accepted while the app was closed
+
+The reverse case: the snapshot lists a mission as **active** that the store has
+never seen, because it was accepted in a session the app was not running for.
+
+These used to be ignored, since reconciliation only updated missions it already
+knew. In a real session on 2026-10-05, four poll-data couriers were accepted at
+18:51 with the app closed, and the 23:07 login snapshot listed all four. With the
+last two still to hand in at Thomson Depot, the game showed them but the overlay
+said "No active missions".
+
+Now it works in two steps.
+
+1. **The snapshot adds the mission.** It is recorded as active with only what the
+   snapshot says: its id and its type (from `Name`, folded by `missionTypeKey()`,
+   so it categorises correctly). Destination, reward and expiry stay UNKNOWN.
+   `Expires` is still not used (trap 2), so no expiry is invented.
+2. **History fills in the rest.** `backfillMissionAcceptances()` in the desktop
+   app walks journals newest first until it finds each mission's
+   `MissionAccepted`, collecting any later `MissionRedirected` and `CargoDepot`
+   on the way. `MissionStore.recover()` applies them in journal order. It runs
+   after any snapshot that added such a mission, and once at startup.
+
+`awaitingRecovery()` identifies these missions by a missing `Faction`.
+`MissionAccepted` carried `Faction` on 425 of 425 events in the corpus, and the
+snapshot never carries it. Deriving it this way means no extra column, and it
+survives a restart.
+
+`recover()` never resurrects or overwrites. It ignores a mission that has been
+handed in since the snapshot, and one whose acceptance was seen live. If the
+acceptance is not within the 60 most recent journals, the mission stays as the
+snapshot described it, which is still active and still counted.
+
 ## Not yet built: recommended next destination
 
 §8 permits a routing feature only when reliable coordinate and distance data exists.

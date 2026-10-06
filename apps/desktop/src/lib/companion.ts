@@ -154,6 +154,7 @@ import {
   backfillCarrierIdentities,
   backfillCarrierJumps,
   backfillExobiologyHoldings,
+  backfillMissionAcceptances,
   backfillTraderIdentities,
   type BackfillContext,
 } from './backfill.js';
@@ -3165,6 +3166,7 @@ export class Companion {
   private readonly missions = new MissionStore();
   /** Set when mission state changed and has not yet been written to disk. */
   private missionsDirty = false;
+  private recoveringMissions = false;
 
   /**
    * What this commander's own game has revealed. The sole basis for spoiler
@@ -3701,6 +3703,10 @@ export class Companion {
     // have been booked in a session this app never saw.
     void this.backfillCarrierJumps(resolution.directory);
 
+    // Missions persisted from an earlier run may still be known only from a login
+    // snapshot; their acceptance may be findable now.
+    void this.recoverMissions();
+
     // Bring the overlay back if it was on when the app last closed. Last, so the
     // first frame it receives describes where the commander actually is rather
     // than an empty state that would flash Unknown across every field.
@@ -3791,6 +3797,8 @@ export class Companion {
     if (this.missions.observe(event)) {
       this.missionsDirty = true;
       this.notify();
+      // The login snapshot may list missions accepted while the app was closed.
+      if (event.source.event === 'Missions') void this.recoverMissions();
     }
 
     // Carrier identities are stable reference data: learn once, remember forever.
@@ -4457,6 +4465,25 @@ export class Companion {
 
   private backfillCarrierJumps(directory: string): Promise<void> {
     return backfillCarrierJumps(this.backfillContext(), directory);
+  }
+
+  /**
+   * Fill in missions known only from the login snapshot from older journals.
+   * One at a time: a second snapshot while a scan is running has nothing to add.
+   */
+  private async recoverMissions(): Promise<void> {
+    if (this.recoveringMissions || !this.directory) return;
+    if (this.missions.awaitingRecovery().length === 0) return;
+    this.recoveringMissions = true;
+    try {
+      if (await backfillMissionAcceptances(this.missions, this.directory)) {
+        this.missionsDirty = true;
+        this.notify();
+        if (this.overlayEnabled) this.pushOverlayState();
+      }
+    } finally {
+      this.recoveringMissions = false;
+    }
   }
 
   private backfillExobiologyHoldings(directory: string): Promise<void> {

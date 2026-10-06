@@ -322,6 +322,87 @@ describe('reconciliation against the Missions snapshot', () => {
   });
 });
 
+describe('missions accepted while the app was closed', () => {
+  /*
+   * Verbatim from a real pair of sessions. Four poll-data couriers were accepted
+   * at 18:51 in a session the app did not watch; the next login's snapshot listed
+   * them. Before the fix the store ignored ids it had never seen, so with only
+   * the last two left to hand in the overlay said "No active missions".
+   */
+  const POLL_ACCEPTED =
+    '{ "timestamp":"2026-10-05T18:51:49Z", "event":"MissionAccepted", "Faction":"Coalition of Independent Pilots", "Name":"Mission_Courier_Elections", "LocalisedName":"Courier for Sensitive Poll Data", "TargetFaction":"Space Tourism Action Board", "DestinationSystem":"Wregoe VN-L b49-3", "DestinationStation":"Thomson Depot", "Expiry":"2026-10-06T18:50:45Z", "Wing":false, "Influence":"++", "Reputation":"+", "Reward":144332, "MissionID":1067743260 }';
+  const LOGIN_SNAPSHOT =
+    '{ "timestamp":"2026-10-05T23:07:46Z", "event":"Missions", "Active":[ { "MissionID":1067743244, "Name":"Mission_Courier_Elections_name", "PassengerMission":false, "Expires":70979 }, { "MissionID":1067743250, "Name":"Mission_Courier_Elections_name", "PassengerMission":false, "Expires":70979 }, { "MissionID":1067743260, "Name":"Mission_Courier_Elections_name", "PassengerMission":false, "Expires":70979 }, { "MissionID":1067743270, "Name":"Mission_Courier_Elections_name", "PassengerMission":false, "Expires":70979 } ], "Failed":[  ], "Complete":[  ] }';
+  const POLL_COMPLETED =
+    '{ "timestamp":"2026-10-06T00:29:25Z", "event":"MissionCompleted", "Faction":"Coalition of Independent Pilots", "Name":"Mission_Courier_Elections_name", "LocalisedName":"Courier for Sensitive Poll Data", "MissionID":1067743260, "TargetFaction":"Space Tourism Action Board", "DestinationSystem":"Wregoe VN-L b49-3", "DestinationStation":"Thomson Depot", "Reward":26835, "FactionEffects":[] }';
+
+  it('keeps a mission the snapshot lists as active even though its acceptance was never seen', () => {
+    const s = new MissionStore();
+    expect(s.observe(ev(LOGIN_SNAPSHOT))).toBe(true);
+
+    expect(s.active()).toHaveLength(4);
+    const m = s.get(1067743260)!;
+    expect(m.status).toBe('active');
+    expect(m.category).toBe('courier');
+    // Only what the snapshot says. It does not name a destination, and Expires is
+    // not trusted (trap 2), so neither is invented.
+    expect(m.destinationSystem).toBe(UNKNOWN);
+    expect(m.expiry).toBe(UNKNOWN);
+    expect(s.awaitingRecovery()).toEqual([1067743244, 1067743250, 1067743260, 1067743270]);
+  });
+
+  it('fills in the details from the original MissionAccepted', () => {
+    const s = new MissionStore();
+    s.observe(ev(LOGIN_SNAPSHOT));
+    expect(s.recover([ev(POLL_ACCEPTED)])).toBe(true);
+
+    const m = s.get(1067743260)!;
+    expect(m.status).toBe('active');
+    expect(m.localisedName).toBe('Courier for Sensitive Poll Data');
+    expect(m.destinationStation).toBe('Thomson Depot');
+    expect(m.reward).toBe(144332);
+    expect(m.acceptedAt).toBe('2026-10-05T18:51:49Z');
+    expect(s.awaitingRecovery()).not.toContain(1067743260);
+    expect(s.byDestination().groups.some((g) => g.station === 'Thomson Depot')).toBe(true);
+  });
+
+  it('never resurrects a mission handed in before the history scan finished', () => {
+    const s = new MissionStore();
+    s.observe(ev(LOGIN_SNAPSHOT));
+    s.observe(ev(POLL_COMPLETED));
+    s.recover([ev(POLL_ACCEPTED)]);
+    expect(s.get(1067743260)!.status).toBe('completed');
+  });
+
+  it('never overwrites a mission whose acceptance was seen live', () => {
+    const s = new MissionStore();
+    s.observe(ev(MASSACRE));
+    s.observe(ev(REDIRECTED));
+    // An older acceptance turning up in history must not undo the redirect.
+    expect(s.recover([ev(MASSACRE)])).toBe(false);
+    expect(s.get(1062787030)!.redirected).toBe(true);
+  });
+
+  it('replays a later redirect for a recovered mission', () => {
+    // Real accept and redirect from 2026-10-03; the snapshot line is built in the
+    // same shape as LOGIN_SNAPSHOT, since that mission was never listed by one.
+    const accepted =
+      '{ "timestamp":"2026-10-03T15:53:14Z", "event":"MissionAccepted", "Faction":"Coalition of Independent Pilots", "Name":"Mission_Massacre", "LocalisedName":"Kill Eurybia Blue Mafia faction Pirates", "TargetType":"$MissionUtil_FactionTag_Pirate;", "TargetType_Localised":"Pirates", "TargetFaction":"Eurybia Blue Mafia", "KillCount":5, "DestinationSystem":"Wregoe KO-G c24-11", "DestinationStation":"Rey Landing", "Expiry":"2026-10-05T10:50:46Z", "Wing":false, "Influence":"+", "Reputation":"+", "Reward":3194199, "MissionID":1067565580 }';
+    const redirected =
+      '{ "timestamp":"2026-10-03T16:10:08Z", "event":"MissionRedirected", "MissionID":1067565580, "Name":"Mission_Massacre", "LocalisedName":"Kill Eurybia Blue Mafia faction Pirates", "NewDestinationStation":"Delsanti Hub", "NewDestinationSystem":"Wregoe FH-D d12-45", "OldDestinationStation":"", "OldDestinationSystem":"Wregoe KO-G c24-11" }';
+    const snapshot =
+      '{ "timestamp":"2026-10-03T17:00:00Z", "event":"Missions", "Active":[ { "MissionID":1067565580, "Name":"Mission_Massacre_name", "PassengerMission":false, "Expires":64246 } ], "Failed":[  ], "Complete":[  ] }';
+
+    const s = new MissionStore();
+    s.observe(ev(snapshot));
+    s.recover([ev(accepted), ev(redirected)]);
+
+    const m = s.get(1067565580)!;
+    expect(m.destinationStation).toBe('Delsanti Hub');
+    expect(isAwaitingTurnIn(m)).toBe(true);
+  });
+});
+
 describe('cargo delivery progress', () => {
   /** Verbatim: ItemsDelivered is cumulative, 540 then 1512 of 1512. */
   const DEPOT_1 =
