@@ -19,7 +19,7 @@ import { aboutStatus, newerBuildNotice } from './lib/about';
 import { Journal } from './Journal';
 import { Research } from './Research';
 import { Contributions } from './Contributions';
-import { Plugins as PluginsScreen } from './Plugins';
+import { PluginCard, Plugins as PluginsScreen, PythonPluginCard } from './Plugins';
 import { PluginPanel } from './PluginPanels';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
@@ -88,8 +88,9 @@ const PHASE: Partial<Record<Section, string>> = {};
 export default function App() {
   const [section, setSection] = useState<Section>('Dashboard');
   /**
-   * A Python plugin's own tab, by folder, or null when a regular section is
-   * showing. Each plugin with a panel gets one, listed under Plugins.
+   * A plugin's own tab, or null when a regular section is showing. Every
+   * installed plugin gets one, listed under Plugins: `rule:<id>` for a
+   * declarative plugin, `py:<folder>` for a Python one.
    */
   const [pluginTab, setPluginTab] = useState<string | null>(null);
 
@@ -106,10 +107,13 @@ export default function App() {
     void companion.start();
   }, []);
 
-  const panelPlugins = snap.pythonPlugins.plugins.filter((p) => p.loaded && p.hasPanel);
-  // A plugin switched off or removed takes its tab with it.
+  const pluginTabs = [
+    ...snap.plugins.loaded.map((p) => ({ key: `rule:${p.manifest.id}`, name: p.manifest.name })),
+    ...snap.pythonPlugins.plugins.map((p) => ({ key: `py:${p.folder}`, name: p.name })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+  // A plugin removed from the folder takes its tab with it.
   const openPlugin =
-    pluginTab !== null && panelPlugins.some((p) => p.folder === pluginTab) ? pluginTab : null;
+    pluginTab !== null && pluginTabs.some((t) => t.key === pluginTab) ? pluginTab : null;
 
   return (
     <div className="app">
@@ -140,15 +144,15 @@ export default function App() {
                 </button>
               </li>
               {s === 'Plugins' &&
-                panelPlugins.map((p) => (
-                  <li key={`plugin:${p.folder}`}>
+                pluginTabs.map((t) => (
+                  <li key={t.key}>
                     <button
                       type="button"
-                      className={`nav-sub ${pluginTab === p.folder ? 'active' : ''}`}
-                      aria-current={pluginTab === p.folder ? 'page' : undefined}
-                      onClick={() => setPluginTab(p.folder)}
+                      className={`nav-sub ${openPlugin === t.key ? 'active' : ''}`}
+                      aria-current={openPlugin === t.key ? 'page' : undefined}
+                      onClick={() => setPluginTab(t.key)}
                     >
-                      <span>{p.name}</span>
+                      <span>{t.name}</span>
                     </button>
                   </li>
                 ))}
@@ -166,7 +170,7 @@ export default function App() {
         */}
         {!snap.guidanceChosen && <FirstRunGuidance />}
         {openPlugin !== null ? (
-          <PluginPanel snap={snap} folder={openPlugin} />
+          <PluginTab snap={snap} tab={openPlugin} />
         ) : (
           <>
           {section === 'Dashboard' && <Dashboard snap={snap} />}
@@ -1335,4 +1339,25 @@ function Placeholder({ section }: { section: Section }) {
       </section>
     </>
   );
+}
+
+/**
+ * One plugin's tab. A Python plugin with a panel shows the panel itself; any
+ * other plugin (a declarative one, or a Python one with no panel, switched off
+ * or failed to start) shows its card.
+ */
+function PluginTab({ snap, tab }: { snap: Snap; tab: string }) {
+  if (tab.startsWith('py:')) {
+    const folder = tab.slice(3);
+    const plugin = snap.pythonPlugins.plugins.find((p) => p.folder === folder);
+    if (!plugin) return null;
+    if (plugin.loaded && plugin.hasPanel && snap.pythonPlugins.running) {
+      return <PluginPanel snap={snap} folder={folder} />;
+    }
+    return <PythonPluginCard plugin={plugin} hostRunning={snap.pythonPlugins.running} />;
+  }
+  const id = tab.slice(5);
+  const plugin = snap.plugins.loaded.find((p) => p.manifest.id === id);
+  if (!plugin) return null;
+  return <PluginCard plugin={plugin} enabled={!snap.plugins.disabledIds.includes(id)} />;
 }

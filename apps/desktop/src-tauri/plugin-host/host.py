@@ -383,10 +383,28 @@ def reparent(child: int, parent: int) -> None:
     ws_caption = 0x00C00000
     ws_thickframe = 0x00040000
     ws_sysmenu = 0x00080000
+    ws_clipsiblings = 0x04000000
     style = user32.GetWindowLongPtrW(child, gwl_style)
-    style = (style & ~(ws_popup | ws_caption | ws_thickframe | ws_sysmenu)) | ws_child
+    style = (style & ~(ws_popup | ws_caption | ws_thickframe | ws_sysmenu)) | ws_child | ws_clipsiblings
     user32.SetWindowLongPtrW(child, gwl_style, style)
     user32.SetParent(child, parent)
+
+    # The app's web view is a sibling that covers the whole window and was not
+    # created with WS_CLIPSIBLINGS, so it painted straight over the panel even
+    # though the panel was above it: the tab showed an empty area. Clipping it
+    # against its siblings lets the panel show through.
+    enum_proc = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+    user32.GetParent.restype = w.HWND
+    user32.GetParent.argtypes = [w.HWND]
+
+    def clip(sibling: int, _: int) -> bool:
+        if sibling != child and user32.GetParent(sibling) == parent:
+            s = user32.GetWindowLongPtrW(sibling, gwl_style)
+            if not s & ws_clipsiblings:
+                user32.SetWindowLongPtrW(sibling, gwl_style, s | ws_clipsiblings)
+        return True
+
+    user32.EnumChildWindows(parent, enum_proc(clip), 0)
 
 
 class Host:
@@ -454,29 +472,44 @@ class Host:
     def _poll_commands(self) -> None:
         # Separate from the journal poll and faster, so a panel follows the
         # app's layout without visible lag.
+        #
+        # Each command is contained, and the next poll is always scheduled. A
+        # failing command used to escape and end the loop for good: after the
+        # Settings button hit a plugin error, no later command arrived, so a
+        # panel stayed on screen over every other tab.
         try:
             while not self.stopping:
-                self._command(self.commands.get_nowait())
-        except queue.Empty:
-            pass
-        if not self.stopping:
-            self.root.after(COMMAND_MS, self._poll_commands)
+                try:
+                    command = self.commands.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    self._command(command)
+                except Exception:
+                    log.error('Command %r failed:\n%s', command.get('type'), traceback.format_exc())
+        finally:
+            if not self.stopping:
+                self.root.after(COMMAND_MS, self._poll_commands)
 
     def _tick(self) -> None:
         if self.stopping:
             return
+        # Same rule as the command loop: one bad entry must not stop delivery.
+        try:
+            for entry in self.tail.poll():
+                monitor.fold(entry)
+                self._dispatch_journal(entry)
 
-        for entry in self.tail.poll():
-            monitor.fold(entry)
-            self._dispatch_journal(entry)
-
-        status = self.tail.status()
-        if status is not None:
-            for plugin in self.plugins:
-                if plugin.has('dashboard_entry'):
-                    plugin.call('dashboard_entry', monitor.cmdr, monitor.is_beta, status)
-
-        self.root.after(POLL_MS, self._tick)
+            status = self.tail.status()
+            if status is not None:
+                for plugin in self.plugins:
+                    if plugin.has('dashboard_entry'):
+                        plugin.call('dashboard_entry', monitor.cmdr, monitor.is_beta, status)
+        except Exception:
+            log.error('Journal delivery failed:\n%s', traceback.format_exc())
+        finally:
+            if not self.stopping:
+                self.root.after(POLL_MS, self._tick)
 
     def _dispatch_journal(self, entry: dict[str, Any]) -> None:
         for plugin in self.plugins:
@@ -538,10 +571,20 @@ class Host:
             import myNotebook as nb
             book = nb.Notebook(win)
             for plugin in with_prefs:
-                page = nb.Frame(book)
-                result = plugin.call('plugin_prefs', page, monitor.cmdr, monitor.is_beta)
-                tab = result if isinstance(result, tk.Misc) else page
-                book.add(tab, text=plugin.name)
+                # Plugins are handed the notebook itself and return the page
+                # they built in it (ConstructionTracker does `nb.Frame(parent)`).
+                # Handing them a page instead made the returned frame a child of
+                # that page, which the notebook refuses to add as a tab.
+                result = plugin.call('plugin_prefs', book, monitor.cmdr, monitor.is_beta)
+                if isinstance(result, tk.Misc) and result.master is book:
+                    book.add(result, text=plugin.name)
+                elif isinstance(result, tk.Misc):
+                    try:
+                        page = nb.Frame(book)
+                        result.grid(in_=page, sticky=tk.NSEW)
+                        book.add(page, text=plugin.name)
+                    except tk.TclError:
+                        log.error('%s settings could not be shown:\n%s', plugin.folder, traceback.format_exc())
 
         def done() -> None:
             for plugin in self.plugins:
