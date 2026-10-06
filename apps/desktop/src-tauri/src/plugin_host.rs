@@ -29,6 +29,18 @@ pub const EVENT: &str = "plugin-host://message";
 #[derive(Default)]
 pub struct PluginHostState {
     inner: Mutex<Option<Running>>,
+    /// The panel showing now and where, in client pixels, so it can follow the
+    /// app window when that moves or resizes.
+    showing: Mutex<Option<Placement>>,
+}
+
+#[derive(Clone)]
+struct Placement {
+    folder: String,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 }
 
 struct Running {
@@ -244,8 +256,8 @@ pub fn plugin_host_stop(state: State<'_, PluginHostState>) {
 /// Stop and wait, off the main thread, then call `then`. Used when the app is
 /// closing: plugins get to save, and the app exits once they have.
 ///
-/// The wait cannot happen on the main thread. Plugin panels are child windows
-/// of the app window, so the host closing them needs the app's message loop
+/// The wait cannot happen on the main thread. Plugin panels are windows owned
+/// by the app window, so the host closing them needs the app's message loop
 /// running; blocking it stalled the host until the five-second kill.
 ///
 /// Returns false when no host was running, so the caller can exit at once.
@@ -264,6 +276,7 @@ pub fn stop_then(state: &State<'_, PluginHostState>, then: impl FnOnce() + Send 
 
 fn take(state: &State<'_, PluginHostState>) -> Option<Running> {
     let _ = send_line(state, &serde_json::json!({ "type": "quit" }));
+    *state.showing.lock().unwrap() = None;
     state.inner.lock().unwrap().take()
 }
 
@@ -295,18 +308,19 @@ pub fn python_plugins_open_folder(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Show one plugin's panel inside the app window, over its tab's free area.
+/// Show one plugin's panel over its tab's free area in the app window.
 ///
 /// Plugins draw with tkinter, real native widgets that a web page cannot
-/// contain. So the panel window becomes a child of the app window, positioned
-/// over the space the tab leaves for it. `x`, `y`, `width` and `height` are
-/// physical pixels relative to the app window's client area; `visible` false
-/// hides it when another tab is showing.
+/// contain. So each panel is its own borderless window, owned by the app
+/// window and kept exactly over the space the tab leaves for it. `x`, `y`,
+/// `width` and `height` are physical pixels relative to the app window's
+/// client area; `visible` false hides it when another tab is showing.
 ///
-/// The host does the moving itself, through Tk. Moving a Tk window from
-/// outside does not stick: Tk keeps its own idea of where the window is and
-/// put it straight back off-screen, which is why the first version of the tab
-/// showed an empty area.
+/// Owned, not a child. An earlier version made the panel a child of the app
+/// window, and Tk crashed (an access violation inside tk86t.dll) on the first
+/// click into it: Tk's window handling assumes a Tk top-level's parent is the
+/// desktop or another Tk window. An owned window keeps Tk's assumptions true,
+/// still stays above the app window, and hides when it is minimised.
 #[tauri::command]
 pub fn plugin_panel_place(
     app: AppHandle,
@@ -318,27 +332,52 @@ pub fn plugin_panel_place(
     height: i32,
     visible: bool,
 ) -> Result<(), String> {
+    if !visible {
+        let mut showing = state.showing.lock().unwrap();
+        if showing.as_ref().is_some_and(|p| p.folder == folder) {
+            *showing = None;
+        }
+        drop(showing);
+        return send_line(
+            &state,
+            &serde_json::json!({ "type": "place", "folder": folder, "visible": false }),
+        );
+    }
+    let placement = Placement { folder, x, y, width, height };
+    *state.showing.lock().unwrap() = Some(placement.clone());
+    send_placement(&app, &state, &placement)
+}
+
+/// Re-send the showing panel's position after the app window moved or resized.
+pub fn follow_main_window(app: &AppHandle) {
+    let state = app.state::<PluginHostState>();
+    let current = state.showing.lock().unwrap().clone();
+    if let Some(placement) = current {
+        let _ = send_placement(app, &state, &placement);
+    }
+}
+
+fn send_placement(app: &AppHandle, state: &State<'_, PluginHostState>, p: &Placement) -> Result<(), String> {
     let main = app
         .get_webview_window("main")
         .ok_or("The main window is missing.")?;
+    // Screen position of the client area: the panel is a top-level window.
+    let origin = main.inner_position().map_err(|e| e.to_string())?;
     #[cfg(windows)]
-    let parent = main.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    let owner = main.hwnd().map_err(|e| e.to_string())?.0 as isize;
     #[cfg(not(windows))]
-    let parent = {
-        let _ = main;
-        0isize
-    };
+    let owner = 0isize;
     send_line(
-        &state,
+        state,
         &serde_json::json!({
             "type": "place",
-            "folder": folder,
-            "parent": parent,
-            "x": x,
-            "y": y,
-            "width": width,
-            "height": height,
-            "visible": visible,
+            "folder": p.folder,
+            "owner": owner,
+            "x": origin.x + p.x,
+            "y": origin.y + p.y,
+            "width": p.width,
+            "height": p.height,
+            "visible": true,
         }),
     )
 }

@@ -3,7 +3,7 @@
  *
  * Plugins draw with tkinter, real native widgets that a web page cannot
  * contain. So this tab leaves an empty area and reports where it is, and the
- * host moves that plugin's window over it as a child of the app window
+ * host pins that plugin's window over it, owned by the app window
  * (`plugin_panel_place` in `plugin_host.rs`, `Panel.place` in `host.py`).
  * Leaving the tab hides it again.
  *
