@@ -792,6 +792,16 @@ export class Companion {
   private edsmTimer: ReturnType<typeof setInterval> | null = null;
   /** Fetched live; empty until it arrives, and empty filters nothing. */
   private edsmDiscard: ReadonlySet<string> = new Set();
+  /**
+   * The first fetch of the discard list, started before the journal catch-up.
+   *
+   * The catch-up re-reads the session so far, and the list used to be requested
+   * only after it finished -- so every startup queued that session's `Music`,
+   * `UnderAttack` and `ReceiveText` unfiltered. 3,597 entries EDSM then answered
+   * "304: Discarded event", all shown to the commander as rejections.
+   */
+  private edsmDiscardFirstLoad: Promise<void> | null = null;
+  private edsmQueueTidied = false;
 
   /**
    * Offer one journal event to EDSM.
@@ -849,8 +859,28 @@ export class Companion {
 
   private startEdsmDrain(): void {
     if (this.edsmTimer !== null) return;
-    void this.loadEdsmDiscard();
+    this.edsmDiscardFirstLoad ??= this.loadEdsmDiscard();
     this.edsmTimer = setInterval(() => void this.drainEdsm(), 30_000);
+  }
+
+  /**
+   * Clear rows earlier builds marked rejected that were never failures.
+   *
+   * 1xx answers mean EDSM already holds the entry, and 304 means it ignored an
+   * event it does not want (see `edsm.ts`). Removing them leaves "Rejected"
+   * counting only real problems. Anything else stays for the commander to see.
+   */
+  private async tidyEdsmQueue(): Promise<void> {
+    if (!this.db) return;
+    try {
+      await this.db.execute(
+        `DELETE FROM integration_queue
+          WHERE integration = 'edsm' AND status = 'rejected'
+            AND (last_error LIKE '1__:%' OR last_error LIKE '304:%')`,
+      );
+    } catch (err) {
+      logger.warn('edsm', 'Could not tidy the queue', { error: String(err) });
+    }
   }
 
   /**
@@ -883,6 +913,15 @@ export class Companion {
 
     this.edsmSending = true;
     try {
+      await this.edsmDiscardFirstLoad;
+      // Offline at startup leaves the list empty; ask again rather than send
+      // everything for the rest of the run.
+      if (this.edsmDiscard.size === 0) await this.loadEdsmDiscard();
+      if (!this.edsmQueueTidied) {
+        this.edsmQueueTidied = true;
+        await this.tidyEdsmQueue();
+      }
+
       const now = new Date().toISOString();
       const rows = await this.db.select<Array<{ id: string; payload: string; attempts: number }>>(
         `SELECT id, payload, attempts FROM integration_queue
@@ -898,7 +937,17 @@ export class Companion {
       const ids: string[] = [];
       for (const row of rows) {
         try {
-          entries.push(JSON.parse(row.payload) as Record<string, unknown>);
+          const entry = JSON.parse(row.payload) as Record<string, unknown>;
+          // Queued before the discard list had loaded. Sending it would only get
+          // "304: Discarded event" back.
+          if (typeof entry['event'] === 'string' && isDiscardedByEdsm(entry['event'], this.edsmDiscard)) {
+            await this.db.execute(
+              `DELETE FROM integration_queue WHERE integration = 'edsm' AND id = $1`,
+              [row.id],
+            );
+            continue;
+          }
+          entries.push(entry);
           ids.push(row.id);
         } catch {
           // A row whose payload cannot be read will never send. Drop it rather
@@ -967,7 +1016,9 @@ export class Companion {
         const result = outcome.perEvent[i];
         const id = ids[i]!;
         if (result === undefined) continue;
-        if (result.accepted) {
+        // Stored now or already (1xx), or ignored as unwanted (304): either way
+        // there is nothing left to do with it, and neither is a failure.
+        if (result.accepted || result.unwanted) {
           await this.db.execute(
             `DELETE FROM integration_queue WHERE integration = 'edsm' AND id = $1`,
             [id],
@@ -3642,6 +3693,10 @@ export class Companion {
       },
       onRotate: (from, to) => logger.info('journal', 'Rotated journal', { from, to }),
     });
+
+    // Before the catch-up below, which queues EDSM entries and needs the list
+    // to filter them. Not awaited: a slow EDSM must not delay reading the game.
+    this.edsmDiscardFirstLoad ??= this.loadEdsmDiscard();
 
     try {
       await this.engine.start();

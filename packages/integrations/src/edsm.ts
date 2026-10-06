@@ -41,6 +41,29 @@
  * submission and ask the commander to look at their key.
  */
 
+/*
+ * ## Per-entry codes, from the commander's own queue
+ *
+ * Each entry in `events` carries its own `msgnum`. Measured on 3,804 entries
+ * this client had marked rejected (2026-10-03 to 2026-10-06):
+ *
+ * | `msgnum` | `msg` | Count |
+ * |---|---|---|
+ * | 101 | Message already stored | 131 |
+ * | 102 | Message older than the stored one | 75 |
+ * | 103 | Duplicate event request | 1 |
+ * | 304 | Discarded event | 3,597 |
+ *
+ * The 1xx codes are EDSM saying it already holds this entry, or something
+ * newer. Nothing is wrong and a resend would get the same answer, so they count
+ * as delivered. Calling them rejections showed a commander thousands of
+ * failures for a log that was in fact complete.
+ *
+ * 304 is EDSM ignoring an event it does not want: every one was on the discard
+ * list, queued before the list had loaded. It is not a failure either, just
+ * traffic that should not have been sent, so it is dropped rather than shown.
+ */
+
 /** Verified by probe, and by the published page. */
 export const EDSM_JOURNAL_URL = 'https://www.edsm.net/api-journal-v1';
 /** Returns the event names EDSM asks clients not to send. */
@@ -63,6 +86,14 @@ export const EDSM_OK = 100;
  */
 export const EDSM_CREDENTIAL_CODES = new Set([201, 202, 203]);
 
+/** Per-entry: EDSM ignored this event because it is on the discard list. */
+export const EDSM_DISCARDED = 304;
+
+/** Per-entry: any 1xx means EDSM holds this entry (100 newly, 101-103 already). */
+export function edsmEntryStored(msgnum: number): boolean {
+  return msgnum >= 100 && msgnum < 200;
+}
+
 /** The outcome of one submission, already classified. */
 export type EdsmOutcome =
   | { readonly kind: 'accepted'; readonly perEvent: readonly EdsmEventResult[] }
@@ -74,8 +105,10 @@ export interface EdsmEventResult {
   readonly index: number;
   readonly msgnum: number;
   readonly msg: string;
-  /** Whether EDSM took this entry. */
+  /** Whether EDSM holds this entry now: taken, or already stored. */
   readonly accepted: boolean;
+  /** EDSM ignored it as an event it does not want. Not a failure. */
+  readonly unwanted: boolean;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -125,7 +158,8 @@ export function parseEdsmResponse(body: unknown): EdsmOutcome {
       index,
       msgnum: code,
       msg: typeof raw['msg'] === 'string' ? raw['msg'] : '',
-      accepted: code === EDSM_OK,
+      accepted: edsmEntryStored(code),
+      unwanted: code === EDSM_DISCARDED,
     });
   });
 
