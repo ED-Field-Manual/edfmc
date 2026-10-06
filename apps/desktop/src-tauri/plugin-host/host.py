@@ -315,7 +315,7 @@ class Panel:
         self.top.title(plugin.name)
         self.top.configure(background=SURFACE)
         self.top.protocol('WM_DELETE_WINDOW', self.top.withdraw)
-        self.embedded_in: int | None = None
+        self.owned_by: int | None = None
         if host.embedded:
             # Undecorated and hidden until the app places it, so it never
             # flashes up as a window of its own.
@@ -345,66 +345,41 @@ class Panel:
             log.error('%s returned a widget that could not be placed:\n%s', plugin.folder, traceback.format_exc())
         theme.apply(self.top)
 
-    def place(self, parent: int, x: int, y: int, width: int, height: int, visible: bool) -> None:
-        """Show this panel inside the app window, over its tab's free area.
+    def place(self, owner: int, x: int, y: int, width: int, height: int, visible: bool) -> None:
+        """Show this panel over its tab's free area. `x` and `y` are screen pixels.
 
-        Done here rather than from the app because Tk keeps its own idea of
-        where its windows are, and moves them back to it. Placing through Tk's
-        own geometry keeps the two in agreement: an earlier version moved the
-        window from outside and Tk put it straight back off-screen.
+        The panel stays a top-level window, owned by the app window, rather than
+        becoming its child. As a child, Tk crashed (an access violation inside
+        tk86t.dll) on the first click into it, because Tk's window handling
+        assumes a Tk top-level's parent is the desktop or another Tk window.
+        Owned, it is still kept above the app window and hidden with it when
+        the app is minimised, and Tk's assumptions hold.
+
+        Positioned through Tk's own geometry: Tk keeps its own idea of where its
+        windows are and puts them back if moved from outside.
         """
         if not visible:
             self.top.withdraw()
             return
-        if self.embedded_in != parent:
+        if self.owned_by != owner:
             self.top.update_idletasks()
-            reparent(int(self.top.wm_frame(), 16), parent)
-            self.embedded_in = parent
+            set_owner(int(self.top.wm_frame(), 16), owner)
+            self.owned_by = owner
         self.top.geometry(f'{max(width, 1)}x{max(height, 1)}+{x}+{y}')
         self.top.deiconify()
         self.top.lift()
 
 
-def reparent(child: int, parent: int) -> None:
-    """Make a top-level window a child of another process's window (Windows)."""
+def set_owner(window: int, owner: int) -> None:
+    """Make another process's window the owner of this one (Windows)."""
     import ctypes
     from ctypes import wintypes as w
 
     user32 = ctypes.windll.user32
-    user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
-    user32.GetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int]
     user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
     user32.SetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int, ctypes.c_ssize_t]
-    user32.SetParent.restype = w.HWND
-    user32.SetParent.argtypes = [w.HWND, w.HWND]
-    gwl_style = -16
-    ws_child = 0x40000000
-    ws_popup = 0x80000000
-    ws_caption = 0x00C00000
-    ws_thickframe = 0x00040000
-    ws_sysmenu = 0x00080000
-    ws_clipsiblings = 0x04000000
-    style = user32.GetWindowLongPtrW(child, gwl_style)
-    style = (style & ~(ws_popup | ws_caption | ws_thickframe | ws_sysmenu)) | ws_child | ws_clipsiblings
-    user32.SetWindowLongPtrW(child, gwl_style, style)
-    user32.SetParent(child, parent)
-
-    # The app's web view is a sibling that covers the whole window and was not
-    # created with WS_CLIPSIBLINGS, so it painted straight over the panel even
-    # though the panel was above it: the tab showed an empty area. Clipping it
-    # against its siblings lets the panel show through.
-    enum_proc = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
-    user32.GetParent.restype = w.HWND
-    user32.GetParent.argtypes = [w.HWND]
-
-    def clip(sibling: int, _: int) -> bool:
-        if sibling != child and user32.GetParent(sibling) == parent:
-            s = user32.GetWindowLongPtrW(sibling, gwl_style)
-            if not s & ws_clipsiblings:
-                user32.SetWindowLongPtrW(sibling, gwl_style, s | ws_clipsiblings)
-        return True
-
-    user32.EnumChildWindows(parent, enum_proc(clip), 0)
+    gwlp_hwndparent = -8  # for a top-level window this sets the owner
+    user32.SetWindowLongPtrW(window, gwlp_hwndparent, owner)
 
 
 class Responsive:
@@ -413,7 +388,7 @@ class Responsive:
     Plugins often block the one thread that draws them: SpanshRouter's Plot
     Route posts to Spansh and then polls with `sleep(1)` up to twenty times,
     all on the main thread. In a standalone window that freezes the plugin.
-    Here the panels are child windows of the app window, which shares their
+    Here the panels are owned by the app window, which shares their
     input with the app, so the whole app froze with it.
 
     So, on the main thread only, `time.sleep` and `requests` calls keep the
@@ -633,7 +608,7 @@ class Host:
             if panel is None:
                 return
             try:
-                panel.place(int(command.get('parent', 0)), int(command.get('x', 0)), int(command.get('y', 0)),
+                panel.place(int(command.get('owner', 0)), int(command.get('x', 0)), int(command.get('y', 0)),
                             int(command.get('width', 1)), int(command.get('height', 1)),
                             bool(command.get('visible')))
             except Exception:

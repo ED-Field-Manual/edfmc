@@ -829,6 +829,14 @@ pub fn run() {
         .on_window_event(|window, event| {
             use tauri::Manager;
 
+            // A plugin panel is its own window pinned over its tab, so it has
+            // to follow the app window around.
+            if window.label() == "main"
+                && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_))
+            {
+                plugin_host::follow_main_window(window.app_handle());
+                return;
+            }
             let tauri::WindowEvent::CloseRequested { api, .. } = event else {
                 return;
             };

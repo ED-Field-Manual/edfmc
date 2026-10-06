@@ -65,65 +65,32 @@ that tool's licence with them, and this project is MIT. Matching the names and
 behaviour plugins call is enough for compatibility.
 
 **A tab per plugin.** Every running plugin that has a panel (`plugin_app`) gets
-its own tab in the sidebar, indented under Plugins. Each panel is its own tkinter
-window, styled with the app's dark palette, and lives *inside* the app:
+its own tab in the sidebar, indented under Plugins. Each panel is its own
+tkinter window, styled with the app's dark palette and pinned over its tab:
 
 1. The host creates each panel window undecorated and hidden (`EDFMC_EMBED=1`).
 2. A plugin's tab leaves an empty area and reports its rectangle in physical
-   pixels (`plugin_panel_place`). `plugin_host.rs` adds the app window's handle
-   and passes it to the host as `{"type":"place", ...}`.
-3. The host makes the panel window a child of the app window (`WS_CHILD`,
-   `SetParent`), then positions it **through Tk's own geometry**. Leaving the tab
-   hides it.
-4. The host is per-monitor DPI aware, so panels are drawn at the screen's real
+   pixels relative to the client area (`plugin_panel_place`). `plugin_host.rs`
+   turns that into screen coordinates and adds the app window's handle.
+3. The host makes the app window the panel's **owner** (`GWLP_HWNDPARENT`) and
+   positions it through Tk's own geometry. An owned window stays above its
+   owner and hides when the owner is minimised. Leaving the tab hides it.
+4. When the app window moves or resizes, `plugin_host.rs` re-sends the showing
+   panel's position, so the panel follows.
+5. The host is per-monitor DPI aware, so panels are drawn at the screen's real
    resolution and match the area's size exactly.
 
-The host moves the window, not the app, because of the first version's bug. The
-app moved the window from outside with `SetWindowPos`, and Tk, which keeps its
-own record of where its windows are, put it straight back off-screen. The tab
-showed an empty area. Placing through Tk keeps the two in agreement. This was
-checked against a stand-in parent window: the panel appeared at the requested
-size with all of the plugin's widgets inside, stayed there, and hid on request.
-
-**The web view has to be clipped.** The panel did end up above the app's web
-view, at the right place, and the tab still looked empty. The web view is a
-sibling window covering the whole client area, and it was created without
-`WS_CLIPSIBLINGS`, so it painted over the panel regardless of z-order. When the
-host makes a panel a child of the app window, it adds `WS_CLIPSIBLINGS` to the
-panel and to the app window's other direct children.
-
-**Commands never stop the loop.** Each command from the app is handled on its
-own, and the next poll is always scheduled. In an earlier build, one failing
-command (Plugin settings, see below) ended the loop for good. Every later
-command, including "hide this panel", was ignored, and a panel stayed on top of
-every other tab. Journal delivery is protected the same way.
-
-**Settings pages get the notebook.** `plugin_prefs` is called with the settings
-notebook itself, and the frame it returns becomes the tab. ConstructionTracker
-builds `nb.Frame(parent)` and returns it. When it was handed a page inside the
-notebook instead, the notebook refused to add a grandchild as a tab.
-
-**Every plugin has a tab.** Declarative plugins, and Python plugins with no panel
-or that did not start, get a tab too. It shows the plugin's card instead of a
-panel.
-
-**A plugin that waits cannot freeze the app.** SpanshRouter's Plot Route posts to
-Spansh and then polls with `sleep(1)` up to twenty times, all on the one thread
-that draws plugins. Because the panels are child windows of the app window,
-Windows shares their input with the app, so the app froze for as long as the
-plugin waited. On the main thread only, the host makes `time.sleep` and
-`requests` calls keep the windows responding while they wait. The wait is just as
-long, and the result or error is the same, but windows are redrawn and answer
-clicks in the meantime. Journal delivery is held until the plugin's wait is
-over, so a plugin never receives an entry in the middle of its own work.
-Measured with SpanshRouter plotting Sol to Colonia: the plot took 17 seconds,
-with the windows serviced at least every 0.22 seconds throughout, and the route
-came back with 129 waypoints.
-
-**Closing the app** waits, off the main thread, for plugins to save before
-exiting. The app's message loop has to keep running while the host closes,
-because its panels are child windows of the app window. Blocking the main thread
-stalled the host until the five-second kill.
+**Why owned and not a child window.** Two earlier versions made the panel a
+*child* of the app window. The first moved it from outside, and Tk put it back
+off-screen. The second placed it through Tk, and it showed, once the app's web
+view was given `WS_CLIPSIBLINGS` so it stopped painting over the panel. But Tk
+then crashed, an access violation inside `tk86t.dll` caught by faulthandler in
+Tk's own event loop, as soon as the panel was clicked. Tk's window handling
+assumes a Tk top-level's parent is the desktop or another Tk window. As an owned
+top-level, it is what Tk expects. Checked against a stand-in owner window: 15 of
+SpanshRouter's widgets, including Plot route, were sent mouse-activate and click
+messages and the host stayed up. The panel then followed a move of the owner and
+hid on request.
 
 Why not draw the panels in the page itself: plugins build them with tkinter,
 which draws real native widgets, and a web page cannot contain those. Rewriting
