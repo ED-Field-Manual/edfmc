@@ -108,6 +108,31 @@ account; treat it as a password.
 Not switched on yet because it warrants testing against a real account first, and
 because of the credential boundary described below.
 
+### What EDSM's answers mean
+
+EDSM answers each entry with its own `msgnum`. Real answers from a commander's
+queue (3,804 entries, 2026-10-03 to 2026-10-06) showed that most of the entries
+the app had marked "rejected" were not failures:
+
+| `msgnum` | Meaning | How the app treats it |
+|---|---|---|
+| 100 | Stored | Delivered |
+| 101, 102, 103 | Already stored, older than the stored one, duplicate | Delivered: EDSM already has it |
+| 304 | Discarded event | Dropped: EDSM does not want this event |
+| anything else | A real refusal | Rejected, shown in the audit |
+
+**Discarded events.** EDSM publishes a list of events it does not want
+(`/api-journal-v1/discard`, 141 names). The app used to fetch that list only
+after it had re-read the current session at startup, so each launch queued that
+session's `Music`, `UnderAttack`, `ReceiveText` and so on unfiltered. Those
+accounted for all 3,597 of the 304 answers. Now the list is requested before the
+catch-up, and the sender checks every entry against it before sending, so
+anything queued before the list arrived is dropped instead of sent. If the list
+could not be fetched, the sender asks for it again on its next pass.
+
+On the first pass after updating, rows that earlier builds marked rejected with a
+1xx or 304 answer are removed, so the Rejected count shows only real problems.
+
 ---
 
 ## Inara — keeps your profile location current

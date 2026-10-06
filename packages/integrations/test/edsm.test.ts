@@ -69,14 +69,41 @@ describe('per-entry results', () => {
       msg: 'OK',
       events: [
         { msgnum: 100, msg: 'OK' },
-        { msgnum: 102, msg: 'Message older than the last one' },
+        { msgnum: 999, msg: 'Something new' },
       ],
     });
     expect(outcome.kind).toBe('accepted');
     if (outcome.kind !== 'accepted') return;
     expect(outcome.perEvent[0]?.accepted).toBe(true);
     expect(outcome.perEvent[1]?.accepted).toBe(false);
-    expect(outcome.perEvent[1]?.msgnum).toBe(102);
+    expect(outcome.perEvent[1]?.unwanted).toBe(false);
+    expect(outcome.perEvent[1]?.msgnum).toBe(999);
+  });
+
+  it('counts "already stored" answers as delivered, not rejected', () => {
+    // The three 1xx messages, verbatim from real replies in the commander's
+    // queue. EDSM already holds each of these entries.
+    const outcome = parseEdsmResponse({
+      msgnum: 100,
+      msg: 'OK',
+      events: [
+        { msgnum: 101, msg: 'Message already stored' },
+        { msgnum: 102, msg: 'Message older than the stored one' },
+        { msgnum: 103, msg: 'Duplicate event request' },
+      ],
+    });
+    if (outcome.kind !== 'accepted') throw new Error(outcome.kind);
+    expect(outcome.perEvent.every((e) => e.accepted)).toBe(true);
+  });
+
+  it('marks a discarded event unwanted rather than rejected', () => {
+    const outcome = parseEdsmResponse({
+      msgnum: 100,
+      msg: 'OK',
+      events: [{ msgnum: 304, msg: 'Discarded event' }],
+    });
+    if (outcome.kind !== 'accepted') throw new Error(outcome.kind);
+    expect(outcome.perEvent[0]).toMatchObject({ accepted: false, unwanted: true });
   });
 
   it('never marks anything accepted on a reply it cannot read', () => {
