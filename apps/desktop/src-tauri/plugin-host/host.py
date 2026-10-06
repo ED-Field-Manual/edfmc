@@ -41,6 +41,22 @@ from typing import Any
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'compat'))
 
+def _dpi_aware() -> None:
+    """Draw at the screen's real resolution.
+
+    The plugin window is placed inside the app window, which is DPI aware. A
+    DPI-unaware child would be bitmap-stretched and blurry on a scaled display,
+    and its size would not match the space the app leaves for it.
+    """
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # per-monitor
+    except (AttributeError, OSError):
+        pass
+
+
+_dpi_aware()
+
 import tkinter as tk  # noqa: E402
 from tkinter import ttk  # noqa: E402
 
@@ -299,9 +315,17 @@ class Host:
 
         self.root = tk.Tk()
         self.root.title('EDFM Companion Plugins')
-        self.root.minsize(320, 120)
         theme.initialize(self.root)
         self.root.protocol('WM_DELETE_WINDOW', self.root.withdraw)
+        # Inside the app (the Plugin panels tab), the app places and sizes the
+        # window. Until it does, it waits off-screen, undecorated, rather than
+        # flashing up as a window of its own.
+        self.embedded = os.environ.get('EDFMC_EMBED') == '1'
+        if self.embedded:
+            self.root.overrideredirect(True)
+            self.root.geometry('1x1+-32000+-32000')
+        else:
+            self.root.minsize(320, 120)
         icon = os.environ.get('EDFMC_ICON')
         if icon and os.path.isfile(icon):
             try:
@@ -364,6 +388,12 @@ class Host:
 
         theme.apply(self.root)
         self.report()
+        if self.embedded:
+            self.root.update_idletasks()
+            try:
+                emit({'type': 'window', 'hwnd': int(self.root.wm_frame(), 16)})
+            except (ValueError, tk.TclError):
+                log.error('Could not find the plugin window to place it:\n%s', traceback.format_exc())
         threading.Thread(target=self._read_commands, daemon=True).start()
         self.root.after(POLL_MS, self._tick)
 
@@ -439,7 +469,7 @@ class Host:
 
     def _command(self, command: dict[str, Any]) -> None:
         kind = command.get('type')
-        if kind == 'show':
+        if kind == 'show' and not self.embedded:
             self.root.deiconify()
             self.root.lift()
             self.root.focus_force()

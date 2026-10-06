@@ -29,6 +29,16 @@ pub const EVENT: &str = "plugin-host://message";
 #[derive(Default)]
 pub struct PluginHostState {
     inner: Mutex<Option<Running>>,
+    /// The plugin window's top-level HWND, as the host reports it, and whether
+    /// it has been moved inside the app window yet. Raw values: they belong to
+    /// another process and are only ever passed to Win32.
+    panel: Mutex<Panel>,
+}
+
+#[derive(Default)]
+struct Panel {
+    hwnd: Option<isize>,
+    embedded: bool,
 }
 
 struct Running {
@@ -172,6 +182,8 @@ pub fn plugin_host_start(
             serde_json::to_string(&disabled).unwrap_or_else(|_| "[]".into()),
         )
         .env("PYTHONIOENCODING", "utf-8")
+        // The plugin window lives inside the app, in the Plugin panels tab.
+        .env("EDFMC_EMBED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -198,12 +210,22 @@ pub fn plugin_host_start(
             let Ok(line) = line else { break };
             // Only well-formed JSON is forwarded; anything else is not protocol.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
+                // The host says where its window is so it can be placed in the
+                // Plugin panels tab. Kept here, not forwarded: the frontend
+                // has no use for a raw window handle.
+                if value["type"] == "window" {
+                    if let Some(hwnd) = value["hwnd"].as_i64() {
+                        let state = handle.state::<PluginHostState>();
+                        *state.panel.lock().unwrap() = Panel { hwnd: Some(hwnd as isize), embedded: false };
+                    }
+                }
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("pid".into(), pid.into());
                     let _ = handle.emit(EVENT, value);
                 }
             }
         }
+        *handle.state::<PluginHostState>().panel.lock().unwrap() = Panel::default();
         let _ = handle.emit(EVENT, serde_json::json!({ "type": "exited", "pid": pid }));
     });
 
@@ -276,5 +298,79 @@ pub fn python_plugins_open_folder(app: AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
         Err(format!("Open this folder: {}", path.to_string_lossy()))
+    }
+}
+
+/// Place the plugin window inside the app window, over the Plugin panels tab.
+///
+/// The plugins draw with tkinter, real native widgets that a web page cannot
+/// contain. So the window is made a child of the app window and positioned
+/// over the space the tab leaves for it. `x`, `y`, `width` and `height` are
+/// physical pixels relative to the app window's client area; `visible` false
+/// hides it when another tab is showing.
+#[tauri::command]
+pub fn plugin_panel_place(
+    app: AppHandle,
+    state: State<'_, PluginHostState>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    visible: bool,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_STYLE,
+            HWND_TOP, SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_HIDE, WS_CAPTION, WS_CHILD,
+            WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+        };
+
+        let mut panel = state.panel.lock().unwrap();
+        let Some(raw) = panel.hwnd else { return Ok(()) };
+        let child = HWND(raw as *mut std::ffi::c_void);
+
+        if !visible {
+            unsafe {
+                let _ = ShowWindow(child, SW_HIDE);
+            }
+            return Ok(());
+        }
+
+        if !panel.embedded {
+            let main = app
+                .get_webview_window("main")
+                .ok_or("The main window is missing.")?
+                .hwnd()
+                .map_err(|e| e.to_string())?;
+            let parent = HWND(main.0 as *mut std::ffi::c_void);
+            unsafe {
+                let style = GetWindowLongPtrW(child, GWL_STYLE);
+                let strip = (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU).0 as isize;
+                SetWindowLongPtrW(child, GWL_STYLE, (style & !strip) | WS_CHILD.0 as isize);
+                SetParent(child, parent).map_err(|e| e.to_string())?;
+            }
+            panel.embedded = true;
+        }
+
+        unsafe {
+            SetWindowPos(
+                child,
+                HWND_TOP,
+                x,
+                y,
+                width.max(1),
+                height.max(1),
+                SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, state, x, y, width, height, visible);
+        Ok(())
     }
 }
