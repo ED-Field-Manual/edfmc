@@ -82,6 +82,33 @@ def plot(source: str, destination: str, jump_range: float, efficiency: int = 60,
         sleep(POLL_EVERY_S)
 
 
+def suggest(prefix: str, limit: int = 8,
+            request: Callable[[str, str], tuple[int, Any]] = _request) -> list[str]:
+    """System names starting with `prefix`, for predictive text. Blocks.
+
+    Spansh answers `{"values": [...names...], "min_max": [...]}`. Names that
+    start with what was typed come first, so "sol" offers Sol before Solati.
+    """
+    prefix = prefix.strip()
+    if len(prefix) < 2:
+        return []
+    status, body = request(f'{API}/systems/field_values/system_names?q={urllib.parse.quote(prefix)}', 'GET')
+    if status != 200 or not isinstance(body, dict):
+        return []
+    names = [v for v in body.get('values') or [] if isinstance(v, str)]
+    if not names:
+        names = [m.get('name') for m in body.get('min_max') or [] if isinstance(m, dict) and isinstance(m.get('name'), str)]
+    low = prefix.lower()
+    names.sort(key=lambda n: (not n.lower().startswith(low), len(n), n.lower()))
+    seen: set[str] = set()
+    out = []
+    for n in names:
+        if n.lower() not in seen:
+            seen.add(n.lower())
+            out.append(n)
+    return out[:limit]
+
+
 def plot_in_background(source: str, destination: str, jump_range: float, efficiency: int,
                        done: Callable[[Route | None, str | None], None]) -> None:
     """Plot on a worker thread. `done(route, error)` is called on that thread."""

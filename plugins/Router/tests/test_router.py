@@ -114,6 +114,62 @@ class SpanshTest(unittest.TestCase):
             spansh.plot('Sol', 'NoSuchSystemXYZ', 50, request=request, sleep=lambda s: None)
 
 
+class SuggestTest(unittest.TestCase):
+    def test_names_that_start_with_the_text_come_first(self) -> None:
+        # fixtures/spansh_names_sol.json is Spansh's real answer for "sol".
+        with open(os.path.join(ROOT, 'tests', 'fixtures', 'spansh_names_sol.json'), encoding='utf-8') as f:
+            body = json.load(f)
+        names = spansh.suggest('sol', request=lambda url, method: (200, body))
+        self.assertEqual(names[0], 'Sol')
+        self.assertEqual(set(names), {'Sol', 'Solitude', 'Solibamba', 'Sollaro', 'Solati'})
+
+    def test_nothing_for_too_little_text_or_a_failed_request(self) -> None:
+        self.assertEqual(spansh.suggest('s', request=lambda u, m: self.fail('should not ask')), [])
+        self.assertEqual(spansh.suggest('sol', request=lambda u, m: (500, None)), [])
+
+
+# A real Loadout line from 2026-10-05, with its Modules list removed for size.
+LOADOUT = ('{"timestamp": "2026-10-05T23:07:46Z", "event": "Loadout", "Ship": "corsair", "ShipID": 18, '
+           '"ShipName": "Void Revenant", "ShipIdent": "BS-VR1", "HullValue": 79304746, "ModulesValue": 215780835, '
+           '"HullHealth": 1.0, "UnladenMass": 785.099976, "CargoCapacity": 64, "MaxJumpRange": 27.648792, '
+           '"FuelCapacity": {"Main": 32.0, "Reserve": 0.41}, "Rebuy": 14754281}')
+
+
+class WhereAmITest(unittest.TestCase):
+    def test_reads_the_system_and_jump_range_the_host_already_knows(self) -> None:
+        import load
+
+        journal = os.path.join(tempfile.mkdtemp(), 'Journal.2026-10-05T180552.01.log')
+        with open(journal, 'w', encoding='utf-8') as f:
+            f.write(LOADOUT + '\n')
+
+        class FakeMonitor:
+            state = {'SystemName': 'Wregoe EH-D d12-54', 'SystemAddress': 1866003925355}
+            logfile = journal
+
+        stored: dict[str, object] = {}
+
+        class FakeConfig:
+            def get_str(self, key, default=None):
+                return stored.get(key, default)
+
+            def get_int(self, key, default=0):
+                return stored.get(key, default)
+
+            def set(self, key, value):
+                stored[key] = value
+
+        load.monitor, load.config = FakeMonitor(), FakeConfig()
+        try:
+            load._state['system'] = None
+            load._where_am_i()
+            self.assertEqual(load._state['system'], 'Wregoe EH-D d12-54')
+            self.assertEqual(load._state['address'], 1866003925355)
+            self.assertEqual(stored['router_range'], '27.65')
+        finally:
+            load.monitor, load.config = None, None
+
+
 class BridgeTest(unittest.TestCase):
     def test_summary_for_the_overlay(self) -> None:
         route = three_stops()

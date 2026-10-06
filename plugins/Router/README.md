@@ -11,8 +11,13 @@ Companion it also shows the next jump in the game overlay.
 
 ## What it does
 
-- **Plot a route** from your current system to anywhere. Your jump range is
-  filled in from your ship's loadout.
+- **Plot a route** from your current system to anywhere. "From" is filled in
+  with the system you are in as soon as the plugin starts, and keeps following
+  you until you type a different start. Your jump range comes from your ship's
+  loadout.
+- **Predictive text** on both system boxes: start typing and matching system
+  names from Spansh appear underneath. Use the arrow keys and Enter, or click
+  one.
 - **Follow it.** The next waypoint is shown with your progress and jumps left,
   and it is copied to the clipboard each time you arrive, ready to paste into
   the galaxy map.
@@ -40,6 +45,11 @@ In the host's settings, on the Router tab:
 - **Copy the next waypoint automatically** (on by default).
 - **Route efficiency** (1–100, default 60): higher stays closer to a straight
   line, lower allows longer detours to neutron stars.
+
+## Looks
+
+In EDFM Companion the panel uses the app's own colours and type. In EDMC,
+EDMC's theme (default, dark or transparent) colours it, as with any plugin.
 
 ## How it works
 

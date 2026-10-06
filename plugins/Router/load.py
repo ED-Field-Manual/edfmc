@@ -11,6 +11,7 @@ else lives in the `router_core` package next to this file.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tkinter as tk
@@ -25,7 +26,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.1.0'
+plugin_version = '0.2.0'
 
 try:
     from config import config  # provided by the host
@@ -36,6 +37,11 @@ try:
     import myNotebook as nb  # provided by the host, for the settings tab
 except ImportError:
     nb = None
+
+try:
+    from monitor import monitor  # provided by the host: what it knows of the game
+except ImportError:
+    monitor = None
 
 _state: dict[str, Any] = {
     'dir': _HERE,
@@ -88,11 +94,54 @@ def _jump_range() -> float | None:
         return None
 
 
+def _where_am_i() -> None:
+    """Learn the current system (and jump range) before the next jump.
+
+    Hosts load plugins after the game is already running, and the next
+    `journal_entry` may be a whole jump away. Both EDMC and EDFM Companion keep
+    the current system in `monitor.state`; the jump range is only in the
+    journal, so the newest `Loadout` in the current journal is read for it.
+    """
+    if monitor is None:
+        return
+    state = getattr(monitor, 'state', None) or {}
+    name = state.get('SystemName') or getattr(monitor, 'system', None)
+    if isinstance(name, str) and name:
+        _state['system'] = name
+        address = state.get('SystemAddress') or getattr(monitor, 'systemaddress', None)
+        _state['address'] = address if isinstance(address, int) else None
+    if _jump_range() is None:
+        path = getattr(monitor, 'logfile', None)
+        jump = _last_loadout_range(path) if isinstance(path, str) else None
+        if jump:
+            _set('range', f'{jump:.2f}')
+
+
+def _last_loadout_range(path: str) -> float | None:
+    """MaxJumpRange from the newest Loadout in a journal file. Read only."""
+    found = None
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if '"event":"Loadout"' not in line.replace(' ', ''):
+                    continue
+                try:
+                    v = json.loads(line).get('MaxJumpRange')
+                except ValueError:
+                    continue
+                if isinstance(v, (int, float)) and v > 0:
+                    found = float(v)
+    except OSError:
+        return None
+    return found
+
+
 # --- entry points --------------------------------------------------------
 
 def plugin_start3(plugin_dir: str) -> str:
     _state['dir'] = plugin_dir
     _state['route'] = Route.load(_route_path())
+    _where_am_i()
     return plugin_name
 
 
@@ -111,6 +160,7 @@ def plugin_app(parent: tk.Frame) -> tk.Frame:
         current_address=lambda: _state['address'],
         jump_range=_jump_range,
         efficiency=lambda: max(1, min(100, _get('efficiency', 60))),
+        set_efficiency=lambda v: _set('efficiency', v),
         auto_copy=lambda: _get('autocopy', True),
         changed=route_changed,
     )
@@ -149,6 +199,8 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     # Jump range: the game states it on every Loadout (login, outfitting, ship swap).
     if event == 'Loadout' and isinstance(entry.get('MaxJumpRange'), (int, float)):
         _set('range', f"{entry['MaxJumpRange']:.2f}")
+        if _state['panel'] is not None and _state['route'].empty:
+            _state['panel'].range_var.set(f"{entry['MaxJumpRange']:.2f}")
 
     if event in ('Location', 'FSDJump', 'CarrierJump'):
         _state['system'] = entry.get('StarSystem')
@@ -163,3 +215,5 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
         # Started mid-session: the host knows the system even before a jump.
         _state['system'] = system
         _state['address'] = state.get('SystemAddress') if isinstance(state, dict) else None
+        if _state['panel'] is not None:
+            _state['panel'].located()

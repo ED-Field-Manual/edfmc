@@ -20,6 +20,15 @@ ACCENT = '#ff7d20'
 LINE = '#353535'
 
 
+#: Colours Tk uses when nothing chose one: Windows system colours and Tk's own.
+_DEFAULTS = {'', 'white', '#ffffff', 'black', '#000000', '#f0f0f0', '#d9d9d9', '#a3a3a3', '#6d6d6d'}
+
+
+def _is_default(value: str) -> bool:
+    v = value.strip().lower()
+    return v.startswith('system') or v in _DEFAULTS
+
+
 class _Theme:
     THEME_DEFAULT = 0
     THEME_DARK = 1
@@ -103,27 +112,29 @@ class _Theme:
             keys = widget.keys()
         except (tk.TclError, AttributeError):
             return
+        # Only colours still at a platform default are replaced. A plugin that
+        # styled itself (Router draws its own buttons and fields in the app's
+        # palette; others pick highlight or warning colours) keeps its choices.
+        wanted = {
+            'background': RAISED if widget.winfo_class() in ('Entry', 'Listbox', 'Text') else SURFACE,
+            'foreground': TEXT,
+            'activebackground': RAISED,
+            'activeforeground': TEXT,
+            'highlightbackground': SURFACE,
+            'insertbackground': TEXT,
+        }
+        if widget.winfo_class() in ('Checkbutton', 'Radiobutton'):
+            wanted['selectcolor'] = RAISED
         opts: dict[str, str] = {}
-        if 'background' in keys:
-            opts['background'] = RAISED if widget.winfo_class() in ('Entry', 'Listbox', 'Text') else SURFACE
-        if 'foreground' in keys:
-            # A plugin that chose its own colour (a highlight, a warning) keeps it.
+        for key, value in wanted.items():
+            if key not in keys:
+                continue
             try:
-                current = str(widget.cget('foreground')).lower()
+                current = str(widget.cget(key))
             except tk.TclError:
-                current = ''
-            if current in ('', 'black', 'systembuttontext', 'systemwindowtext', '#000000', 'systemmenutext'):
-                opts['foreground'] = TEXT
-        if 'activebackground' in keys:
-            opts['activebackground'] = RAISED
-        if 'activeforeground' in keys:
-            opts['activeforeground'] = TEXT
-        if 'highlightbackground' in keys:
-            opts['highlightbackground'] = SURFACE
-        if 'selectcolor' in keys and widget.winfo_class() in ('Checkbutton', 'Radiobutton'):
-            opts['selectcolor'] = RAISED
-        if 'insertbackground' in keys:
-            opts['insertbackground'] = TEXT
+                continue
+            if _is_default(current):
+                opts[key] = value
         try:
             widget.configure(**opts)
         except tk.TclError:
