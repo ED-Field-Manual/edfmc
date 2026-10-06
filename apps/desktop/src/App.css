@@ -78,6 +78,9 @@ body {
   font: inherit; text-align: left; cursor: pointer;
 }
 .nav button:hover { background: var(--surface-3); color: var(--text); }
+/* A Python plugin's own tab, listed under Plugins. Indented and a step smaller
+   so it reads as belonging to Plugins rather than as a section of the app. */
+.nav button.nav-sub { padding-left: 1.75rem; font-size: 0.8125rem; }
 /* Active gets a faint orange wash as well as the bar, so the accent colour is
    doing structural work rather than just decorating one edge. */
 .nav button.active {

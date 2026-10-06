@@ -66,6 +66,7 @@ from monitor import monitor  # noqa: E402
 from theme import ACCENT, MUTED, SURFACE, TEXT, theme  # noqa: E402
 
 POLL_MS = 250
+COMMAND_MS = 30
 # Shown in the app as plain text. Bounded so a huge file cannot flood the protocol.
 MAX_README_CHARS = 64 * 1024
 
@@ -305,50 +306,111 @@ class JournalTail:
         return entry if isinstance(entry, dict) else None
 
 
+class Panel:
+    """One plugin's own window, shown inside the app on that plugin's tab."""
+
+    def __init__(self, host: Host, plugin: Plugin) -> None:
+        self.plugin = plugin
+        self.top = tk.Toplevel(host.root)
+        self.top.title(plugin.name)
+        self.top.configure(background=SURFACE)
+        self.top.protocol('WM_DELETE_WINDOW', self.top.withdraw)
+        self.embedded_in: int | None = None
+        if host.embedded:
+            # Undecorated and hidden until the app places it, so it never
+            # flashes up as a window of its own.
+            self.top.overrideredirect(True)
+            self.top.withdraw()
+
+        self.top.columnconfigure(0, weight=1)
+        self.top.rowconfigure(0, weight=1)
+        self.frame = tk.Frame(self.top, background=SURFACE)
+        self.frame.grid(row=0, column=0, sticky=tk.NSEW, padx=8, pady=8)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.columnconfigure(1, weight=1)
+        self.status = tk.StringVar(value='')
+        tk.Label(self.top, textvariable=self.status, foreground=MUTED, background=SURFACE,
+                 anchor=tk.W, justify=tk.LEFT).grid(row=1, column=0, sticky=tk.EW, padx=8, pady=(0, 6))
+        plugin.frame = self.frame
+
+        result = plugin.call('plugin_app', self.frame)
+        # Either one widget spanning the row, or a (label, value) pair.
+        try:
+            if isinstance(result, tuple) and len(result) == 2:
+                result[0].grid(row=0, column=0, sticky=tk.W)
+                result[1].grid(row=0, column=1, sticky=tk.EW)
+            elif isinstance(result, tk.Misc) and result.master is self.frame and not result.grid_info():
+                result.grid(row=0, column=0, columnspan=2, sticky=tk.EW)
+        except tk.TclError:
+            log.error('%s returned a widget that could not be placed:\n%s', plugin.folder, traceback.format_exc())
+        theme.apply(self.top)
+
+    def place(self, parent: int, x: int, y: int, width: int, height: int, visible: bool) -> None:
+        """Show this panel inside the app window, over its tab's free area.
+
+        Done here rather than from the app because Tk keeps its own idea of
+        where its windows are, and moves them back to it. Placing through Tk's
+        own geometry keeps the two in agreement: an earlier version moved the
+        window from outside and Tk put it straight back off-screen.
+        """
+        if not visible:
+            self.top.withdraw()
+            return
+        if self.embedded_in != parent:
+            self.top.update_idletasks()
+            reparent(int(self.top.wm_frame(), 16), parent)
+            self.embedded_in = parent
+        self.top.geometry(f'{max(width, 1)}x{max(height, 1)}+{x}+{y}')
+        self.top.deiconify()
+        self.top.lift()
+
+
+def reparent(child: int, parent: int) -> None:
+    """Make a top-level window a child of another process's window (Windows)."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    user32 = ctypes.windll.user32
+    user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+    user32.GetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int]
+    user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+    user32.SetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int, ctypes.c_ssize_t]
+    user32.SetParent.restype = w.HWND
+    user32.SetParent.argtypes = [w.HWND, w.HWND]
+    gwl_style = -16
+    ws_child = 0x40000000
+    ws_popup = 0x80000000
+    ws_caption = 0x00C00000
+    ws_thickframe = 0x00040000
+    ws_sysmenu = 0x00080000
+    style = user32.GetWindowLongPtrW(child, gwl_style)
+    style = (style & ~(ws_popup | ws_caption | ws_thickframe | ws_sysmenu)) | ws_child
+    user32.SetWindowLongPtrW(child, gwl_style, style)
+    user32.SetParent(child, parent)
+
+
 class Host:
     def __init__(self) -> None:
         self.commands: queue.Queue[dict[str, Any]] = queue.Queue()
         self.plugins: list[Plugin] = []
+        self.panels: dict[str, Panel] = {}
         self.tail = JournalTail(config.default_journal_dir_path)
         self.settings_window: tk.Toplevel | None = None
         self.stopping = False
+        # Inside the app, each plugin's panel is shown on its own tab.
+        self.embedded = os.environ.get('EDFMC_EMBED') == '1'
 
+        # The root only anchors the panels and dialogs; it is never shown.
         self.root = tk.Tk()
         self.root.title('EDFM Companion Plugins')
         theme.initialize(self.root)
-        self.root.protocol('WM_DELETE_WINDOW', self.root.withdraw)
-        # Inside the app (the Plugin panels tab), the app places and sizes the
-        # window. Until it does, it waits off-screen, undecorated, rather than
-        # flashing up as a window of its own.
-        self.embedded = os.environ.get('EDFMC_EMBED') == '1'
-        if self.embedded:
-            self.root.overrideredirect(True)
-            self.root.geometry('1x1+-32000+-32000')
-        else:
-            self.root.minsize(320, 120)
-        icon = os.environ.get('EDFMC_ICON')
-        if icon and os.path.isfile(icon):
-            try:
-                self.root.iconbitmap(icon)
-            except tk.TclError:
-                pass
+        self.root.withdraw()
 
-        bar = tk.Frame(self.root, background=SURFACE)
-        bar.grid(row=0, column=0, sticky=tk.EW, padx=8, pady=(8, 4))
-        bar.columnconfigure(0, weight=1)
-        self.status_var = tk.StringVar(value='')
-        tk.Label(bar, textvariable=self.status_var, foreground=MUTED, background=SURFACE,
-                 anchor=tk.W, wraplength=260, justify=tk.LEFT).grid(row=0, column=0, sticky=tk.EW)
-        ttk.Button(bar, text='Settings', command=self.open_settings).grid(row=0, column=1, sticky=tk.E)
+        host_bridge.set_status_handler(self._status_all)
 
-        self.body = tk.Frame(self.root, background=SURFACE)
-        self.body.grid(row=1, column=0, sticky=tk.NSEW, padx=8, pady=(0, 8))
-        self.body.columnconfigure(0, weight=1)
-        self.body.columnconfigure(1, weight=1)
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
-
-        host_bridge.set_status_handler(lambda message: self.status_var.set(message))
+    def _status_all(self, message: str) -> None:
+        for panel in self.panels.values():
+            panel.status.set(message)
 
     # -- startup ---------------------------------------------------------
 
@@ -375,62 +437,32 @@ class Host:
             load(plugin)
             log.info('%s: %s', plugin.folder, 'loaded' if plugin.module else plugin.error)
 
-        row = 0
         for plugin in self.plugins:
-            if not plugin.has('plugin_app'):
-                continue
-            row = self._add_app(plugin, row)
+            if plugin.has('plugin_app'):
+                self.panels[plugin.folder] = Panel(self, plugin)
 
-        if not any(p.module for p in self.plugins):
-            tk.Label(self.body, text='No plugins are running. Put a plugin folder in the plugins folder, then restart plugins.',
-                     foreground=MUTED, background=SURFACE, wraplength=280, justify=tk.LEFT
-                     ).grid(row=row, column=0, columnspan=2, sticky=tk.W)
-
-        theme.apply(self.root)
         self.report()
-        if self.embedded:
-            self.root.update_idletasks()
-            try:
-                emit({'type': 'window', 'hwnd': int(self.root.wm_frame(), 16)})
-            except (ValueError, tk.TclError):
-                log.error('Could not find the plugin window to place it:\n%s', traceback.format_exc())
         threading.Thread(target=self._read_commands, daemon=True).start()
         self.root.after(POLL_MS, self._tick)
-
-    def _add_app(self, plugin: Plugin, row: int) -> int:
-        # A separator above each plugin, like the rows of a single window.
-        if row > 0:
-            ttk.Separator(self.body, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2,
-                                                               sticky=tk.EW, pady=4)
-            row += 1
-        frame = tk.Frame(self.body, background=SURFACE)
-        frame.grid(row=row, column=0, columnspan=2, sticky=tk.NSEW)
-        frame.columnconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
-        plugin.frame = frame
-        result = plugin.call('plugin_app', frame)
-        # Either one widget spanning the row, or a (label, value) pair.
-        try:
-            if isinstance(result, tuple) and len(result) == 2:
-                result[0].grid(row=0, column=0, sticky=tk.W)
-                result[1].grid(row=0, column=1, sticky=tk.EW)
-            elif isinstance(result, tk.Misc) and result.master is frame and not result.grid_info():
-                result.grid(row=0, column=0, columnspan=2, sticky=tk.EW)
-        except tk.TclError:
-            log.error('%s returned a widget that could not be placed:\n%s', plugin.folder, traceback.format_exc())
-        return row + 1
+        self.root.after(COMMAND_MS, self._poll_commands)
 
     def report(self) -> None:
         emit({'type': 'status', 'plugins': [p.describe() for p in self.plugins]})
 
     # -- the loop --------------------------------------------------------
 
-    def _tick(self) -> None:
+    def _poll_commands(self) -> None:
+        # Separate from the journal poll and faster, so a panel follows the
+        # app's layout without visible lag.
         try:
             while not self.stopping:
                 self._command(self.commands.get_nowait())
         except queue.Empty:
             pass
+        if not self.stopping:
+            self.root.after(COMMAND_MS, self._poll_commands)
+
+    def _tick(self) -> None:
         if self.stopping:
             return
 
@@ -453,8 +485,8 @@ class Host:
             result = plugin.call('journal_entry', monitor.cmdr, monitor.is_beta, monitor.system,
                                  monitor.station, dict(entry), monitor.snapshot())
             # A returned string is the plugin reporting a problem to the user.
-            if isinstance(result, str) and result:
-                self.status_var.set(f'{plugin.name}: {result}')
+            if isinstance(result, str) and result and plugin.folder in self.panels:
+                self.panels[plugin.folder].status.set(result)
 
     def _read_commands(self) -> None:
         for line in sys.stdin:
@@ -469,10 +501,19 @@ class Host:
 
     def _command(self, command: dict[str, Any]) -> None:
         kind = command.get('type')
-        if kind == 'show' and not self.embedded:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
+        if kind == 'place':
+            panel = self.panels.get(str(command.get('folder')))
+            if panel is None:
+                return
+            try:
+                panel.place(int(command.get('parent', 0)), int(command.get('x', 0)), int(command.get('y', 0)),
+                            int(command.get('width', 1)), int(command.get('height', 1)),
+                            bool(command.get('visible')))
+            except Exception:
+                log.error('Could not place %s:\n%s', panel.plugin.folder, traceback.format_exc())
+        elif kind == 'show' and not self.embedded:
+            for panel in self.panels.values():
+                panel.top.deiconify()
         elif kind == 'settings':
             self.open_settings()
         elif kind == 'quit':

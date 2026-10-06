@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type CommanderState, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl, type GuidanceMode } from '@edfm/context';
@@ -20,7 +20,7 @@ import { Journal } from './Journal';
 import { Research } from './Research';
 import { Contributions } from './Contributions';
 import { Plugins as PluginsScreen } from './Plugins';
-import { PluginPanels } from './PluginPanels';
+import { PluginPanel } from './PluginPanels';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -62,7 +62,6 @@ const SECTIONS = [
   'Connections',
   'Screenshots',
   'Plugins',
-  'Plugin panels',
   'Settings',
   'Diagnostics',
 ] as const;
@@ -80,7 +79,6 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Connections',
   'Screenshots',
   'Plugins',
-  'Plugin panels',
   'Settings',
   'Diagnostics',
 ]);
@@ -89,6 +87,11 @@ const PHASE: Partial<Record<Section, string>> = {};
 
 export default function App() {
   const [section, setSection] = useState<Section>('Dashboard');
+  /**
+   * A Python plugin's own tab, by folder, or null when a regular section is
+   * showing. Each plugin with a panel gets one, listed under Plugins.
+   */
+  const [pluginTab, setPluginTab] = useState<string | null>(null);
 
   const snap = useSyncExternalStore(
     (cb) => companion.subscribe(cb),
@@ -103,6 +106,11 @@ export default function App() {
     void companion.start();
   }, []);
 
+  const panelPlugins = snap.pythonPlugins.plugins.filter((p) => p.loaded && p.hasPanel);
+  // A plugin switched off or removed takes its tab with it.
+  const openPlugin =
+    pluginTab !== null && panelPlugins.some((p) => p.folder === pluginTab) ? pluginTab : null;
+
   return (
     <div className="app">
       <nav className="nav" aria-label="Main">
@@ -116,17 +124,35 @@ export default function App() {
         </div>
         <ul>
           {SECTIONS.map((s) => (
-            <li key={s}>
-              <button
-                type="button"
-                className={s === section ? 'active' : ''}
-                aria-current={s === section ? 'page' : undefined}
-                onClick={() => setSection(s)}
-              >
-                <span>{s}</span>
-                {!IMPLEMENTED.has(s) && <span className="pill">{PHASE[s]}</span>}
-              </button>
-            </li>
+            <Fragment key={s}>
+              <li>
+                <button
+                  type="button"
+                  className={openPlugin === null && s === section ? 'active' : ''}
+                  aria-current={openPlugin === null && s === section ? 'page' : undefined}
+                  onClick={() => {
+                    setPluginTab(null);
+                    setSection(s);
+                  }}
+                >
+                  <span>{s}</span>
+                  {!IMPLEMENTED.has(s) && <span className="pill">{PHASE[s]}</span>}
+                </button>
+              </li>
+              {s === 'Plugins' &&
+                panelPlugins.map((p) => (
+                  <li key={`plugin:${p.folder}`}>
+                    <button
+                      type="button"
+                      className={`nav-sub ${pluginTab === p.folder ? 'active' : ''}`}
+                      aria-current={pluginTab === p.folder ? 'page' : undefined}
+                      onClick={() => setPluginTab(p.folder)}
+                    >
+                      <span>{p.name}</span>
+                    </button>
+                  </li>
+                ))}
+            </Fragment>
           ))}
         </ul>
         <ConnectionBadge snap={snap} />
@@ -139,21 +165,26 @@ export default function App() {
           who wants to get straight to their journal should be able to.
         */}
         {!snap.guidanceChosen && <FirstRunGuidance />}
-        {section === 'Dashboard' && <Dashboard snap={snap} />}
-        {section === 'Context' && <ContextPanel snap={snap} />}
-        {section === 'Missions' && <MissionsPanel snap={snap} />}
-        {section === 'Overlay' && <OverlayPanel />}
-        {section === 'Logistics' && <Logistics snap={snap} />}
-        {section === 'Journal' && <Journal snap={snap} />}
-        {section === 'Research' && <Research snap={snap} />}
-        {section === 'Contributions' && <Contributions snap={snap} />}
-        {section === 'Connections' && <Integrations snap={snap} />}
-        {section === 'Screenshots' && <Screenshots snap={snap} />}
-        {section === 'Plugins' && <PluginsScreen snap={snap} />}
-        {section === 'Plugin panels' && <PluginPanels snap={snap} />}
-        {section === 'Settings' && <Settings snap={snap} />}
-        {section === 'Diagnostics' && <Diagnostics snap={snap} />}
-        {!IMPLEMENTED.has(section) && <Placeholder section={section} />}
+        {openPlugin !== null ? (
+          <PluginPanel snap={snap} folder={openPlugin} />
+        ) : (
+          <>
+          {section === 'Dashboard' && <Dashboard snap={snap} />}
+          {section === 'Context' && <ContextPanel snap={snap} />}
+          {section === 'Missions' && <MissionsPanel snap={snap} />}
+          {section === 'Overlay' && <OverlayPanel />}
+          {section === 'Logistics' && <Logistics snap={snap} />}
+          {section === 'Journal' && <Journal snap={snap} />}
+          {section === 'Research' && <Research snap={snap} />}
+          {section === 'Contributions' && <Contributions snap={snap} />}
+          {section === 'Connections' && <Integrations snap={snap} />}
+          {section === 'Screenshots' && <Screenshots snap={snap} />}
+          {section === 'Plugins' && <PluginsScreen snap={snap} />}
+          {section === 'Settings' && <Settings snap={snap} />}
+          {section === 'Diagnostics' && <Diagnostics snap={snap} />}
+          {!IMPLEMENTED.has(section) && <Placeholder section={section} />}
+          </>
+        )}
         {/* Above whatever is open: a capture needs answering now, not after
             navigating somewhere. */}
         <ScreenshotDialog snap={snap} />

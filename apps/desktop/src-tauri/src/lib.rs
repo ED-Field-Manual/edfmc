@@ -829,9 +829,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             use tauri::Manager;
 
-            if !matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else {
                 return;
-            }
+            };
             // Only the main window. The overlay closing must never take the app with
             // it, and a future second window should not either.
             if window.label() != "main" {
@@ -850,9 +850,15 @@ pub fn run() {
                     .store(false, std::sync::atomic::Ordering::SeqCst);
             }
             // Let plugins save before the process goes. Bounded: a plugin that
-            // hangs on stop is killed rather than holding the app open.
+            // hangs on stop is killed after five seconds rather than holding
+            // the app open. The window stays until then, so its message loop
+            // keeps running for the plugin panels inside it.
             if let Some(state) = app.try_state::<plugin_host::PluginHostState>() {
-                plugin_host::stop(&state);
+                let handle = app.clone();
+                if plugin_host::stop_then(&state, move || handle.exit(0)) {
+                    api.prevent_close();
+                    return;
+                }
             }
             app.exit(0);
         })

@@ -29,16 +29,6 @@ pub const EVENT: &str = "plugin-host://message";
 #[derive(Default)]
 pub struct PluginHostState {
     inner: Mutex<Option<Running>>,
-    /// The plugin window's top-level HWND, as the host reports it, and whether
-    /// it has been moved inside the app window yet. Raw values: they belong to
-    /// another process and are only ever passed to Win32.
-    panel: Mutex<Panel>,
-}
-
-#[derive(Default)]
-struct Panel {
-    hwnd: Option<isize>,
-    embedded: bool,
 }
 
 struct Running {
@@ -182,7 +172,7 @@ pub fn plugin_host_start(
             serde_json::to_string(&disabled).unwrap_or_else(|_| "[]".into()),
         )
         .env("PYTHONIOENCODING", "utf-8")
-        // The plugin window lives inside the app, in the Plugin panels tab.
+        // Each plugin's panel lives inside the app, on that plugin's own tab.
         .env("EDFMC_EMBED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -210,22 +200,12 @@ pub fn plugin_host_start(
             let Ok(line) = line else { break };
             // Only well-formed JSON is forwarded; anything else is not protocol.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
-                // The host says where its window is so it can be placed in the
-                // Plugin panels tab. Kept here, not forwarded: the frontend
-                // has no use for a raw window handle.
-                if value["type"] == "window" {
-                    if let Some(hwnd) = value["hwnd"].as_i64() {
-                        let state = handle.state::<PluginHostState>();
-                        *state.panel.lock().unwrap() = Panel { hwnd: Some(hwnd as isize), embedded: false };
-                    }
-                }
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("pid".into(), pid.into());
                     let _ = handle.emit(EVENT, value);
                 }
             }
         }
-        *handle.state::<PluginHostState>().panel.lock().unwrap() = Panel::default();
         let _ = handle.emit(EVENT, serde_json::json!({ "type": "exited", "pid": pid }));
     });
 
@@ -261,10 +241,24 @@ pub fn plugin_host_stop(state: State<'_, PluginHostState>) {
     }
 }
 
-/// Stop and wait. Used when the app is closing, where waiting is the point.
-pub fn stop(state: &State<'_, PluginHostState>) {
-    if let Some(running) = take(state) {
-        finish(running);
+/// Stop and wait, off the main thread, then call `then`. Used when the app is
+/// closing: plugins get to save, and the app exits once they have.
+///
+/// The wait cannot happen on the main thread. Plugin panels are child windows
+/// of the app window, so the host closing them needs the app's message loop
+/// running; blocking it stalled the host until the five-second kill.
+///
+/// Returns false when no host was running, so the caller can exit at once.
+pub fn stop_then(state: &State<'_, PluginHostState>, then: impl FnOnce() + Send + 'static) -> bool {
+    match take(state) {
+        Some(running) => {
+            std::thread::spawn(move || {
+                finish(running);
+                then();
+            });
+            true
+        }
+        None => false,
     }
 }
 
@@ -301,76 +295,50 @@ pub fn python_plugins_open_folder(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Place the plugin window inside the app window, over the Plugin panels tab.
+/// Show one plugin's panel inside the app window, over its tab's free area.
 ///
-/// The plugins draw with tkinter, real native widgets that a web page cannot
-/// contain. So the window is made a child of the app window and positioned
+/// Plugins draw with tkinter, real native widgets that a web page cannot
+/// contain. So the panel window becomes a child of the app window, positioned
 /// over the space the tab leaves for it. `x`, `y`, `width` and `height` are
 /// physical pixels relative to the app window's client area; `visible` false
 /// hides it when another tab is showing.
+///
+/// The host does the moving itself, through Tk. Moving a Tk window from
+/// outside does not stick: Tk keeps its own idea of where the window is and
+/// put it straight back off-screen, which is why the first version of the tab
+/// showed an empty area.
 #[tauri::command]
 pub fn plugin_panel_place(
     app: AppHandle,
     state: State<'_, PluginHostState>,
+    folder: String,
     x: i32,
     y: i32,
     width: i32,
     height: i32,
     visible: bool,
 ) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or("The main window is missing.")?;
     #[cfg(windows)]
-    {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_STYLE,
-            HWND_TOP, SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_HIDE, WS_CAPTION, WS_CHILD,
-            WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
-        };
-
-        let mut panel = state.panel.lock().unwrap();
-        let Some(raw) = panel.hwnd else { return Ok(()) };
-        let child = HWND(raw as *mut std::ffi::c_void);
-
-        if !visible {
-            unsafe {
-                let _ = ShowWindow(child, SW_HIDE);
-            }
-            return Ok(());
-        }
-
-        if !panel.embedded {
-            let main = app
-                .get_webview_window("main")
-                .ok_or("The main window is missing.")?
-                .hwnd()
-                .map_err(|e| e.to_string())?;
-            let parent = HWND(main.0 as *mut std::ffi::c_void);
-            unsafe {
-                let style = GetWindowLongPtrW(child, GWL_STYLE);
-                let strip = (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU).0 as isize;
-                SetWindowLongPtrW(child, GWL_STYLE, (style & !strip) | WS_CHILD.0 as isize);
-                SetParent(child, parent).map_err(|e| e.to_string())?;
-            }
-            panel.embedded = true;
-        }
-
-        unsafe {
-            SetWindowPos(
-                child,
-                HWND_TOP,
-                x,
-                y,
-                width.max(1),
-                height.max(1),
-                SWP_SHOWWINDOW | SWP_FRAMECHANGED,
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    }
+    let parent = main.hwnd().map_err(|e| e.to_string())?.0 as isize;
     #[cfg(not(windows))]
-    {
-        let _ = (app, state, x, y, width, height, visible);
-        Ok(())
-    }
+    let parent = {
+        let _ = main;
+        0isize
+    };
+    send_line(
+        &state,
+        &serde_json::json!({
+            "type": "place",
+            "folder": folder,
+            "parent": parent,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "visible": visible,
+        }),
+    )
 }
