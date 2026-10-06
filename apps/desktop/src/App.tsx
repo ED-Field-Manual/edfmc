@@ -1354,10 +1354,18 @@ function PluginTab({ snap, tab }: { snap: Snap; tab: string }) {
     if (plugin.loaded && plugin.hasPanel && snap.pythonPlugins.running) {
       return <PluginPanel snap={snap} folder={folder} />;
     }
-    return <PythonPluginCard plugin={plugin} hostRunning={snap.pythonPlugins.running} />;
+    return (
+      <PythonPluginCard plugin={plugin} hostRunning={snap.pythonPlugins.running} showToggle={false} />
+    );
   }
   const id = tab.slice(5);
   const plugin = snap.plugins.loaded.find((p) => p.manifest.id === id);
   if (!plugin) return null;
-  return <PluginCard plugin={plugin} enabled={!snap.plugins.disabledIds.includes(id)} />;
+  return (
+    <PluginCard
+      plugin={plugin}
+      enabled={!snap.plugins.disabledIds.includes(id)}
+      showToggle={false}
+    />
+  );
 }
