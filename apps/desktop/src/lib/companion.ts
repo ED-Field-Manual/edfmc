@@ -5194,6 +5194,10 @@ export class Companion {
     return this.pythonPlugins.setEnabled(enabled);
   }
 
+  setPythonPluginEnabled(folder: string, enabled: boolean): Promise<void> {
+    return this.pythonPlugins.setPluginEnabled(folder, enabled);
+  }
+
   restartPythonPlugins(): Promise<void> {
     return this.pythonPlugins.restart();
   }

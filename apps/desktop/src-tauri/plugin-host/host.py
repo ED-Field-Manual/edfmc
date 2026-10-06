@@ -50,6 +50,8 @@ from monitor import monitor  # noqa: E402
 from theme import ACCENT, MUTED, SURFACE, TEXT, theme  # noqa: E402
 
 POLL_MS = 250
+# Shown in the app as plain text. Bounded so a huge file cannot flood the protocol.
+MAX_README_CHARS = 64 * 1024
 
 # The protocol channel. Captured before plugins load, then sys.stdout is
 # pointed at the log so plugin prints cannot interleave with it.
@@ -101,6 +103,7 @@ class Plugin:
         self.module: Any = None
         self.error: str | None = None
         self.frame: tk.Frame | None = None
+        self.disabled = False
 
     def call(self, hook: str, *args: Any) -> Any:
         fn = getattr(self.module, hook, None) if self.module else None
@@ -115,8 +118,40 @@ class Plugin:
     def has(self, hook: str) -> bool:
         return self.module is not None and callable(getattr(self.module, hook, None))
 
+    def version(self) -> str | None:
+        """What the plugin says its version is, or None. Never guessed."""
+        v = getattr(self.module, 'plugin_version', None) or getattr(self.module, '__version__', None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        # Some plugins keep it in a version.json beside load.py, as bare text.
+        try:
+            with open(os.path.join(self.path, 'version.json'), encoding='utf-8') as f:
+                text = f.read(64).strip().strip('"')
+            return text or None
+        except OSError:
+            return None
+
+    def readme(self) -> str | None:
+        for name in ('README.md', 'readme.md', 'README.txt', 'README'):
+            try:
+                with open(os.path.join(self.path, name), encoding='utf-8', errors='replace') as f:
+                    return f.read(MAX_README_CHARS)
+            except OSError:
+                continue
+        return None
+
     def describe(self) -> dict[str, Any]:
-        return {'folder': self.folder, 'name': self.name, 'loaded': self.module is not None, 'error': self.error}
+        return {
+            'folder': self.folder,
+            'name': self.name,
+            'loaded': self.module is not None,
+            'disabled': self.disabled,
+            'error': self.error,
+            'version': self.version(),
+            'hasPanel': self.has('plugin_app'),
+            'hasSettings': self.has('plugin_prefs'),
+            'readme': self.readme(),
+        }
 
 
 def discover(plugin_dir: str) -> list[Plugin]:
@@ -302,7 +337,17 @@ class Host:
 
         self.tail.prime()
         self.plugins = discover(plugin_dir)
+        try:
+            disabled = set(json.loads(os.environ.get('EDFMC_DISABLED_PLUGINS', '[]')))
+        except ValueError:
+            disabled = set()
         for plugin in self.plugins:
+            if plugin.folder in disabled:
+                # Listed, so its card still shows, but never imported: a
+                # switched-off plugin runs no code at all.
+                plugin.disabled = True
+                log.info('%s: switched off', plugin.folder)
+                continue
             load(plugin)
             log.info('%s: %s', plugin.folder, 'loaded' if plugin.module else plugin.error)
 

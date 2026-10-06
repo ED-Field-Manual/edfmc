@@ -17,7 +17,15 @@ export interface PythonPluginStatus {
   readonly folder: string;
   readonly name: string;
   readonly loaded: boolean;
+  /** Switched off by the commander: listed, but none of its code runs. */
+  readonly disabled: boolean;
   readonly error: string | null;
+  /** As the plugin states it, or null. Never guessed. */
+  readonly version: string | null;
+  readonly hasPanel: boolean;
+  readonly hasSettings: boolean;
+  /** The plugin's README, shown as plain text. */
+  readonly readme: string | null;
 }
 
 export interface PythonPluginView {
@@ -33,6 +41,7 @@ export interface PythonPluginView {
 }
 
 const SETTING = 'pythonPlugins.enabled';
+const DISABLED_SETTING = 'pythonPlugins.disabled';
 
 interface Deps {
   readonly getSetting: (key: string) => Promise<string | null>;
@@ -53,6 +62,7 @@ export class PythonPlugins {
   private stopping = false;
   /** The host process we started. Messages from any other (an old one exiting after a restart) are ignored. */
   private pid: number | null = null;
+  private disabled = new Set<string>();
 
   constructor(private readonly deps: Deps) {}
 
@@ -71,6 +81,14 @@ export class PythonPlugins {
   async init(journalDir: string | null): Promise<void> {
     this.journalDir = journalDir;
     this.enabled = (await this.deps.getSetting(SETTING)) === 'true';
+    try {
+      const stored = JSON.parse((await this.deps.getSetting(DISABLED_SETTING)) ?? '[]') as unknown;
+      if (Array.isArray(stored)) {
+        this.disabled = new Set(stored.filter((v): v is string => typeof v === 'string'));
+      }
+    } catch {
+      this.disabled = new Set();
+    }
     await this.refreshInfo();
     if (this.enabled) await this.start();
     this.deps.changed();
@@ -82,6 +100,17 @@ export class PythonPlugins {
     if (enabled) await this.start();
     else await this.stop();
     this.deps.changed();
+  }
+
+  /**
+   * Switch one plugin on or off. Takes effect by restarting the host: a plugin
+   * that has already run cannot be un-imported, so there is no gentler way.
+   */
+  async setPluginEnabled(folder: string, enabled: boolean): Promise<void> {
+    if (enabled) this.disabled.delete(folder);
+    else this.disabled.add(folder);
+    await this.deps.setSetting(DISABLED_SETTING, JSON.stringify([...this.disabled]));
+    await this.restart();
   }
 
   /** Stop and start again, so newly added plugin folders are picked up. */
@@ -169,7 +198,10 @@ export class PythonPlugins {
     this.problem = null;
     this.stopping = false;
     try {
-      this.pid = await invoke<number>('plugin_host_start', { journalDir: this.journalDir });
+      this.pid = await invoke<number>('plugin_host_start', {
+        journalDir: this.journalDir,
+        disabled: [...this.disabled],
+      });
       this.running = true;
       logger.info('plugins', 'Python plugin host started');
     } catch (err) {

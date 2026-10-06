@@ -88,6 +88,30 @@ was reported as "Plugins stopped unexpectedly".
 app does the same, and the host also quits on its own if the app's end of stdin
 closes.
 
+## Plugin cards
+
+Each Python plugin gets its own card on the Plugins page, below the Python
+plugins switch, laid out like a declarative plugin's card. The host reports for
+each folder:
+
+- **Name**, from `plugin_start3`'s return value.
+- **Version**, from `plugin_version` or `__version__` in `load.py`, or a bare
+  version string in `version.json` beside it (SpanshRouter does this). If the
+  plugin states none, the card says "Version not stated". Nothing is guessed.
+- **Status**: running, switched off, or could not start, with the reason.
+- Whether it adds a **panel** (`plugin_app`) and has **settings** (`plugin_prefs`).
+- Its **README**, behind "How to use this", shown as plain text and capped at
+  64 KB.
+
+**The per-plugin switch** stores switched-off folder names in the
+`pythonPlugins.disabled` setting and restarts the host. The host still lists a
+switched-off plugin, so its card stays, but never imports it. A plugin that is
+off runs no code at all. Restarting is the only reliable way to turn a plugin
+off, because Python cannot un-import a plugin that has already run.
+
+Cards appear while the host is running, since it is the host that reads the
+plugin folders.
+
 ## Python
 
 The host looks for, in order:
