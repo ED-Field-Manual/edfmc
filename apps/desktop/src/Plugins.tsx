@@ -56,7 +56,16 @@ function Readme({ text }: { text: string | null }) {
 }
 
 /** One Python plugin, laid out like a declarative plugin's card. */
-export function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus; hostRunning: boolean }) {
+export function PythonPluginCard({
+  plugin,
+  hostRunning,
+  showToggle = true,
+}: {
+  plugin: PythonPluginStatus;
+  hostRunning: boolean;
+  /** The Enabled switch lives on the Plugins page only, not on a plugin's own tab. */
+  showToggle?: boolean;
+}) {
   const on = !plugin.disabled;
   return (
     <section className="card">
@@ -67,7 +76,8 @@ export function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPlugin
             {plugin.version ?? 'Version not stated'} · Python plugin · <code>{plugin.folder}</code>
           </p>
         </div>
-        <label className="stack" htmlFor={`py-toggle-${plugin.folder}`}>
+        {showToggle && (
+          <label className="stack" htmlFor={`py-toggle-${plugin.folder}`}>
           <span>
             <input
               id={`py-toggle-${plugin.folder}`}
@@ -78,6 +88,7 @@ export function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPlugin
             {on ? 'Enabled' : 'Disabled'}
           </span>
         </label>
+        )}
       </div>
 
       {plugin.disabled ? (
@@ -100,7 +111,16 @@ export function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPlugin
   );
 }
 
-export function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled: boolean }) {
+export function PluginCard({
+  plugin,
+  enabled,
+  showToggle = true,
+}: {
+  plugin: LoadedPlugin;
+  enabled: boolean;
+  /** The Enabled switch lives on the Plugins page only, not on a plugin's own tab. */
+  showToggle?: boolean;
+}) {
   const m = plugin.manifest;
 
   return (
@@ -113,7 +133,8 @@ export function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled:
             {m.author && ` · ${m.author}`} · <code>{m.id}</code>
           </p>
         </div>
-        <label className="stack" htmlFor={`toggle-${m.id}`}>
+        {showToggle && (
+          <label className="stack" htmlFor={`toggle-${m.id}`}>
           <span>
             <input
               id={`toggle-${m.id}`}
@@ -124,6 +145,7 @@ export function PluginCard({ plugin, enabled }: { plugin: LoadedPlugin; enabled:
             {enabled ? 'Enabled' : 'Disabled'}
           </span>
         </label>
+        )}
       </div>
 
       {m.description && <p>{m.description}</p>}
