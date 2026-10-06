@@ -64,9 +64,33 @@ written for this app, not copied. Copying another tool's modules would bring
 that tool's licence with them, and this project is MIT. Matching the names and
 behaviour plugins call is enough for compatibility.
 
-**The plugin window.** Each plugin's `plugin_app` frame is stacked in one
-window, styled with the app's dark palette. Closing the window hides it. The
-Plugins page has "Show plugin window" and "Plugin settings".
+**The Plugin panels tab.** Each plugin's `plugin_app` frame is stacked in one
+tkinter window, styled with the app's dark palette, and that window lives
+*inside* the app on the Plugin panels tab:
+
+1. The host starts its window undecorated and off-screen (`EDFMC_EMBED=1`), then
+   reports the window's handle (`{"type":"window","hwnd":...}`).
+2. The tab leaves an empty area and reports its rectangle in physical pixels
+   (`plugin_panel_place`). On the first call, `plugin_host.rs` makes the plugin
+   window a child of the app window (`WS_CHILD`, `SetParent`). After that it
+   just moves it over the area. Leaving the tab hides it.
+3. The host is per-monitor DPI aware, so the panels are drawn at the screen's
+   real resolution and match the area's size exactly.
+
+Why not draw the panels in the page itself: plugins build them with tkinter,
+which draws real native widgets, and a web page cannot contain those. Rewriting
+each plugin's interface in HTML would break the point of running plugins
+unchanged.
+
+Two things were tried and rejected. Tk's own embedding (`tk.Tk(use=hwnd)`) hangs
+when the container is not itself a Tk window, because Tk waits for a reply only
+another Tk would send. A separate floating window worked, but it was a second
+window to manage, and commanders asked for a tab.
+
+The cost: nothing drawn by the page can appear on top of that area. A dialog
+opened while the tab is showing would sit behind the panels, so the tab holds
+nothing else. A plugin's own settings and pop-ups still open as small windows of
+their own.
 
 **Imports.** Both the plugins folder and each plugin's own folder go on
 `sys.path`. The second is needed: SpanshRouter's `load.py` imports

@@ -20,6 +20,7 @@ import { Journal } from './Journal';
 import { Research } from './Research';
 import { Contributions } from './Contributions';
 import { Plugins as PluginsScreen } from './Plugins';
+import { PluginPanels } from './PluginPanels';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -61,6 +62,7 @@ const SECTIONS = [
   'Connections',
   'Screenshots',
   'Plugins',
+  'Plugin panels',
   'Settings',
   'Diagnostics',
 ] as const;
@@ -78,6 +80,7 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Connections',
   'Screenshots',
   'Plugins',
+  'Plugin panels',
   'Settings',
   'Diagnostics',
 ]);
@@ -147,6 +150,7 @@ export default function App() {
         {section === 'Connections' && <Integrations snap={snap} />}
         {section === 'Screenshots' && <Screenshots snap={snap} />}
         {section === 'Plugins' && <PluginsScreen snap={snap} />}
+        {section === 'Plugin panels' && <PluginPanels snap={snap} />}
         {section === 'Settings' && <Settings snap={snap} />}
         {section === 'Diagnostics' && <Diagnostics snap={snap} />}
         {!IMPLEMENTED.has(section) && <Placeholder section={section} />}

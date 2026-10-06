@@ -88,7 +88,7 @@ function PythonPluginCard({ plugin, hostRunning }: { plugin: PythonPluginStatus;
       ) : plugin.loaded ? (
         <p className="muted">
           {hostRunning ? 'Running.' : 'Loaded.'}
-          {plugin.hasPanel && ' Its panel is in the plugin window.'}
+          {plugin.hasPanel && ' Its panel is on the Plugin panels tab.'}
           {plugin.hasSettings && ' It has settings under Plugin settings.'}
         </p>
       ) : (
@@ -191,8 +191,8 @@ function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
       <p className="muted">
         Community plugins written in Python: route planners, trackers and other tools that add
         their own panel. Each one is a folder with a <code>load.py</code> in it, kept in the same
-        plugins folder as above. They run in a separate plugin window, so a plugin that crashes
-        cannot take the Companion with it.
+        plugins folder as above. Their panels appear on the Plugin panels tab. They run in a
+        separate process, so a plugin that crashes cannot take the Companion with it.
       </p>
 
       <div className="note">
@@ -228,9 +228,6 @@ function PythonPluginsCard({ snap }: { snap: CompanionSnapshot }) {
         )}
         {py.running && (
           <>
-            <button type="button" onClick={() => void companion.showPythonPluginWindow()}>
-              Show plugin window
-            </button>
             <button type="button" onClick={() => void companion.openPythonPluginSettings()}>
               Plugin settings
             </button>

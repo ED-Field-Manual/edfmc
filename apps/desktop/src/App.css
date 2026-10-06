@@ -983,3 +983,12 @@ label.field select:focus-visible {
 .status-syncing { color: var(--accent); border-color: var(--accent); }
 .status-needs-attention { color: #ffc46b; border-color: #7a5a1f; }
 .status-unavailable { color: #ff8f7a; border-color: #7a3126; }
+
+/* The Plugin panels tab. The area is left empty: the plugin window, a native
+   child window, is placed over it. It fills the rest of the viewport so the
+   page never scrolls the panels out from under the area that reports them. */
+.plugin-panels { display: flex; flex-direction: column; height: calc(100vh - 4.5rem); }
+.plugin-panels-area {
+  flex: 1; min-height: 200px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px;
+}
