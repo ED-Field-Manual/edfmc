@@ -4141,6 +4141,7 @@ export class Companion {
         guidance: this.guidanceMode,
         liveJournal: this.projectLiveJournal(),
         liveActivity: this.projectLiveActivity(),
+        pluginRoute: this.pythonPlugins.view().route,
         context: top
           ? {
               title: top.title,
@@ -5187,7 +5188,11 @@ export class Companion {
   private readonly pythonPlugins = new PythonPlugins({
     getSetting: (key) => this.getSetting(key),
     setSetting: (key, value) => this.setSetting(key, value),
-    changed: () => this.notify(),
+    changed: () => {
+      this.notify();
+      // A plugin's route is shown in the overlay, so it has to reach it too.
+      if (this.overlayEnabled) this.pushOverlayState();
+    },
   });
 
   setPythonPluginEnabled(folder: string, enabled: boolean): Promise<void> {

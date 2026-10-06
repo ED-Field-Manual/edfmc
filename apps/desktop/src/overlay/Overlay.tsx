@@ -69,6 +69,18 @@ interface OverlayWidgets {
   edfmNotes: boolean;
   carrierJump: boolean;
   liveJournal: boolean;
+  route?: boolean;
+}
+
+/** A route published by a plugin (Router). */
+interface PluginRoute {
+  next: string | null;
+  nextIsNeutron: boolean;
+  destination: string | null;
+  jumpsLeft: number;
+  waypoint: number;
+  waypoints: number;
+  finished: boolean;
 }
 
 interface OverlayAppearance {
@@ -103,6 +115,7 @@ interface OverlayState {
   guidance: 'standard' | 'new-cmdr';
   liveJournal: LiveJournalState | null;
   liveActivity: OverlayLiveActivity | null;
+  pluginRoute?: PluginRoute | null;
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }
@@ -112,7 +125,7 @@ interface Point {
   y: number;
 }
 
-type WidgetId = 'context' | 'missions' | 'carrierJump' | 'liveJournal';
+type WidgetId = 'context' | 'missions' | 'carrierJump' | 'liveJournal' | 'route';
 
 const STORAGE_KEY = 'edfm.overlay.layout.v2';
 
@@ -122,6 +135,7 @@ const DEFAULT_LAYOUT: Record<WidgetId, Point> = {
   missions: { x: 32, y: 260 },
   carrierJump: { x: 32, y: 520 },
   liveJournal: { x: 360, y: 32 },
+  route: { x: 360, y: 260 },
 };
 
 /** Leave edit mode. The backend restores click-through and tells both windows. */
@@ -137,6 +151,30 @@ function exitEditMode(): void {
  * countdown has to move every second and pushing a fresh string that often would be
  * absurd. The instant is the reported fact; counting down from it is presentation.
  */
+/**
+ * The next jump on a route a plugin is following, so the commander can read it
+ * without leaving the game. The plugin keeps it current and has already put
+ * the system on the clipboard for the galaxy map.
+ */
+function RouteWidget({ route }: { route: PluginRoute }) {
+  if (route.finished || route.next === null) {
+    return <div className="rt-done">Arrived{route.destination ? ` at ${route.destination}` : ''}</div>;
+  }
+  return (
+    <>
+      <div className="rt-next">
+        {route.next}
+        {route.nextIsNeutron && <span className="rt-neutron"> neutron</span>}
+      </div>
+      <div className="rt-line">
+        {route.jumpsLeft} {route.jumpsLeft === 1 ? 'jump' : 'jumps'} left · waypoint {route.waypoint} of{' '}
+        {route.waypoints}
+        {route.destination && <> · to {route.destination}</>}
+      </div>
+    </>
+  );
+}
+
 function CarrierJumpWidget({ jumps }: { jumps: OverlayCarrierJump[] }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -303,6 +341,7 @@ function loadLayout(): Record<WidgetId, Point> {
         missions: valid(parsed.missions) ?? DEFAULT_LAYOUT.missions,
         carrierJump: valid(parsed.carrierJump) ?? DEFAULT_LAYOUT.carrierJump,
         liveJournal: valid(parsed.liveJournal) ?? DEFAULT_LAYOUT.liveJournal,
+        route: valid(parsed.route) ?? DEFAULT_LAYOUT.route,
       };
     }
   } catch {
@@ -545,6 +584,12 @@ export default function Overlay() {
             <CarrierJumpWidget jumps={state.carrierJumps} />
           </Widget>
         )}
+
+      {(widgets?.route ?? true) && state?.pluginRoute && (
+        <Widget id="route" title="Route" pos={layout.route} editing={editing} onMove={move}>
+          <RouteWidget route={state.pluginRoute} />
+        </Widget>
+      )}
     </div>
   );
 }

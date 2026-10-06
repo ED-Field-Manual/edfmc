@@ -52,6 +52,38 @@ export interface PythonPluginView {
   readonly checking: boolean;
   /** The last check's result per plugin folder. */
   readonly updates: Readonly<Record<string, UpdateResult>>;
+  /** The route a plugin published for the overlay, or null. */
+  readonly route: PluginRoute | null;
+}
+
+/**
+ * A route a plugin published (`edfmc.publish('route', ...)`), for the overlay.
+ * Every field is checked on arrival: this comes from a plugin, not from us.
+ */
+export interface PluginRoute {
+  readonly next: string | null;
+  readonly nextIsNeutron: boolean;
+  readonly destination: string | null;
+  readonly jumpsLeft: number;
+  readonly waypoint: number;
+  readonly waypoints: number;
+  readonly finished: boolean;
+}
+
+export function readPluginRoute(data: unknown): PluginRoute | null {
+  if (data === null || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' && v.length <= 200 ? v : null);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0);
+  return {
+    next: str(d['next']),
+    nextIsNeutron: d['nextIsNeutron'] === true,
+    destination: str(d['destination']),
+    jumpsLeft: num(d['jumpsLeft']),
+    waypoint: num(d['waypoint']),
+    waypoints: num(d['waypoints']),
+    finished: d['finished'] === true,
+  };
 }
 
 const DISABLED_SETTING = 'pythonPlugins.disabled';
@@ -84,6 +116,7 @@ export class PythonPlugins {
   private updateChecks = true;
   private checking = false;
   private updates: Record<string, UpdateResult> = {};
+  private route: PluginRoute | null = null;
   /** Repos the commander pasted, by plugin folder. */
   private repos: Record<string, string> = {};
 
@@ -100,6 +133,7 @@ export class PythonPlugins {
       updateChecks: this.updateChecks,
       checking: this.checking,
       updates: this.updates,
+      route: this.route,
     };
   }
 
@@ -261,7 +295,12 @@ export class PythonPlugins {
       case 'error':
         this.problem = typeof message['message'] === 'string' ? message['message'] : 'Plugins stopped.';
         break;
+      case 'publish':
+        if (message['topic'] !== 'route') return;
+        this.route = readPluginRoute(message['data']);
+        break;
       case 'exited':
+        this.route = null;
         this.running = false;
         this.pid = null;
         if (!this.stopping && this.enabled && this.problem === null) {

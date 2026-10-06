@@ -1046,6 +1046,20 @@ function OverlayPanel() {
           <label className="check">
             <input
               type="checkbox"
+              checked={widgets.route}
+              onChange={(e) => void companion.setOverlayWidgets({ ...widgets, route: e.target.checked })}
+            />
+            <span>
+              Route{' '}
+              <span className="muted-inline">
+                — the next jump on a route a plugin such as Router is following
+              </span>
+            </span>
+          </label>
+
+          <label className="check">
+            <input
+              type="checkbox"
               checked={widgets.liveJournal}
               onChange={(e) =>
                 void companion.setOverlayWidgets({ ...widgets, liveJournal: e.target.checked })

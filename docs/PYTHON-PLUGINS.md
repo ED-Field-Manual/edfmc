@@ -162,6 +162,24 @@ off, because Python cannot un-import a plugin that has already run.
 Cards appear while the host is running, since it is the host that reads the
 plugin folders.
 
+## The `edfmc` module: extras only EDFM Companion offers
+
+Besides the standard modules, the host provides `edfmc` (`compat/edfmc.py`). It
+exists only here, so a plugin imports it in a `try`/`except ImportError` and runs
+unchanged in other hosts.
+
+`edfmc.publish(topic, data)` hands the app a piece of plain JSON. A value that is
+not plain JSON raises an error in the plugin, before anything is sent. The app
+understands one topic:
+
+| Topic | Shown as | Shape |
+|---|---|---|
+| `route` | The overlay's Route widget (`docs/OVERLAY.md`) | `next`, `nextIsNeutron`, `destination`, `jumpsLeft`, `waypoint`, `waypoints`, `finished`; or `None` to clear |
+
+Unknown topics are ignored. Nothing published leaves the machine. The host sends
+it to the app as `{"type":"publish","topic":...,"data":...}`, and the app checks
+every field before using it.
+
 ## Update checks
 
 Each Python plugin's card shows whether GitHub has a newer version

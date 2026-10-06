@@ -525,3 +525,8 @@ body,
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
+
+/* Route: the next system is the one thing to read, so it is the large line. */
+.rt-next { font-size: 1.05em; font-weight: 700; }
+.rt-neutron { font-size: 0.75em; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
+.rt-line, .rt-done { font-size: 0.85em; opacity: 0.85; }
