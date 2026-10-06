@@ -1,7 +1,7 @@
 /**
  * Validate a plugin without installing it.
  *
- *   npx tsx packages/plugins/tools/check.mts examples/plugins/deep-core-mining
+ *   npx tsx packages/plugins/tools/check.mts path/to/plugin-folder
  *
  * Runs exactly the validation the application runs, so "it passes here" and
  * "it will load there" are the same statement.

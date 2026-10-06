@@ -257,14 +257,11 @@ the text comes from a stranger, and text that can style itself is text that can
 misrepresent itself as part of the application. Write for a monospace block —
 blank lines and indentation survive, `# headings` will not become headings.
 
-A complete working example, with both, is in
-[`examples/plugins/deep-core-mining`](../examples/plugins/deep-core-mining).
-
-Check it before installing — this runs exactly the validation the app runs, so
-"passes here" and "will load there" are the same statement:
+Check a plugin before installing it. This runs exactly the validation the app
+runs, so "passes here" and "will load there" mean the same thing:
 
 ```bash
-npx tsx packages/plugins/tools/check.mts examples/plugins/deep-core-mining
+npx tsx packages/plugins/tools/check.mts path/to/deep-core-mining
 ```
 
 ```
