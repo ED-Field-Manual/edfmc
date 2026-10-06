@@ -150,7 +150,14 @@ describe('overlay widgets', () => {
       'edfmNotes',
       'liveJournal',
       'missions',
+      'route',
     ]);
+  });
+
+  it('shows a plugin route by default, only while a plugin publishes one', () => {
+    // On by default: it only appears when a plugin such as Router has a route,
+    // so a commander without one never sees it.
+    expect(DEFAULT_WIDGETS.route).toBe(true);
   });
 
   it('leaves the Live Journal off by default', () => {

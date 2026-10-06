@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 _status: Callable[[str], None] = lambda message: None
+_publish: Callable[[str, Any], None] = lambda topic, data: None
 
 
 def set_status_handler(handler: Callable[[str], None]) -> None:
@@ -14,3 +15,12 @@ def set_status_handler(handler: Callable[[str], None]) -> None:
 
 def status(message: str) -> None:
     _status(message)
+
+
+def set_publish_handler(handler: Callable[[str, Any], None]) -> None:
+    global _publish
+    _publish = handler
+
+
+def publish(topic: str, data: Any) -> None:
+    _publish(topic, data)

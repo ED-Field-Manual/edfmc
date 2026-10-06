@@ -189,6 +189,20 @@ class ResponsiveTest(unittest.TestCase):
             root.destroy()
 
 
+class EdfmcModuleTest(unittest.TestCase):
+    """What a plugin gets from `import edfmc` (Router uses it for the overlay)."""
+
+    def test_publish_reaches_the_app_as_plain_json(self) -> None:
+        import edfmc
+        import host_bridge
+        sent = []
+        host_bridge.set_publish_handler(lambda topic, data: sent.append((topic, data)))
+        edfmc.publish('route', {'next': 'Achenar', 'jumpsLeft': 4})
+        self.assertEqual(sent, [('route', {'next': 'Achenar', 'jumpsLeft': 4})])
+        with self.assertRaises(TypeError):
+            edfmc.publish('route', {'not json': object()})
+
+
 class TailTest(unittest.TestCase):
     def test_primes_without_delivering_then_delivers_new_lines(self) -> None:
         jdir = os.path.join(_TMP, 'tail')

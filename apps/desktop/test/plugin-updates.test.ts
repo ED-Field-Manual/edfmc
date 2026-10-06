@@ -153,3 +153,32 @@ describe('asking GitHub', () => {
     expect(gh.asked.every((u) => u.startsWith('https://api.github.com/repos/') || u.startsWith('https://raw.githubusercontent.com/'))).toBe(true);
   });
 });
+
+describe('a route a plugin publishes', () => {
+  it('keeps only well-formed fields', async () => {
+    const { readPluginRoute } = await import('../src/lib/pythonPlugins');
+    // Verbatim from Router's publish, through the plugin host (2026-10-06).
+    const r = readPluginRoute({
+      next: 'PSR J1752-2806',
+      nextIsNeutron: true,
+      destination: 'Colonia',
+      jumpsLeft: 166,
+      totalJumps: 166,
+      waypoint: 2,
+      waypoints: 129,
+      distanceLeft: 21629.3877108911,
+      finished: false,
+    });
+    expect(r).toEqual({
+      next: 'PSR J1752-2806',
+      nextIsNeutron: true,
+      destination: 'Colonia',
+      jumpsLeft: 166,
+      waypoint: 2,
+      waypoints: 129,
+      finished: false,
+    });
+    expect(readPluginRoute(null)).toBeNull();
+    expect(readPluginRoute({ next: 42, jumpsLeft: -3 })).toMatchObject({ next: null, jumpsLeft: 0 });
+  });
+});

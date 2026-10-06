@@ -504,6 +504,8 @@ class Host:
         self.responsive = Responsive(self.root)
 
         host_bridge.set_status_handler(self._status_all)
+        host_bridge.set_publish_handler(
+            lambda topic, data: emit({'type': 'publish', 'topic': topic, 'data': data}))
 
     def _status_all(self, message: str) -> None:
         for panel in self.panels.values():

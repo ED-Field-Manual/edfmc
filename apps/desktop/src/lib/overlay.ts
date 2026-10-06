@@ -67,6 +67,8 @@ export interface OverlayWidgets {
    * others -- so it is opt-in rather than something to discover and turn off.
    */
   liveJournal: boolean;
+  /** The route a plugin is following (Router), next waypoint first. */
+  route: boolean;
 }
 
 export const DEFAULT_WIDGETS: OverlayWidgets = {
@@ -75,6 +77,7 @@ export const DEFAULT_WIDGETS: OverlayWidgets = {
   edfmNotes: true,
   carrierJump: true,
   liveJournal: false,
+  route: true,
 };
 
 /**
@@ -372,6 +375,8 @@ export interface OverlayPushState {
   guidance: GuidanceMode;
   /** Newest recorded activity, or null. See the Live Journal widget. */
   liveJournal: LiveJournalState | null;
+  /** A route published by a plugin, or null. */
+  pluginRoute: import('./pythonPlugins.js').PluginRoute | null;
   /**
    * Operational progress right now, which takes precedence over `liveJournal`.
    *

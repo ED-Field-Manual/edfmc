@@ -143,6 +143,7 @@ setting, its own remembered position, and inherits the same appearance.
 | Missions | on | What is outstanding |
 | Carrier Jump | on | When your carrier leaves |
 | Live Journal | **off** | What was just recorded |
+| Route | on | The next jump on a route a plugin is following |
 
 `EDFM notes` is deliberately absent from that table: it is a **sub-option of
 Missions**, not a panel. It has no position, no frame and nothing to drag, and the
@@ -281,6 +282,20 @@ An unconfirmed departure stops displaying after **ten minutes**. 93% of real jum
 confirm within five minutes of the stated departure (median: zero); past that the
 commander is almost certainly offline and confirmation may be hours away, so
 continuing to say "Departing" tells them nothing true.
+
+### Route: from a plugin
+
+The Route widget shows what a Python plugin publishes on the `route` topic through
+`edfmc.publish` (see `docs/PYTHON-PLUGINS.md`). The first plugin to do this is
+**Router**. The widget shows the next system, in large type and marked if it is a
+neutron star, then the jumps left, the waypoint count and the destination. The
+plugin has already put the system on the clipboard, so a commander can paste it
+into the galaxy map without leaving the game.
+
+It is on by default because it only appears while a plugin has a route. A
+commander without one never sees it. The app checks every published field on
+arrival, because the data comes from a plugin: strings are capped, and counts
+must be finite and non-negative. The route clears when the plugin host stops.
 
 ## Guidance in the overlay
 
