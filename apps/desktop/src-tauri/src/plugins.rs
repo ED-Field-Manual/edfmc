@@ -106,19 +106,48 @@ fn usable(dir: &Path) -> Result<(), String> {
     }
 }
 
+/// The one folder a commander looks in for everything the app keeps for them:
+/// `Documents/EDFMC`, holding `plugins` and `screenshots`.
+pub fn edfmc_documents(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().document_dir().ok().map(|d| d.join("EDFMC"))
+}
+
+/// Move a folder the app used to keep elsewhere into its new place.
+///
+/// Only when the new place does not exist yet, so this runs once and never
+/// merges into, or overwrites, anything already there. A failure leaves the old
+/// folder where it was; nothing is deleted.
+pub fn adopt_old_folder(old: &Path, new: &Path) {
+    if new.exists() || !old.is_dir() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    if fs::rename(old, new).is_ok() {
+        // The old parent, `Documents/EDFM Companion`, goes too once empty.
+        if let Some(old_parent) = old.parent() {
+            let _ = fs::remove_dir(old_parent);
+        }
+    }
+}
+
 /// Where plugins live, with the reason if it is not the preferred location.
 ///
-/// `Documents/EDFM Companion/plugins` first, because installing a plugin means
+/// `Documents/EDFMC/plugins` first, because installing a plugin means
 /// a person putting a folder somewhere they can find. App data second, so a
 /// machine with no usable Documents folder still has plugins rather than a
 /// broken feature — which is the common case on a minimal Linux install with no
 /// `xdg-user-dirs` package.
 fn resolve(app: &tauri::AppHandle) -> (Option<PathBuf>, &'static str, Option<String>) {
-    let documents = app
-        .path()
-        .document_dir()
-        .ok()
-        .map(|d| d.join("EDFM Companion").join("plugins"));
+    let documents = edfmc_documents(app).map(|d| d.join("plugins"));
+
+    // Earlier builds used `Documents/EDFM Companion/plugins`.
+    if let (Some(new), Ok(docs)) = (documents.as_ref(), app.path().document_dir()) {
+        adopt_old_folder(&docs.join("EDFM Companion").join("plugins"), new);
+    }
 
     if let Some(dir) = documents {
         match usable(&dir) {
@@ -158,7 +187,7 @@ fn resolve(app: &tauri::AppHandle) -> (Option<PathBuf>, &'static str, Option<Str
     }
 }
 
-fn plugins_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+pub fn plugins_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     resolve(app).0
 }
 

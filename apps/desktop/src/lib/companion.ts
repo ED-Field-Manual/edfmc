@@ -2261,10 +2261,14 @@ export class Companion {
   /**
    * Resolve the folder captures are saved into.
    *
-   * Defaults to `Pictures/EDFM Companion/Screenshots`, reached through the
-   * known-folder API rather than by appending "Pictures" to the user profile:
-   * the folder is relocatable, and on a machine where it has been moved a
-   * string-built path is simply wrong.
+   * Defaults to `Documents/EDFMC/screenshots`, beside the plugins folder, so
+   * everything the app keeps for a commander is in one place. Reached through
+   * the known-folder API rather than by appending "Documents" to the user
+   * profile: the folder is relocatable.
+   *
+   * Earlier builds defaulted to `Pictures/EDFM Companion/Screenshots`. A
+   * commander still on that default is moved to the new one, images and all.
+   * One who chose a folder of their own keeps it.
    *
    * Images never go into application data. A commander's screenshots belong
    * somewhere they can find them without knowing this app exists.
@@ -2273,22 +2277,55 @@ export class Companion {
     this.screenshotHotkey = (await this.getSetting('screenshot.hotkey')) ?? null;
 
     const stored = await this.getSetting('screenshot.folder');
-    if (stored) {
+    let defaultDir: string | null = null;
+    let oldDefault: string | null = null;
+    try {
+      defaultDir = await invoke<string | null>('screenshots_default_dir');
+      const pictures = await invoke<string | null>('pictures_dir');
+      oldDefault = pictures ? `${pictures}\\EDFM Companion\\Screenshots` : null;
+    } catch {
+      // Without the known folders there is no default; a stored choice still works.
+    }
+
+    const onOldDefault =
+      stored !== null && oldDefault !== null && stored.toLowerCase() === oldDefault.toLowerCase();
+    if (stored && !onOldDefault) {
       this.screenshotFolder = stored;
     } else {
-      try {
-        const pictures = await invoke<string | null>('pictures_dir');
-        this.screenshotFolder = pictures
-          ? `${pictures}\\EDFM Companion\\Screenshots`
-          : null;
-      } catch {
-        this.screenshotFolder = null;
+      this.screenshotFolder = defaultDir;
+      if (onOldDefault && oldDefault && defaultDir) {
+        await this.moveScreenshots(oldDefault, defaultDir);
+        await this.setSetting('screenshot.folder', defaultDir);
       }
     }
 
     this.screenshotFolderOk = await this.checkScreenshotFolder();
     await this.registerScreenshotHotkey();
     this.notify();
+  }
+
+  /**
+   * Move existing images to the new default folder and update the catalog.
+   *
+   * Only rows for files that actually moved are changed. A file that could not
+   * move keeps its old path, which still points at it.
+   */
+  private async moveScreenshots(from: string, to: string): Promise<void> {
+    try {
+      const moved = await invoke<Array<[string, string]>>('move_screenshots', { from, to });
+      if (!this.db) return;
+      for (const [oldPath, newPath] of moved) {
+        await this.db.execute('UPDATE screenshots SET file_path = $2 WHERE file_path = $1', [
+          oldPath,
+          newPath,
+        ]);
+      }
+      logger.info('screenshots', 'Moved screenshots to the new default folder', {
+        moved: moved.length,
+      });
+    } catch (err) {
+      logger.warn('screenshots', 'Could not move screenshots', { error: String(err) });
+    }
   }
 
   private async checkScreenshotFolder(): Promise<boolean> {

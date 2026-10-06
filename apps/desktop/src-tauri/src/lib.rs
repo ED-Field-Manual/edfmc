@@ -883,6 +883,8 @@ pub fn run() {
             screenshot::paths_exist,
             screenshot::folder_writable,
             screenshot::delete_screenshot_file,
+            screenshot::screenshots_default_dir,
+            screenshot::move_screenshots,
             edfm_journal::edfm_journal_status,
             edfm_journal::edfm_journal_batch,
             edsm::edsm_submit,
