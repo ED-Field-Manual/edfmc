@@ -86,8 +86,10 @@ def suggest(prefix: str, limit: int = 8,
             request: Callable[[str, str], tuple[int, Any]] = _request) -> list[str]:
     """System names starting with `prefix`, for predictive text. Blocks.
 
-    Spansh answers `{"values": [...names...], "min_max": [...]}`. Names that
-    start with what was typed come first, so "sol" offers Sol before Solati.
+    Spansh answers `{"values": [...names...], "min_max": [...]}`. An exact
+    match comes first, then names that start with what was typed, so "sol"
+    offers Sol before Solati, and "wregoe fh-d d12-45" offers that system
+    before Wregoe FH-D d12-9.
     """
     prefix = prefix.strip()
     if len(prefix) < 2:
@@ -99,7 +101,9 @@ def suggest(prefix: str, limit: int = 8,
     if not names:
         names = [m.get('name') for m in body.get('min_max') or [] if isinstance(m, dict) and isinstance(m.get('name'), str)]
     low = prefix.lower()
-    names.sort(key=lambda n: (not n.lower().startswith(low), len(n), n.lower()))
+    # The exact system first (so a fully typed name is offered back with
+    # Frontier's casing), then names that start with the text, then the rest.
+    names.sort(key=lambda n: (n.lower() != low, not n.lower().startswith(low), len(n), n.lower()))
     seen: set[str] = set()
     out = []
     for n in names:

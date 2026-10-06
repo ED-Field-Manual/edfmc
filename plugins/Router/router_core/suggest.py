@@ -115,8 +115,10 @@ class SuggestEntry:
     # -- the list ----------------------------------------------------------
 
     def _show(self, names: list[str]) -> None:
-        typed = self.var.get().strip().lower()
-        names = [n for n in names if n.lower() != typed]
+        typed = self.var.get().strip()
+        # Nothing to offer when the box already holds exactly the one match.
+        if names == [typed]:
+            names = []
         if not names or self.entry.focus_get() is not self.entry:
             self.close()
             return

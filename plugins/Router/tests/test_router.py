@@ -123,6 +123,15 @@ class SuggestTest(unittest.TestCase):
         self.assertEqual(names[0], 'Sol')
         self.assertEqual(set(names), {'Sol', 'Solitude', 'Solibamba', 'Sollaro', 'Solati'})
 
+    def test_a_fully_typed_system_is_offered_first(self) -> None:
+        # Spansh's real answer for "Wregoe FH-D D12-45", typed with a capital D.
+        # The exact system used to be left out of the list, which read as
+        # Router not knowing it.
+        with open(os.path.join(ROOT, 'tests', 'fixtures', 'spansh_names_wregoe_fh_d_d12_45.json'), encoding='utf-8') as f:
+            body = json.load(f)
+        names = spansh.suggest('Wregoe FH-D D12-45', request=lambda url, method: (200, body))
+        self.assertEqual(names[0], 'Wregoe FH-D d12-45')
+
     def test_nothing_for_too_little_text_or_a_failed_request(self) -> None:
         self.assertEqual(spansh.suggest('s', request=lambda u, m: self.fail('should not ask')), [])
         self.assertEqual(spansh.suggest('sol', request=lambda u, m: (500, None)), [])
