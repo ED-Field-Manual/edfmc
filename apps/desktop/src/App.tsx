@@ -108,8 +108,13 @@ export default function App() {
   }, []);
 
   const pluginTabs = [
-    ...snap.plugins.loaded.map((p) => ({ key: `rule:${p.manifest.id}`, name: p.manifest.name })),
-    ...snap.pythonPlugins.plugins.map((p) => ({ key: `py:${p.folder}`, name: p.name })),
+    // A switched-off plugin has no tab; it is switched back on from the Plugins page.
+    ...snap.plugins.loaded
+      .filter((p) => !snap.plugins.disabledIds.includes(p.manifest.id))
+      .map((p) => ({ key: `rule:${p.manifest.id}`, name: p.manifest.name })),
+    ...snap.pythonPlugins.plugins
+      .filter((p) => !p.disabled)
+      .map((p) => ({ key: `py:${p.folder}`, name: p.name })),
   ].sort((a, b) => a.name.localeCompare(b.name));
   // A plugin removed from the folder takes its tab with it.
   const openPlugin =
