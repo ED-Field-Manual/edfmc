@@ -243,7 +243,7 @@ class Panel:
         self.destination.close()
         self.plotting = True
         self.plot_button.config(state=tk.DISABLED, text='Plotting…')
-        self.say('Asking Spansh for a route…')
+        self.say('Plotting your route… please wait. Long routes can take up to a minute.')
         spansh.plot_in_background(source, destination, jump_range, efficiency,
                                   lambda route, error: self._results.put((route, error)))
 

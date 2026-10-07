@@ -152,7 +152,7 @@ class NativePage:
             self._set_efficiency(efficiency)
             self.plotting = True
             self.suggestions = None
-            self.say('Asking Spansh for a route…')
+            self.say('Plotting your route… please wait. Long routes can take up to a minute.')
             spansh.plot_in_background(source, destination, jump_range, efficiency,
                                       lambda route, error: self._later(lambda: self._plotted(route, error)))
             self._watch()

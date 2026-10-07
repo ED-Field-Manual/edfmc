@@ -62,7 +62,8 @@ function RouterPage({ state, act }: { state: State; act: Act }) {
   return (
     <>
       {route ? <RouterFollow route={route} act={act} /> : <RouterForm state={state} act={act} />}
-      {statusText && (
+      {/* While plotting, the plotting panel says it; the status line would repeat it. */}
+      {statusText && state['plotting'] !== true && (
         <p className={status?.['error'] === true ? 'router-status bad' : 'router-status'}>{statusText}</p>
       )}
     </>
@@ -102,6 +103,21 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
     <section className="card router-card">
       <h2>Plot a route</h2>
       <p className="muted">Neutron-boosted routes from Spansh. Start typing a system name for suggestions.</p>
+
+      {plotting && (
+        <div className="router-plotting" role="status" aria-live="polite">
+          <span className="router-spinner" aria-hidden="true" />
+          <div>
+            <strong>Plotting your route… please wait</strong>
+            <div className="muted">
+              Spansh is working out the neutron route to {destination || 'your destination'}. Long routes can
+              take up to a minute.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <fieldset className="router-fieldset" disabled={plotting}>
 
       <div className="router-field">
         <div className="router-label-row">
@@ -165,6 +181,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           Import CSV…
         </button>
       </div>
+      </fieldset>
     </section>
   );
 }

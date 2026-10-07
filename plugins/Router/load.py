@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.3.0'
+plugin_version = '0.3.1'
 
 try:
     from config import config  # provided by the host
