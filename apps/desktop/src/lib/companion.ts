@@ -128,15 +128,45 @@ import {
   backoffFor,
   buildBatch,
   augmentForEdsm,
-  buildInaraBatch,
   buildEddnJournalMessage,
   classifyHttp,
   isDiscardedByEdsm,
   parseEdsmDiscard,
   parseEdsmResponse,
-  parseInaraResponse,
-  toInaraLocation,
-  type InaraEvent as InaraLocationEvent,
+  INARA_ACCEPTED_RETENTION_MS,
+  INARA_APP_NAME,
+  INARA_CATEGORIES,
+  INARA_CATEGORY_DEFAULTS,
+  INARA_FALLBACK_INTERVAL_MS,
+  INARA_MAX_BATCH,
+  INARA_MIN_INTERVAL_MS,
+  INARA_SESSION_START_DELAY_MS,
+  INARA_SIZE_TRIGGER,
+  INARA_STATE_LABEL,
+  InaraTranslator,
+  applyInaraResponse,
+  inaraConnectionState,
+  inaraLinks,
+  inaraMayTransmit,
+  inaraMayVerify,
+  inaraQueueId,
+  inaraRequestEvents,
+  inaraVerifyEvent,
+  planInaraBatch,
+  readInaraProfile,
+  readInaraVerify,
+  resolveInaraConfig,
+  shouldQueueInara,
+  toInaraPayload,
+  type InaraCategory,
+  type InaraCondition,
+  type InaraConnectionState,
+  type InaraLinks,
+  type InaraOutgoing,
+  type InaraProfile,
+  type InaraReleaseConfig,
+  type InaraStateInput,
+  type QueueItem,
   classifyFailure,
   isWithinPhaseOne,
   looksLikeJournalToken,
@@ -339,6 +369,26 @@ function cargoLabel(m: Mission): string | null {
 
 export type ConnectionState = 'starting' | 'watching' | 'no-directory' | 'stopped' | 'error';
 
+/** What the Inara card needs. Never the key, which JavaScript cannot read. */
+export interface InaraView {
+  readonly state: InaraConnectionState;
+  readonly label: string;
+  readonly appName: string;
+  /** Release setting: Inara has white-listed the app name. */
+  readonly appAuthorized: boolean;
+  readonly isBeingDeveloped: boolean;
+  readonly mayVerify: boolean;
+  readonly verifying: boolean;
+  readonly profile: InaraProfile | null;
+  readonly categories: Readonly<Record<InaraCategory, boolean>>;
+  readonly systemLink: { readonly label: string; readonly url: string } | null;
+  readonly stationLink: { readonly label: string; readonly url: string } | null;
+  /** Returns null when Inara confirmed the key, or a sentence. */
+  readonly verify: () => Promise<string | null>;
+  readonly syncNow: () => Promise<void>;
+  readonly setCategory: (category: InaraCategory, on: boolean) => Promise<void>;
+}
+
 export interface CompanionSnapshot {
   readonly state: CommanderState;
   readonly stats: IngestStats;
@@ -386,6 +436,8 @@ export interface CompanionSnapshot {
    * claims and only the second one is evidence.
    */
   readonly sharing: SharingAudit;
+  /** Inara's own state, beyond what the shared audit shows. See docs/INARA.md. */
+  readonly inara: InaraView;
   /**
    * Journal fields whose type changed, and what the app knows about itself.
    *
@@ -1121,160 +1173,515 @@ export class Companion {
 
   /* ------------------------------------------------------------ Inara */
 
+  /**
+   * Inara, on the shared durable queue. See docs/INARA.md.
+   *
+   * The translator runs on every line whatever the switches say -- it is local
+   * and pure, and a ship or location learned while the integration is off is
+   * still true when it is switched on. Nothing reaches the queue unless
+   * `inaraMayTransmit` agrees, and nothing reaches the network unless it agrees
+   * again at send time.
+   */
+  private readonly inaraConfig: InaraReleaseConfig = resolveInaraConfig(import.meta.env);
+  private readonly inaraTranslator = new InaraTranslator();
+  /** The commander the fields below were loaded for. */
+  private inaraFid: string | null = null;
+  /** Persisted per commander, so a stop survives a restart. */
+  private inaraCondition: InaraCondition | null = null;
+  private inaraProfile: InaraProfile | null = null;
+  private inaraCategories: Record<InaraCategory, boolean> = { ...INARA_CATEGORY_DEFAULTS };
+  private inaraFingerprints = new Map<string, string>();
+  private inaraLinksSeen: InaraLinks | null = null;
   private inaraSending = false;
-  /** The location Inara was last told about, so it is not told twice. */
-  private inaraLastSent: string | null = null;
-  /**
-   * Set when Inara refuses the key or this app's name. Such a refusal repeats on
-   * every request, and Inara's guide reserves the right to cut off keys that
-   * keep producing errors. Cleared by saving a key or toggling the switch.
-   */
-  private inaraHalted = false;
+  private inaraVerifying = false;
+  private inaraLastSendMs = 0;
+  private inaraFallbackTimer: ReturnType<typeof setInterval> | null = null;
+  private inaraDrainTimer: ReturnType<typeof setTimeout> | null = null;
+  private inaraDrainAt = 0;
+  /** Enqueues run in order: a coalesce delete must not overtake its insert. */
+  private inaraWrites: Promise<void> = Promise.resolve();
+  private inaraRetentionDone = false;
+  private readonly inaraBlockedLogged = new Set<string>();
 
-  /**
-   * Keep the Inara profile location current.
-   *
-   * Unlike EDDN and EDSM this is not fed from the Activity Journal, because
-   * **Inara has no event that accepts exobiology** -- its write vocabulary is
-   * travel, ranks, ships, materials, market and combat. Feeding it journal
-   * entries would mean inventing event names, so it is fed location instead,
-   * which is the one thing it both documents and commanders want from it.
-   *
-   * `setCommanderTravelLocation` overwrites rather than appends, so there is no
-   * queue: a backlog of old locations would walk the profile through places the
-   * commander has already left. Only the latest is sent, and only when it has
-   * actually changed.
-   */
+  private inaraStateInput(): InaraStateInput {
+    return {
+      hasCredential: this.integrationState.inara.hasCredential,
+      enabled: this.integrationState.inara.enabled,
+      config: this.inaraConfig,
+      condition: this.inaraCondition,
+      profile: this.inaraProfile,
+      lastSuccessAt: this.sharingState.inara?.lastSuccessAt ?? null,
+    };
+  }
+
+  private inaraKey(part: string): string {
+    return `integration.inara.${this.inaraFid}.${part}`;
+  }
+
+  /** Load everything Inara keeps per commander. Called on every commander change. */
+  private async loadInaraState(): Promise<void> {
+    const fid = this.discoveryFid;
+    this.inaraFid = fid;
+    this.inaraCondition = null;
+    this.inaraProfile = null;
+    this.inaraCategories = { ...INARA_CATEGORY_DEFAULTS };
+    this.inaraFingerprints = new Map();
+    this.inaraLinksSeen = null;
+    if (fid === null) return;
+
+    const condition = await this.getSetting(this.inaraKey('condition'));
+    this.inaraCondition =
+      condition === 'credential' || condition === 'app-not-allowed' || condition === 'transient'
+        ? condition
+        : null;
+    this.inaraProfile = readInaraProfile(await this.getSetting(this.inaraKey('profile')));
+    for (const c of INARA_CATEGORIES) {
+      const v = await this.getSetting(this.inaraKey(`share.${c}`));
+      if (v === 'true' || v === 'false') this.inaraCategories[c] = v === 'true';
+    }
+    if (this.db) {
+      try {
+        const rows = await this.db.select<Array<{ key: string; fingerprint: string }>>(
+          `SELECT key, fingerprint FROM integration_fingerprint
+            WHERE integration = 'inara' AND commander_fid = $1`,
+          [fid],
+        );
+        this.inaraFingerprints = new Map(rows.map((r) => [r.key, r.fingerprint]));
+      } catch (err) {
+        logger.warn('inara', 'Could not read fingerprints', { error: String(err) });
+      }
+    }
+  }
+
+  private async setInaraCondition(condition: InaraCondition | null): Promise<void> {
+    this.inaraCondition = condition;
+    if (this.inaraFid !== null) await this.setSetting(this.inaraKey('condition'), condition ?? '');
+  }
+
   private observeForInara(event: NormalizedEvent): void {
-    if (this.inaraHalted) return;
-    if (!this.integrationState.inara.enabled) return;
-    if (!INTEGRATIONS.inara.implemented) return;
-    if (!this.integrationState.inara.hasCredential) return;
+    const result = this.inaraTranslator.observe(
+      event.source.raw as Record<string, unknown>,
+      event.source.provenance,
+      Date.now(),
+    );
 
-    // Arriving somewhere is the only thing that moves the profile. Firing on
-    // every event would send one request per journal line.
-    const name = event.source.event;
-    if (
-      name !== 'Location' &&
-      name !== 'FSDJump' &&
-      name !== 'CarrierJump' &&
-      name !== 'Docked' &&
-      name !== 'ApproachBody' &&
-      name !== 'Touchdown'
-    ) {
+    if (result.blocked === 'legacy' || result.blocked === 'beta') {
+      // Inara forbids both. Said once per kind, not per line.
+      if (!this.inaraBlockedLogged.has(result.blocked)) {
+        this.inaraBlockedLogged.add(result.blocked);
+        logger.info('inara', 'Not live game data; nothing is queued for Inara', {
+          reason: result.blocked,
+        });
+      }
+      return;
+    }
+    if (result.blocked !== null) return;
+    if (!INTEGRATIONS.inara.implemented) return;
+    if (!inaraMayTransmit(this.inaraStateInput())) return;
+
+    // Attributed by the line's own commander, and only while that is the
+    // commander whose settings are loaded: never guessed across a switch.
+    const fid = this.inaraTranslator.commander;
+    if (fid === null || fid !== this.inaraFid) return;
+
+    const wanted = result.events.filter((e) => this.inaraCategories[e.category]);
+    if (wanted.length > 0) {
+      const id = event.source.provenance.eventId;
+      this.inaraWrites = this.inaraWrites.then(() => this.enqueueInara(fid, id, wanted));
+    }
+
+    if (result.flush === 'session-start') this.scheduleInaraDrain(INARA_SESSION_START_DELAY_MS);
+    else if (result.flush === 'now') this.scheduleInaraDrain(0);
+  }
+
+  private async enqueueInara(
+    fid: string,
+    journalEventId: string,
+    events: readonly InaraOutgoing[],
+  ): Promise<void> {
+    if (!this.db) return;
+    const now = new Date().toISOString();
+    try {
+      for (let n = 0; n < events.length; n += 1) {
+        const payload = toInaraPayload(events[n]!);
+        const last =
+          payload.coalesceKey === null ? undefined : this.inaraFingerprints.get(payload.coalesceKey);
+        if (!shouldQueueInara(payload, last)) continue;
+        if (payload.coalesceKey !== null) {
+          // A newer snapshot makes any older one still waiting pointless.
+          await this.db.execute(
+            `DELETE FROM integration_queue
+              WHERE integration = 'inara' AND commander_fid = $1
+                AND status IN ('queued', 'retryable')
+                AND json_extract(payload, '$.coalesceKey') = $2`,
+            [fid, payload.coalesceKey],
+          );
+        }
+        await this.db.execute(
+          `INSERT OR IGNORE INTO integration_queue
+             (id, integration, commander_fid, status, payload, attempts, created_at, updated_at)
+           VALUES ($1, 'inara', $2, 'queued', $3, 0, $4, $4)`,
+          [inaraQueueId(journalEventId, n), fid, JSON.stringify(payload), now],
+        );
+      }
+      const pending = await this.db.select<Array<{ n: number }>>(
+        `SELECT COUNT(*) AS n FROM integration_queue
+          WHERE integration = 'inara' AND commander_fid = $1 AND status IN ('queued', 'retryable')`,
+        [fid],
+      );
+      if (Number(pending[0]?.n ?? 0) >= INARA_SIZE_TRIGGER) this.scheduleInaraDrain(0);
+    } catch (err) {
+      logger.warn('inara', 'Could not queue an event', { error: String(err) });
+    }
+  }
+
+  /** Drain after `delayMs`, or sooner if a drain is already due sooner. */
+  private scheduleInaraDrain(delayMs: number): void {
+    const at = Date.now() + delayMs;
+    if (this.inaraDrainTimer !== null && this.inaraDrainAt <= at) return;
+    if (this.inaraDrainTimer !== null) clearTimeout(this.inaraDrainTimer);
+    this.inaraDrainAt = at;
+    this.inaraDrainTimer = setTimeout(() => {
+      this.inaraDrainTimer = null;
+      void this.drainInara(false);
+    }, delayMs);
+  }
+
+  private startInaraDrain(): void {
+    if (this.inaraFallbackTimer !== null) return;
+    this.inaraFallbackTimer = setInterval(
+      () => void this.drainInara(false),
+      INARA_FALLBACK_INTERVAL_MS,
+    );
+    this.scheduleInaraDrain(INARA_SESSION_START_DELAY_MS);
+  }
+
+  /**
+   * Send what is due, for the current commander only.
+   *
+   * `manual` skips the minimum interval between automatic sends; nothing else.
+   * A disabled integration, a missing key, an unapproved app name or a refused
+   * key all stop it here, before any request.
+   */
+  private async drainInara(manual: boolean): Promise<void> {
+    if (this.inaraSending || !this.db) return;
+    if (!inaraMayTransmit(this.inaraStateInput())) return;
+    const fid = this.inaraFid;
+    const st = this.state;
+    if (fid === null || !isKnown(st.commander) || !isKnown(st.fid) || st.fid !== fid) return;
+    const commander = st.commander;
+
+    const sinceLast = Date.now() - this.inaraLastSendMs;
+    if (!manual && sinceLast < INARA_MIN_INTERVAL_MS) {
+      this.scheduleInaraDrain(INARA_MIN_INTERVAL_MS - sinceLast);
       return;
     }
 
-    const st = this.state;
-    if (!isKnown(st.commander)) return;
-
-    const at = {
-      systemName: isKnown(st.starSystem) ? st.starSystem : null,
-      systemCoords: isKnown(st.starPos) ? st.starPos : null,
-      stationName: isKnown(st.stationName) ? st.stationName : null,
-      marketId: isKnown(st.marketId) ? st.marketId : null,
-      bodyName: isKnown(st.body) ? st.body : null,
-      occurredAt: event.source.provenance.timestamp,
-    };
-
-    const built = toInaraLocation(at);
-    if (built === null) return;
-
-    /*
-     * Keyed on the location rather than the event, because several events
-     * report arriving at the same place -- `Location` then `Docked`, say -- and
-     * each would otherwise be a separate request saying the same thing.
-     */
-    const fingerprint = JSON.stringify(built.eventData);
-    if (fingerprint === this.inaraLastSent) return;
-    this.inaraLastSent = fingerprint;
-
-    void this.sendInara(built);
-  }
-
-  private async sendInara(locationEvent: InaraLocationEvent): Promise<void> {
-    if (this.inaraSending) return;
     this.inaraSending = true;
+    let more = false;
     try {
-      const st = this.state;
-      const batch = buildInaraBatch({
-        // Supplied by Rust from the credential store; never read here.
-        apiKey: '',
-        commanderName: isKnown(st.commander) ? st.commander : '',
-        commanderFrontierID: this.discoveryFid,
-        appName: 'EDFM Companion',
-        appVersion: COMPANION_VERSION,
-        isBeingDeveloped: false,
-        events: [locationEvent],
-      });
+      await this.inaraWrites;
+      if (!this.inaraRetentionDone) {
+        this.inaraRetentionDone = true;
+        // Accepted rows are kept only so a re-read cannot resend them; past
+        // Inara's 30 days they could not be sent anyway.
+        await this.db.execute(
+          `DELETE FROM integration_queue
+            WHERE integration = 'inara' AND status = 'accepted' AND updated_at < $1`,
+          [new Date(Date.now() - INARA_ACCEPTED_RETENTION_MS).toISOString()],
+        );
+      }
 
-      const raw = await invoke<{ status: number; body: string; transport_error: string | null }>(
+      const raw = await this.db.select<
+        Array<{
+          id: string;
+          commander_fid: string | null;
+          status: string;
+          payload: string;
+          attempts: number;
+          last_error: string | null;
+          next_attempt_at: string | null;
+          created_at: string;
+          updated_at: string;
+        }>
+      >(
+        `SELECT id, commander_fid, status, payload, attempts, last_error, next_attempt_at,
+                created_at, updated_at
+           FROM integration_queue
+          WHERE integration = 'inara' AND commander_fid = $1 AND status IN ('queued', 'retryable')
+          ORDER BY created_at, rowid
+          LIMIT 1000`,
+        [fid],
+      );
+      const rows: QueueItem[] = raw.map((r) => ({
+        id: r.id,
+        integration: 'inara',
+        commanderFid: r.commander_fid,
+        status: r.status as QueueItem['status'],
+        payload: r.payload,
+        attempts: Number(r.attempts),
+        lastError: r.last_error,
+        nextAttemptAt: r.next_attempt_at,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
+
+      const plan = planInaraBatch(rows, { fid, nowMs: Date.now() });
+      for (const id of [...plan.superseded, ...plan.unreadable]) {
+        await this.db.execute(
+          `DELETE FROM integration_queue WHERE integration = 'inara' AND id = $1`,
+          [id],
+        );
+      }
+      for (const id of plan.expired) {
+        await this.db.execute(
+          `UPDATE integration_queue
+              SET status = 'rejected', last_error = $2, next_attempt_at = NULL, updated_at = $3
+            WHERE integration = 'inara' AND id = $1`,
+          [id, 'Older than 30 days, which Inara does not accept.', new Date().toISOString()],
+        );
+      }
+      if (plan.send.length === 0) return;
+
+      this.inaraLastSendMs = Date.now();
+      const http = await invoke<{ status: number; body: string; transport_error: string | null }>(
         'inara_submit',
         {
           submission: {
-            app_name: batch.header.appName,
-            app_version: batch.header.appVersion,
-            commander_name: batch.header.commanderName,
-            commander_frontier_id: batch.header.commanderFrontierID ?? null,
-            events_json: JSON.stringify(batch.events),
+            app_version: COMPANION_VERSION,
+            is_being_developed: this.inaraConfig.isBeingDeveloped,
+            commander_name: commander,
+            commander_frontier_id: fid,
+            events_json: JSON.stringify(inaraRequestEvents(plan)),
           },
         },
       );
 
-      if (raw.transport_error !== null || raw.status === 0) {
-        // Allowed to be retried: the next arrival will try again, so a dropped
-        // request costs nothing but a slightly stale profile.
-        this.inaraLastSent = null;
-        return;
-      }
+      const effect = applyInaraResponse(
+        plan,
+        { status: http.status, body: http.body, transportError: http.transport_error },
+        new Date(),
+        Math.random,
+      );
 
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(raw.body);
-      } catch {
-        parsed = null;
-      }
-
-      const outcome = parseInaraResponse(parsed);
-      if (outcome.kind === 'app-not-allowed') {
-        this.inaraHalted = true;
-        await this.recordIntegrationError(
-          'inara',
-          'Inara has not approved this app yet, so it refuses every request. Your key is not the problem. Sending is paused.',
+      for (const row of effect.rows) {
+        await this.db.execute(
+          `UPDATE integration_queue
+              SET status = $2, attempts = $3, last_error = $4, next_attempt_at = $5, updated_at = $6
+            WHERE integration = 'inara' AND id = $1`,
+          [row.id, row.status, row.attempts, row.lastError, row.nextAttemptAt, row.updatedAt],
         );
-        logger.warn('inara', 'App name not white-listed');
-        this.notify();
-        return;
       }
-      if (outcome.kind === 'credential') {
-        this.inaraHalted = true;
-        /*
-         * A rejected key will not fix itself, and Inara documents that a header
-         * level failure cancels the batch. Stop and say so rather than
-         * repeating an authenticated request with a dead key.
-         */
-        await this.recordIntegrationError(
-          'inara',
-          `Inara rejected the key: ${outcome.message}`.slice(0, 200),
+      for (const { key, fingerprint } of effect.acceptedFingerprints) {
+        this.inaraFingerprints.set(key, fingerprint);
+        await this.db.execute(
+          `INSERT INTO integration_fingerprint
+             (integration, commander_fid, key, fingerprint, updated_at)
+           VALUES ('inara', $1, $2, $3, $4)
+           ON CONFLICT (integration, commander_fid, key)
+           DO UPDATE SET fingerprint = excluded.fingerprint, updated_at = excluded.updated_at`,
+          [fid, key, fingerprint, new Date().toISOString()],
         );
-        logger.warn('inara', 'Credential rejected');
-        this.notify();
-        return;
       }
-      if (outcome.kind !== 'accepted') {
-        this.inaraLastSent = null;
-        logger.warn('inara', 'Location not accepted', { kind: outcome.kind });
-        return;
-      }
+      if (effect.links) this.inaraLinksSeen = effect.links;
 
-      await this.recordIntegrationSuccess('inara');
-      this.notify();
+      await this.applyInaraCondition(effect.condition, effect.message);
+      more = effect.condition === 'ok' && plan.send.length >= INARA_MAX_BATCH;
     } catch (err) {
-      this.inaraLastSent = null;
       logger.warn('inara', 'Send failed', { error: String(err) });
     } finally {
       this.inaraSending = false;
     }
+    if (more) this.scheduleInaraDrain(INARA_MIN_INTERVAL_MS);
+  }
+
+  /** Record what an answer means for the whole integration. */
+  private async applyInaraCondition(
+    condition: InaraCondition,
+    message: string | null,
+  ): Promise<void> {
+    if (condition === 'ok') {
+      await this.setInaraCondition(null);
+      await this.recordIntegrationSuccess('inara');
+    } else if (condition === 'transient') {
+      await this.setInaraCondition('transient');
+      await this.recordIntegrationError('inara', message ?? 'Inara could not be reached.');
+    } else if (condition === 'app-not-allowed') {
+      await this.setInaraCondition('app-not-allowed');
+      await this.recordIntegrationError(
+        'inara',
+        'Inara has not approved this app yet, so it refuses every request. Your key is not the problem. Nothing more will be sent until it does.',
+      );
+      logger.warn('inara', 'App name not white-listed');
+    } else {
+      await this.setInaraCondition('credential');
+      await this.recordIntegrationError(
+        'inara',
+        'Inara did not accept your API key. Nothing more will be sent until you replace it or verify it again.',
+      );
+      logger.warn('inara', 'Credential rejected');
+    }
+    this.notify();
+  }
+
+  /**
+   * Ask Inara whose key this is.
+   *
+   * The only read this integration makes, and only when the commander presses
+   * Verify. The answer is cached per commander and never polled for.
+   */
+  readonly verifyInara = async (): Promise<string | null> => {
+    if (this.inaraVerifying) return null;
+    if (!inaraMayVerify(this.inaraStateInput())) {
+      return this.inaraConfig.appAuthorized && this.inaraCondition !== 'app-not-allowed'
+        ? 'Add your API key first.'
+        : 'Inara has not approved this app yet, so nothing can be sent, including this check.';
+    }
+    const st = this.state;
+    const fid = this.inaraFid;
+    if (fid === null || !isKnown(st.commander)) {
+      return 'Start the game once so the app knows which commander this key belongs to.';
+    }
+    this.inaraVerifying = true;
+    this.notify();
+    try {
+      const now = new Date().toISOString();
+      const http = await invoke<{ status: number; body: string; transport_error: string | null }>(
+        'inara_submit',
+        {
+          submission: {
+            app_version: COMPANION_VERSION,
+            is_being_developed: this.inaraConfig.isBeingDeveloped,
+            commander_name: st.commander,
+            commander_frontier_id: fid,
+            events_json: JSON.stringify([inaraVerifyEvent(now)]),
+          },
+        },
+      );
+      const result = readInaraVerify(
+        { status: http.status, body: http.body, transportError: http.transport_error },
+        now,
+      );
+      if (fid !== this.inaraFid) return null;
+      if (result.kind === 'verified') {
+        this.inaraProfile = result.profile;
+        await this.setSetting(this.inaraKey('profile'), JSON.stringify(result.profile));
+        await this.applyInaraCondition('ok', null);
+        this.scheduleInaraDrain(0);
+        return null;
+      }
+      // A failed check says nothing about the key; the condition is left alone.
+      if (result.kind === 'transient' || result.kind === 'ok') return result.message;
+      await this.applyInaraCondition(result.kind, result.message);
+      return result.message;
+    } catch (err) {
+      logger.warn('inara', 'Verify failed', { error: String(err) });
+      return 'The check could not be made.';
+    } finally {
+      this.inaraVerifying = false;
+      this.notify();
+    }
+  };
+
+  /** Send what is waiting now, retries included. */
+  readonly syncInaraNow = async (): Promise<void> => {
+    await this.retrySharingNow('inara');
+    await this.drainInara(true);
+    await this.loadSharingState();
+  };
+
+  /**
+   * Choose whether one kind of data goes to Inara.
+   *
+   * Switching a kind off also withdraws anything of that kind still waiting,
+   * so the choice takes effect at once rather than after a backlog drains.
+   */
+  readonly setInaraCategory = async (category: InaraCategory, on: boolean): Promise<void> => {
+    if (this.inaraFid === null) return;
+    this.inaraCategories = { ...this.inaraCategories, [category]: on };
+    this.notify();
+    await this.setSetting(this.inaraKey(`share.${category}`), String(on));
+    if (!on && this.db) {
+      try {
+        await this.db.execute(
+          `DELETE FROM integration_queue
+            WHERE integration = 'inara' AND commander_fid = $1
+              AND status IN ('queued', 'retryable')
+              AND json_extract(payload, '$.category') = $2`,
+          [this.inaraFid, category],
+        );
+      } catch (err) {
+        logger.warn('inara', 'Could not withdraw waiting items', { error: String(err) });
+      }
+      await this.loadSharingState();
+    }
+  };
+
+  /** Forget everything Inara-specific for this commander, when the key changes or goes. */
+  private async forgetInara(): Promise<void> {
+    const fid = this.inaraFid;
+    this.inaraProfile = null;
+    this.inaraLinksSeen = null;
+    this.inaraFingerprints = new Map();
+    await this.setInaraCondition(null);
+    if (fid === null || !this.db) return;
+    await this.setSetting(this.inaraKey('profile'), '');
+    try {
+      // Waiting rows would go out under the next key, which may be another
+      // account's. Accepted rows stay: they are only the record of what was sent.
+      await this.db.execute(
+        `DELETE FROM integration_queue
+          WHERE integration = 'inara' AND commander_fid = $1 AND status IN ('queued', 'retryable')`,
+        [fid],
+      );
+      await this.db.execute(
+        `DELETE FROM integration_fingerprint WHERE integration = 'inara' AND commander_fid = $1`,
+        [fid],
+      );
+    } catch (err) {
+      logger.warn('inara', 'Could not clear waiting items', { error: String(err) });
+    }
+  }
+
+  private inaraView(): InaraView {
+    const input = this.inaraStateInput();
+    const state = inaraConnectionState(input);
+    const st = this.state;
+    const system = isKnown(st.starSystem) ? st.starSystem : null;
+    const station = isKnown(st.stationName) ? st.stationName : null;
+    // Inara's links are kept only for the place they were returned for.
+    const seen = this.inaraLinksSeen;
+    const links = seen !== null && seen.systemName === system ? seen : null;
+    const carrier = isKnown(st.stationType) && st.stationType === 'FleetCarrier';
+    return {
+      state,
+      label: INARA_STATE_LABEL[state],
+      appName: INARA_APP_NAME,
+      appAuthorized: this.inaraConfig.appAuthorized,
+      isBeingDeveloped: this.inaraConfig.isBeingDeveloped,
+      mayVerify: inaraMayVerify(input) && !this.inaraVerifying,
+      verifying: this.inaraVerifying,
+      profile: this.inaraProfile,
+      categories: this.inaraCategories,
+      // Inara's own URL when it gave one for where the commander is; the
+      // documented search link otherwise.
+      systemLink:
+        system === null
+          ? null
+          : { label: system, url: links?.starsystem ?? inaraLinks.starsystem(system) },
+      stationLink:
+        system === null || station === null
+          ? null
+          : {
+              label: station,
+              url:
+                (links !== null && links.stationName === station ? links.station : null) ??
+                (carrier ? inaraLinks.carrier(station) : inaraLinks.station(station, system)),
+            },
+      verify: this.verifyInara,
+      syncNow: this.syncInaraNow,
+      setCategory: this.setInaraCategory,
+    };
   }
 
   /* ------------------------------------------------------------- EDDN */
@@ -3090,6 +3497,7 @@ export class Companion {
       const hasCredential = await credentialPresent(id);
       this.integrationState = { ...this.integrationState, [id]: { enabled, hasCredential } };
     }
+    if (fid !== this.inaraFid) await this.loadInaraState();
     this.notify();
     await this.loadSharingState();
   }
@@ -3122,13 +3530,14 @@ export class Companion {
       logger.warn(id, 'Could not store the key', { error: String(err) });
       return 'The key could not be saved to the Windows Credential Manager.';
     }
-    if (id === 'inara') this.inaraHalted = false;
+    if (id === 'inara') await this.forgetInara();
     await this.loadIntegrationState();
     this.notify();
     return null;
   };
 
   readonly clearIntegrationCredential = async (id: IntegrationId): Promise<void> => {
+    if (id === 'inara') await this.forgetInara();
     try {
       await credentialClear(id);
     } catch (err) {
@@ -3151,7 +3560,6 @@ export class Companion {
 
   readonly setIntegrationEnabled = async (id: IntegrationId, enabled: boolean): Promise<void> => {
     if (!INTEGRATIONS[id]?.implemented) return;
-    if (id === 'inara') this.inaraHalted = false;
     this.integrationState = {
       ...this.integrationState,
       [id]: { ...this.integrationState[id], enabled },
@@ -3163,6 +3571,7 @@ export class Companion {
     if (fid !== null) {
       await this.setSetting(`integration.${id}.${fid}.enabled`, String(enabled));
     }
+    if (id === 'inara' && enabled) this.scheduleInaraDrain(0);
   };
 
   /**
@@ -3544,6 +3953,7 @@ export class Companion {
           commanderName: isKnown(this.state.commander) ? this.state.commander : null,
           commanderFid: this.discoveryFid,
         }),
+        inara: this.inaraView(),
         diagnostics: {
           appVersion: COMPANION_VERSION,
           gameVersion: isKnown(this.state.gameVersion) ? this.state.gameVersion : null,
@@ -3826,6 +4236,7 @@ export class Companion {
       // path.
       this.startEddnDrain();
       this.startEdsmDrain();
+      this.startInaraDrain();
       this.connection = 'watching';
       logger.info('journal', 'Watching', { file: this.engine.currentFile });
     } catch (err) {
@@ -3913,6 +4324,9 @@ export class Companion {
 
   stop(): void {
     this.engine?.stop();
+    // Best effort: whatever Inara is still owed goes now, as its guide suggests
+    // for session end. Not awaited; closing must not wait on a server.
+    void this.drainInara(true);
     this.connection = 'stopped';
     // An open session whose end was never observed is recorded as interrupted
     // rather than silently closed: "the app shut down" is different evidence

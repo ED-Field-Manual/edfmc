@@ -21,7 +21,7 @@ generate there. It is off until you connect it.
 |---|---|---|
 | **EDDN** | **Built and wired** | Nothing — it is anonymous community sharing |
 | EDSM | Designed | Your API key, and a round of live testing |
-| Inara | Sends your location | Your personal Inara API key, and Inara white-listing the app name |
+| Inara | **Built**, awaiting Inara's approval of the app name; sends nothing until then | Your personal Inara API key, and a release built with `VITE_INARA_APP_AUTHORIZED=true` once Inara approves `EDFM Companion` |
 | **EDFM Commander Journal** | **Built** — push-only, new activity plus an optional history upload | A journal sync token from your EDFM account |
 
 Every one ships **off**. The unbuilt ones report "Not built yet" in the UI
@@ -135,55 +135,56 @@ On the first pass after updating, rows that earlier builds marked rejected with 
 
 ---
 
-## Inara — keeps your profile location current
+## Inara — keeps your profile in step with the game
 
-Inara is **not** a journal-forwarding API. It takes its own event vocabulary, so
-activity has to be translated rather than relayed.
+**The full design, the implementation matrix and the corpus evidence are in
+[INARA.md](INARA.md).** This is the summary.
 
-**Inara has no event for exobiology, and none for exploration scans.** Its write
-vocabulary is travel, ranks, ships, materials, market and combat. Since this
-app's Activity Journal is exobiology — completed specimens, signals found, data
-sold — there is nothing in it Inara can accept. Translating it would mean
-inventing event names, so none is sent.
+Inara is **not** a journal-forwarding API. It takes its own event vocabulary,
+and the app translates journal lines into it: the flight log (jumps, dockings,
+landings, carrier jumps), ranks (pilot, navy, engineer, Powerplay), reputation,
+ships and their loadouts, suit loadouts, materials, cargo and ship locker, game
+statistics, and — only if the commander switches it on — credits. Each kind can
+be switched off separately, and switching one off withdraws anything of that
+kind still waiting.
 
-What Inara does take, and what commanders want from it, is their profile
-location. So that is the whole of this integration: `setCommanderTravelLocation`
-on arrival, carrying the system (and its coordinates), the station when docked,
-and the body by name.
+**Inara has no event for exobiology scans or exploration scans**, so the
+Activity Journal still reaches Inara not at all.
 
-Two things follow from it being a *set* rather than a log:
+It uses the same durable `integration_queue` as EDDN and EDSM, per commander,
+with deterministic ids so a re-read journal sends nothing twice, and snapshot
+fingerprints so an unchanged rank list or loadout is not sent again at the next
+login. Requests are batched on session start, docking, jumps and shutdown, as
+Inara's guide asks, and never mix commanders.
 
-- **There is no queue.** The event overwrites your current location, so a
-  backlog would walk your profile through places you had already left. Only the
-  latest location is sent, and only when it has actually changed.
-- **A dropped request costs nothing.** The next arrival sends again.
+**Only the live game is sent.** Legacy (3.x) and beta lines are dropped before
+they reach the queue, as Inara requires.
 
-**Your surface position is never sent.** Inara accepts
-`starsystemBodyCoords` — your latitude and longitude on a planet — and this app
-does not send it, because "where you are standing on a planet" is on the
-never-shares list. The body name alone keeps the profile accurate.
+**Your surface position is never sent.** Inara accepts `starsystemBodyCoords`
+— your latitude and longitude on a planet — and this app does not send it. The
+body name alone keeps the profile accurate.
 
-**Inara has to white-list the app's name first.** Two earlier versions of this
-file got this wrong in opposite directions. The first said the project owner had to
-register for an application key. The correction said `appName` was a free string
-and nothing had to be registered. That correction was also wrong. The header does
-take the commander's *personal* API key, but Inara's developer guide asks
-developers to send the app name "as it needs to be white-listed first". An
-unlisted name is refused whatever the key. This app's first real request, on
-2026-10-06, came back `400 "This application has no access allowed."`
+**Inara has to white-list the app's name first.** The header carries the
+commander's *personal* API key, but Inara's developer guide asks for the app
+name "as it needs to be white-listed first", and an unlisted name is refused
+whatever the key. This app's first real request, on 2026-10-06, came back
+`400 "This application has no access allowed."` Two earlier versions of this
+file got that wrong in opposite directions; INARA.md has the corrected account.
 
-So before Inara will accept anything, the project owner has to send Inara's
-developer the app name exactly as it is sent (`EDFM Companion`), what the app
-does, a short description for Inara's list of apps, and a download URL if there
-is one.
+So the integration ships in **Awaiting application authorization**: the key can
+be saved and choices made, but nothing is queued and nothing is sent, the
+Verify button included. A release built with `VITE_INARA_APP_AUTHORIZED=true`
+lifts that once Inara has approved `EDFM Companion`. If Inara still refuses the
+name, the app returns to that state by itself and remembers it across restarts.
+A refused key likewise stops everything until the key is replaced or Verify
+succeeds, because Inara's guide reserves the right to cut off keys that keep
+producing errors.
 
-Until then, the app recognises that reply and pauses Inara for the rest of the
-run. Saving a key or switching Inara off and on again lets it try once more.
-Inara's guide reserves the right to cut off keys that keep producing errors, so
-the app does not keep sending refused requests.
+**What you need to do:** generate a personal API key on Inara (your commander →
+Settings → API key). It is not your Inara password.
 
-**What you need to do:** generate a personal API key at
-`https://inara.cz/elite/cmdr-settings-api/`. It is not your Inara password.
+Inara is an independent community site run by Artie; this project is not
+affiliated with it and thanks it for the API.
 
 ---
 
@@ -214,16 +215,22 @@ that fails the suite rather than an oversight.
 
 **The consequence, recorded so it is not rediscovered later: any integration
 needing a credential must perform its HTTP request in Rust.** EDDN needs none,
-which is why it is the one implemented first.
+which is why it is the one implemented first. EDSM, Inara and the EDFM journal
+each have a Rust command that reads the key and sends it only to its own
+service; Inara's also pins the app name and refuses redirects.
 
 ---
 
 ## What is never shared, by any of them
 
-- Chat, friends, wings, squadrons
-- Your credits, loadout, fines, bounties or faction reputation
+- Chat, friends, wings or squadron membership
 - Where you are standing on a planet
 - Anything at all while an integration is switched off
+
+Credits, loadouts and faction reputation used to be on this list. They are not
+any more, because Inara's profile sync exists to put them on the commander's own
+Inara profile, at their request (credits only if they switch that on). EDDN and
+the EDFM journal still never carry them, and their own manifests say so.
 
 ## What never reaches a community database
 

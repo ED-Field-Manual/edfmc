@@ -1,60 +1,39 @@
 /**
- * Inara submission.
+ * Inara: the envelope, the constants, and reading the reply.
  *
- * ## What Inara can actually take, and what it cannot
- *
- * This was built against Inara's own API documentation rather than from memory,
- * and the documentation settled the design: **Inara has no event for organic or
- * biological data, and none for exploration scans.** Its write vocabulary is
- * travel, ranks, ships, materials, market and combat.
- *
- * That matters, because this app's Activity Journal records exobiology
- * milestones -- completed specimens, signals found, data sold. None of them has
- * an Inara equivalent. So unlike EDDN and EDSM, **Inara is not fed from the
- * Activity Journal at all**: there is nothing in the journal it could accept.
- *
- * What Inara can take, and what commanders actually want from it, is their
- * profile location staying current. So that is the whole of this integration --
- * `setCommanderTravelLocation`, and nothing else until a verified need appears.
- *
- * ## Why a "set" is not queued
- *
- * `setCommanderTravelLocation` overwrites the commander's current location
- * rather than appending to a log. A backlog of stale locations is therefore
- * worse than useless: replaying it would walk the profile through places the
- * commander has already left. Only the latest location is ever sent, which is
- * why this module takes one location and has no queue.
+ * The translation from journal lines to Inara events is in
+ * `inara-translate.ts`, the queue and batch decisions in `inara-queue.ts`, and
+ * the commander-facing state in `inara-state.ts`. docs/INARA.md has the whole
+ * design and the implementation matrix, written against Inara's developer
+ * guide and API documentation.
  *
  * ## The envelope
  *
  * ```
  * { "header": { appName, appVersion, isBeingDeveloped, APIkey, commanderName,
  *               commanderFrontierID },
- *   "events": [ { eventName, eventTimestamp, eventData } ] }
+ *   "events": [ { eventName, eventTimestamp, eventCustomID, eventData } ] }
  * ```
  *
- * Field spellings are corroborated by two independent sources: Inara's API
- * documentation and EDMarketConnector's production client. Both give
- * `starsystemName`, `starsystemCoords`, `stationName`, `marketID` and
- * `starsystemBodyName` -- note the lowercase `system` and the uppercase `ID`.
+ * The header is assembled in Rust (`inara.rs`), because `APIkey` is the
+ * commander's personal key and is read from the Windows Credential Manager
+ * there. It never exists in this process.
  *
- * ## Credentials, and the app white-list
+ * ## The app white-list
  *
- * The header carries the *user's personal API key*, from their own Inara
- * settings page. That part is right.
- *
- * But the `appName` is not free to choose. Inara's developer guide asks
- * developers to send the app name "as it needs to be white-listed first", and
- * an unlisted name is refused whatever the key. The first real request this
- * client made came back:
+ * Inara's developer guide asks for the app name "as it needs to be white-listed
+ * first", and an unlisted name is refused whatever the key:
  *
  * ```
  * eventStatus 400, "This application has no access allowed."
  * ```
  *
- * An earlier note here said no registration was needed. That was wrong, and it
- * is why the app shipped with a name Inara had never been told about.
+ * So `INARA_APP_NAME` is a constant, and nothing is sent until a release says
+ * the name has been approved (`VITE_INARA_APP_AUTHORIZED`).
  */
+
+/** Exactly as white-listed by Inara. Changing it means asking Inara again. */
+export const INARA_APP_NAME = 'EDFM Companion';
 
 export const INARA_URL = 'https://inara.cz/inapi/v1/';
 
@@ -73,11 +52,13 @@ export const INARA_WARNING = 202;
 export const INARA_SOFT_ERROR = 204;
 export const INARA_ERROR = 400;
 
-/** The one event this client sends. */
+/** The location event, also produced by `InaraTranslator` from `Location`. */
 export const INARA_SET_LOCATION = 'setCommanderTravelLocation';
 
 export interface InaraEvent {
   readonly eventName: string;
+  /** Optional; Inara echoes it back so results can be paired with requests. */
+  readonly eventCustomID?: number;
   /** ISO 8601, and the documentation asks for the real time of the event. */
   readonly eventTimestamp: string;
   readonly eventData: Readonly<Record<string, unknown>>;
@@ -167,13 +148,22 @@ export function buildInaraBatch(input: {
 
 export interface InaraEventResult {
   readonly index: number;
+  /** Echoed back by Inara when the request set one. */
+  readonly customId: number | null;
   readonly status: number;
   readonly text: string;
   readonly accepted: boolean;
+  /** Whatever the event returned, such as `starsystemInaraURL`. Untrusted. */
+  readonly data: Readonly<Record<string, unknown>> | null;
 }
 
 export type InaraOutcome =
-  | { readonly kind: 'accepted'; readonly perEvent: readonly InaraEventResult[] }
+  | {
+      readonly kind: 'accepted';
+      readonly perEvent: readonly InaraEventResult[];
+      /** The header's eventData: Inara's user id and name for the key's owner. */
+      readonly user: Readonly<Record<string, unknown>> | null;
+    }
   | { readonly kind: 'credential'; readonly message: string }
   /** The key may be fine; Inara has not white-listed this app's name. */
   | { readonly kind: 'app-not-allowed'; readonly message: string }
@@ -236,13 +226,16 @@ export function parseInaraResponse(body: unknown): InaraOutcome {
   rawEvents.forEach((raw, index) => {
     if (!isRecord(raw)) return;
     const code = typeof raw['eventStatus'] === 'number' ? raw['eventStatus'] : -1;
+    const customId = raw['eventCustomID'];
     perEvent.push({
       index,
+      customId: typeof customId === 'number' && Number.isInteger(customId) ? customId : null,
       status: code,
       text: typeof raw['eventStatusText'] === 'string' ? raw['eventStatusText'] : '',
       accepted: isInaraAccepted(code),
+      data: isRecord(raw['eventData']) ? raw['eventData'] : null,
     });
   });
 
-  return { kind: 'accepted', perEvent };
+  return { kind: 'accepted', perEvent, user: isRecord(header['eventData']) ? header['eventData'] : null };
 }

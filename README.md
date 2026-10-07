@@ -186,6 +186,7 @@ scripts/             Journal profiling tooling
 | [RESEARCH.md](docs/RESEARCH.md) | Research framework, session model, data-quality rules |
 | [LOGISTICS.md](docs/LOGISTICS.md) | Confidence engine, sourcing planner, construction projects |
 | [INTEGRATIONS.md](docs/INTEGRATIONS.md) | EDDN, EDSM, Inara: what each sends, and where credentials live |
+| [INARA.md](docs/INARA.md) | Inara: the journal-to-Inara matrix, batching, dedup, and the app white-list |
 | [JOURNAL-SYNC.md](docs/JOURNAL-SYNC.md) | EDFM Commander Journal: tokens, what is uploaded, the history rebuild and what it cannot recover |
 | [PLUGINS.md](docs/PLUGINS.md) | Installing and writing plugins, and why they are safe |
 | [EXTENSIONS.md](docs/EXTENSIONS.md) | Extension architecture: tiers, threat model, API boundaries, roadmap |

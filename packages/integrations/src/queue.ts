@@ -79,6 +79,18 @@ export function backoffFor(attempts: number): number {
 }
 
 /**
+ * The same schedule with ±20 % jitter, for services where many clients may have
+ * failed at once and would otherwise all come back on the same second.
+ *
+ * `random` is injected so the bound can be tested; it must return [0, 1).
+ */
+export function jitteredBackoffFor(attempts: number, random: () => number): number {
+  const base = backoffFor(attempts);
+  const r = Math.min(Math.max(random(), 0), 0.999999);
+  return base * (0.8 + 0.4 * r);
+}
+
+/**
  * How an attempt ended.
  *
  * `permanent` and `retryable` are the whole point of the distinction: an HTTP
@@ -128,7 +140,12 @@ export function sanitiseError(detail: string): string {
  * Returns a new item rather than mutating, so the caller writes exactly what it
  * is given and a failed write leaves the previous row intact.
  */
-export function applyAttempt(item: QueueItem, result: AttemptResult, now: Date): QueueItem {
+export function applyAttempt(
+  item: QueueItem,
+  result: AttemptResult,
+  now: Date,
+  random?: () => number,
+): QueueItem {
   const at = now.toISOString();
   const attempts = item.attempts + 1;
 
@@ -161,7 +178,8 @@ export function applyAttempt(item: QueueItem, result: AttemptResult, now: Date):
     };
   }
 
-  const next = new Date(now.getTime() + backoffFor(attempts) * 1000);
+  const wait = random ? jitteredBackoffFor(attempts, random) : backoffFor(attempts);
+  const next = new Date(now.getTime() + Math.round(wait * 1000));
   return {
     ...item,
     status: 'retryable',

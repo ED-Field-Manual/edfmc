@@ -222,9 +222,23 @@ describe('the universal promise', () => {
   it('covers the things no integration ever receives', () => {
     const universal = universalNeverShares(integrationsList()).join(' | ');
     expect(universal).toMatch(/Chat, friends/);
-    expect(universal).toMatch(/credits/);
-    expect(universal).toMatch(/reputation/);
+    expect(universal).toMatch(/standing on a planet/);
     expect(universal).toMatch(/switched off/);
+  });
+
+  it('no longer claims credits, loadouts or reputation are universal, because Inara sends them', () => {
+    /*
+     * Inara's profile sync exists to put exactly these on the commander's own
+     * Inara profile, at their request. The promise still holds, and is still
+     * asserted, for the services that keep it.
+     */
+    const universal = universalNeverShares(integrationsList()).join(' | ');
+    expect(universal).not.toMatch(/credits|reputation/i);
+    for (const id of ['eddn', 'edfm-journal'] as const) {
+      const never = INTEGRATIONS[id].privacy.neverShares.join(' ');
+      expect(never, id).toMatch(/credits, ship loadout/);
+      expect(never, id).toMatch(/reputation with any faction/);
+    }
   });
 
   it('no longer claims the Activity Journal is universal, because it is not', () => {
@@ -248,9 +262,9 @@ describe('the universal promise', () => {
     // list. This is what previously made the documented claim unfounded.
     const weakened = integrationsList().map((d, i) =>
       i === 2
-        ? { ...d, privacy: { ...d.privacy, neverShares: ['Chat, friends, wings or squadrons'] } }
+        ? { ...d, privacy: { ...d.privacy, neverShares: [UNIVERSAL_NEVER_SHARES[0]!] } }
         : d,
     );
-    expect(universalNeverShares(weakened)).toEqual(['Chat, friends, wings or squadrons']);
+    expect(universalNeverShares(weakened)).toEqual([UNIVERSAL_NEVER_SHARES[0]]);
   });
 });

@@ -24,11 +24,21 @@ import type { IntegrationDescriptor, IntegrationId } from './types.js';
  * restated alongside them.
  */
 export const UNIVERSAL_NEVER_SHARES: readonly string[] = [
-  'Chat, friends, wings or squadrons',
-  'Your credits, ship loadout, fines or bounties',
-  'Your reputation with any faction',
+  'Chat, friends, wings or squadron membership',
   'Where you are standing on a planet',
   'Anything at all while this integration is switched off',
+];
+
+/**
+ * Account details that EDDN and the EDFM journal never carry.
+ *
+ * These were in the universal list until Inara's profile sync, which exists to
+ * put exactly these on the commander's own Inara profile, at their request.
+ * Keeping them "universal" would be a promise one integration breaks.
+ */
+export const ACCOUNT_NEVER_SHARES: readonly string[] = [
+  'Your credits, ship loadout, fines or bounties',
+  'Your reputation with any faction',
 ];
 
 /**
@@ -68,6 +78,7 @@ export const INTEGRATIONS: Readonly<Record<IntegrationId, IntegrationDescriptor>
       ],
       neverShares: [
         ...COMMUNITY_NEVER_SHARES,
+        ...ACCOUNT_NEVER_SHARES,
         'Your latitude and longitude, which are stripped before anything is sent',
       ],
     },
@@ -97,6 +108,7 @@ export const INTEGRATIONS: Readonly<Record<IntegrationId, IntegrationDescriptor>
       ],
       neverShares: [
         ...UNIVERSAL_NEVER_SHARES,
+        ...ACCOUNT_NEVER_SHARES,
         'Raw Frontier journal events or files — only entries this app derived',
         'Your EDFM password, which is never asked for and is not a sync credential',
         'Screenshot images, or the paths they are stored at',
@@ -134,21 +146,29 @@ export const INTEGRATIONS: Readonly<Record<IntegrationId, IntegrationDescriptor>
     implemented: true,
     privacy: {
       summary:
-        'A commander profile and community site. It keeps your profile location current; it has no event for exobiology, so none is sent.',
+        'A commander profile and community site. It keeps your Inara profile in step with the game: ranks, ships, loadouts, materials and your flight log. You choose which of these below.',
       requiresCredential: true,
       credentialHelp:
-        'inara.cz → your commander → API settings. A personal API key, which is not your Inara password, and no application registration is needed.',
+        'inara.cz → your commander → Settings → API key. This is your personal key, not your Inara password. Inara must also approve this app before anything can be sent.',
       shares: [
-        'The star system you are in, and its coordinates',
-        'The station you are docked at, when you are docked',
-        'The body you are near, by name only',
-        'Your Inara commander name',
+        'Your flight log: jumps, dockings, landings (body name only) and carrier jumps you were aboard',
+        'Your current system and station',
+        'Pilot, navy, engineer and Powerplay ranks',
+        'Reputation with the superpowers and with minor factions you meet',
+        'Your ships: type, name, ident, values, rebuy, jump range and full loadouts, and where stored ships are docked',
+        'Your on-foot suit loadouts',
+        'Your materials, ship cargo and ship locker',
+        'Your in-game statistics, as the game reports them',
+        'Your credits and loan, only if you switch that on',
+        'Your commander name and Frontier ID, which Inara uses to find your profile',
       ],
       neverShares: [
         ...COMMUNITY_NEVER_SHARES,
         'Your API key with anyone but Inara — it never reaches EDFM',
-        'Anything about your exobiology — Inara has no event that accepts it',
-        'Your position on a planet surface, which Inara would accept but is not sent',
+        'Individual exobiology scans or samples — Inara has no event that accepts them',
+        'Your latitude and longitude on a planet, which Inara would accept but is not sent',
+        'Anything from the Legacy game or a beta',
+        'Anything older than 30 days',
       ],
     },
   },

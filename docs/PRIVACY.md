@@ -22,7 +22,7 @@ have been the most reassuring sentence on the page and the least accurate:
 | **Verification / contribution** | Off | Reference lookups and station observations — below |
 | **EDDN** | Off | Anonymous community observations about the galaxy |
 | **EDSM** | Off | Your flight log, under your own API key |
-| **Inara** | Off | Your current location, under your own API key |
+| **Inara** | Off | Your flight log, ranks, ships and loadouts, inventory and statistics (each kind optional; credits off unless chosen), under your own API key. Nothing at all until Inara approves the app — see `docs/INARA.md` |
 | **EDFM Commander Journal** | Off | Derived Activity Journal entries, to your own EDFM account |
 | **Plugin update checks** | On, only if Python plugins are installed | Nothing about you: read-only requests to GitHub for each plugin's repository |
 

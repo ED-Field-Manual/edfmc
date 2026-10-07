@@ -26,6 +26,7 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useState } from 'react';
 
+import { InaraPanel } from './InaraPanel';
 import { JournalSync } from './JournalSync';
 import type { CompanionSnapshot } from './lib/companion.js';
 
@@ -152,6 +153,7 @@ function CredentialField({
   const [value, setValue] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [replacing, setReplacing] = useState(false);
 
   async function save() {
     setBusy(true);
@@ -162,17 +164,21 @@ function CredentialField({
     setValue('');
     setBusy(false);
     setProblem(reason);
+    if (reason === null) setReplacing(false);
   }
 
-  if (row.hasCredential) {
+  if (row.hasCredential && !replacing) {
     return (
-      <div className="field">
+      <div className="field credential-field">
         <span>API key</span>
         <p className="field-hint">
           Stored in the Windows Credential Manager. It is never shown again, and this app
           cannot read it back — only whether one exists.
         </p>
         <p className="audit-actions">
+          <button type="button" className="secondary" onClick={() => setReplacing(true)}>
+            Replace key
+          </button>
           <button
             type="button"
             className="secondary"
@@ -186,7 +192,7 @@ function CredentialField({
   }
 
   return (
-    <div className="field">
+    <div className="field credential-field">
       <span>API key</span>
       <input
         value={value}
@@ -205,6 +211,11 @@ function CredentialField({
         <button type="button" className="primary" onClick={() => void save()} disabled={busy}>
           {busy ? 'Saving…' : 'Save key'}
         </button>
+        {replacing && (
+          <button type="button" className="secondary" onClick={() => setReplacing(false)}>
+            Keep the current key
+          </button>
+        )}
         <button
           type="button"
           className="secondary"
@@ -231,7 +242,9 @@ function IntegrationCard({ row, snap }: { row: SharingRow; snap: CompanionSnapsh
         <h2>{service.name}</h2>
         {/* Text, not a coloured dot. */}
         <span className={`integration-status status-${row.status}`}>
-          {STATUS_LABEL[row.status] ?? row.status}
+          {/* Inara has states the shared audit cannot express, such as a key
+              Inara has confirmed or an app it has not approved yet. */}
+          {row.id === 'inara' ? snap.inara.label : (STATUS_LABEL[row.status] ?? row.status)}
         </span>
       </div>
 
@@ -252,7 +265,7 @@ function IntegrationCard({ row, snap }: { row: SharingRow; snap: CompanionSnapsh
           <span>
             Enable {service.name}
             {service.privacy.requiresCredential && !row.hasCredential && (
-              <span className="muted-inline"> ''' + DASH + ''' add an API key below first</span>
+              <span className="muted-inline"> {'—'} add an API key below first</span>
             )}
           </span>
         </label>
@@ -265,6 +278,8 @@ function IntegrationCard({ row, snap }: { row: SharingRow; snap: CompanionSnapsh
         */
         <p className="note">{service.pendingReason}</p>
       )}
+
+      {row.id === 'inara' && service.implemented && <InaraPanel snap={snap} />}
 
       {/*
         The audit proper. Shown for every service, including unbuilt ones, where

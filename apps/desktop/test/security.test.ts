@@ -123,3 +123,42 @@ describe('capabilities', () => {
     }
   });
 });
+
+describe('Inara credentials and identity', () => {
+  const SRC = join(__dirname, '..', 'src');
+  const companion = readFileSync(join(SRC, 'lib', 'companion.ts'), 'utf8');
+  const rust = readFileSync(join(TAURI, 'src', 'inara.rs'), 'utf8');
+  const shared = readFileSync(
+    join(__dirname, '..', '..', '..', 'packages', 'integrations', 'src', 'inara.ts'),
+    'utf8',
+  );
+
+  it('the app name Rust sends is the one the TypeScript side names', () => {
+    const rustName = /const APP_NAME: &str = "([^"]+)";/.exec(rust)?.[1];
+    const tsName = /export const INARA_APP_NAME = '([^']+)';/.exec(shared)?.[1];
+    expect(rustName).toBe('EDFM Companion');
+    expect(tsName).toBe(rustName);
+  });
+
+  it('the frontend never passes a key, an app name or a hardcoded development flag', () => {
+    const submissions = companion.match(/'inara_submit',\s*\{[\s\S]*?\n\s{6,8}\}/g) ?? [];
+    expect(submissions.length).toBeGreaterThanOrEqual(2);
+    for (const s of submissions) {
+      expect(s).not.toMatch(/api_?key/i);
+      expect(s).not.toMatch(/app_name/);
+      expect(s).toContain('is_being_developed: this.inaraConfig.isBeingDeveloped');
+    }
+  });
+
+  it('no key-shaped literal is embedded anywhere in the Inara code', () => {
+    // A personal Inara key is a long run of letters and digits. None belongs in source.
+    for (const src of [companion, rust, shared]) {
+      expect(src).not.toMatch(/APIkey"?\s*[:=]\s*["'][A-Za-z0-9]{12,}/);
+    }
+  });
+
+  it('Inara traffic is gated on the release setting, which defaults off', () => {
+    expect(companion).toContain('resolveInaraConfig(import.meta.env)');
+    expect(companion).toMatch(/if \(!inaraMayTransmit\(this\.inaraStateInput\(\)\)\) return;/);
+  });
+});

@@ -316,6 +316,10 @@ again. `ExternalLinkProvider` is a template with no default, so choosing one lat
 changes configuration rather than stored data. The journal is fully useful
 offline.
 
+Inara's formats have since been verified against its developer guide and are
+available as `inaraLinks` in `@edfm/integrations` (see docs/INARA.md). The
+journal still uses none by default; nothing about its behaviour changed.
+
 ---
 
 ## Identity, and why replay cannot duplicate

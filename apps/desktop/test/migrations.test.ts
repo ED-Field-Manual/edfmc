@@ -621,3 +621,95 @@ describe('journal entries EDFM will never accept', () => {
     db.close();
   });
 });
+
+describe('Inara on the shared queue', () => {
+  /*
+   * The statements below are the ones `companion.ts` runs, against the real
+   * schema. They are what make re-reads, snapshots and commander switches safe,
+   * so they are executed here rather than trusted.
+   */
+  function install(): DatabaseSync {
+    const db = new DatabaseSync(':memory:');
+    migrate(db, 17);
+    return db;
+  }
+  const insert = (db: DatabaseSync, id: string, fid: string, payload: object) =>
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO integration_queue
+           (id, integration, commander_fid, status, payload, attempts, created_at, updated_at)
+         VALUES (?, 'inara', ?, 'queued', ?, 0, '2026-10-06T00:00:00Z', '2026-10-06T00:00:00Z')`,
+      )
+      .run(id, fid, JSON.stringify(payload));
+  const ids = (db: DatabaseSync) =>
+    (db.prepare(`SELECT id FROM integration_queue WHERE integration = 'inara' ORDER BY rowid`).all() as Array<{ id: string }>).map(
+      (r) => r.id,
+    );
+
+  it('a re-read of the same journal line is ignored, even after it was sent', () => {
+    const db = install();
+    insert(db, 'inara:J.log:10#0', 'F1', { coalesceKey: null, category: 'travel' });
+    db.exec(`UPDATE integration_queue SET status = 'accepted' WHERE id = 'inara:J.log:10#0'`);
+    insert(db, 'inara:J.log:10#0', 'F1', { coalesceKey: null, category: 'travel' });
+    expect(ids(db)).toEqual(['inara:J.log:10#0']);
+    expect(
+      (db.prepare(`SELECT status FROM integration_queue`).get() as { status: string }).status,
+    ).toBe('accepted');
+  });
+
+  it('a newer snapshot replaces an older waiting one, for that commander only', () => {
+    const db = install();
+    insert(db, 'a', 'F1', { coalesceKey: 'materials', category: 'inventory' });
+    insert(db, 'b', 'F2', { coalesceKey: 'materials', category: 'inventory' });
+    db.prepare(
+      `DELETE FROM integration_queue
+        WHERE integration = 'inara' AND commander_fid = ?
+          AND status IN ('queued', 'retryable')
+          AND json_extract(payload, '$.coalesceKey') = ?`,
+    ).run('F1', 'materials');
+    insert(db, 'c', 'F1', { coalesceKey: 'materials', category: 'inventory' });
+    expect(ids(db)).toEqual(['b', 'c']);
+  });
+
+  it('switching a kind off withdraws only that kind, only for that commander', () => {
+    const db = install();
+    insert(db, 'a', 'F1', { coalesceKey: null, category: 'travel' });
+    insert(db, 'b', 'F1', { coalesceKey: 'credits', category: 'credits' });
+    insert(db, 'c', 'F2', { coalesceKey: 'credits', category: 'credits' });
+    db.prepare(
+      `DELETE FROM integration_queue
+        WHERE integration = 'inara' AND commander_fid = ?
+          AND status IN ('queued', 'retryable')
+          AND json_extract(payload, '$.category') = ?`,
+    ).run('F1', 'credits');
+    expect(ids(db)).toEqual(['a', 'c']);
+  });
+
+  it('remembers the last accepted fingerprint per commander, replacing the old one', () => {
+    const db = install();
+    const upsert = db.prepare(
+      `INSERT INTO integration_fingerprint (integration, commander_fid, key, fingerprint, updated_at)
+       VALUES ('inara', ?, ?, ?, '2026-10-06T00:00:00Z')
+       ON CONFLICT (integration, commander_fid, key)
+       DO UPDATE SET fingerprint = excluded.fingerprint, updated_at = excluded.updated_at`,
+    );
+    upsert.run('F1', 'rank-pilot', 'aaa');
+    upsert.run('F1', 'rank-pilot', 'bbb');
+    upsert.run('F2', 'rank-pilot', 'ccc');
+    const rows = db
+      .prepare(`SELECT commander_fid, fingerprint FROM integration_fingerprint ORDER BY commander_fid`)
+      .all() as Array<{ commander_fid: string; fingerprint: string }>;
+    expect(rows.map((r) => [r.commander_fid, r.fingerprint])).toEqual([
+      ['F1', 'bbb'],
+      ['F2', 'ccc'],
+    ]);
+  });
+
+  it('upgrades an existing install without touching its queue', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db, 16);
+    insert(db, 'kept', 'F1', { coalesceKey: null, category: 'travel' });
+    migrate(db, 17);
+    expect(ids(db)).toEqual(['kept']);
+  });
+});

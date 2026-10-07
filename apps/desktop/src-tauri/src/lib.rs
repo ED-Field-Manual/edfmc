@@ -777,6 +777,31 @@ fn migrations() -> Vec<Migration> {
                );
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 17,
+        description: "remember what each service last accepted, per commander",
+        sql: r#"
+            -- A snapshot (ranks, a ship's loadout, the materials list) is only
+            -- worth sending when it differs from what the service already holds.
+            -- This records the fingerprint of the last one it accepted, so an
+            -- identical snapshot at the next login is not sent again -- which
+            -- Inara asks for in so many words.
+            --
+            -- Per commander: two commanders on one machine have different
+            -- ranks, and one must never suppress the other's update.
+            --
+            -- Holds hashes of game data only. Never a key, never a response.
+            CREATE TABLE IF NOT EXISTS integration_fingerprint (
+                integration    TEXT NOT NULL,
+                commander_fid  TEXT NOT NULL,
+                key            TEXT NOT NULL,
+                fingerprint    TEXT NOT NULL,
+                updated_at     TEXT NOT NULL,
+                PRIMARY KEY (integration, commander_fid, key)
+            );
+        "#,
+        kind: MigrationKind::Up,
     }]
 }
 
