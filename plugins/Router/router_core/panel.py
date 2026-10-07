@@ -29,7 +29,9 @@ class Panel:
     def __init__(self, parent: tk.Misc, route: Route, *, current_system: Callable[[], str | None],
                  current_address: Callable[[], int | None], jump_range: Callable[[], float | None],
                  efficiency: Callable[[], int], set_efficiency: Callable[[int], None],
-                 auto_copy: Callable[[], bool], changed: Callable[[], None]) -> None:
+                 auto_copy: Callable[[], bool], changed: Callable[[], None],
+                 supercharge: Callable[[], int] = lambda: 4,
+                 set_supercharge: Callable[[int], None] = lambda v: None) -> None:
         self.route = route
         self._current_system = current_system
         self._current_address = current_address
@@ -38,6 +40,7 @@ class Panel:
         self._set_efficiency = set_efficiency
         self._auto_copy = auto_copy
         self._changed = changed
+        self._supercharge = supercharge
         self._results: queue.Queue[tuple[Route | None, str | None]] = queue.Queue()
         self.plotting = False
         #: The system the panel last filled into "From" itself. While the box
@@ -245,7 +248,8 @@ class Panel:
         self.plot_button.config(state=tk.DISABLED, text='Plotting…')
         self.say('Plotting your route… please wait. Long routes can take up to a minute.')
         spansh.plot_in_background(source, destination, jump_range, efficiency,
-                                  lambda route, error: self._results.put((route, error)))
+                                  lambda route, error: self._results.put((route, error)),
+                                  supercharge=self._supercharge())
 
     def _poll(self) -> None:
         try:

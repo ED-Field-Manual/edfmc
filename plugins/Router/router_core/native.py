@@ -31,7 +31,9 @@ class NativePage:
                  current_system: Callable[[], str | None], current_address: Callable[[], int | None],
                  jump_range: Callable[[], float | None], efficiency: Callable[[], int],
                  set_efficiency: Callable[[int], None], auto_copy: Callable[[], bool],
-                 changed: Callable[[], None]) -> None:
+                 changed: Callable[[], None],
+                 supercharge: Callable[[], int] = lambda: 4,
+                 set_supercharge: Callable[[int], None] = lambda v: None) -> None:
         self.route = route
         self._current_system = current_system
         self._current_address = current_address
@@ -40,6 +42,8 @@ class NativePage:
         self._set_efficiency = set_efficiency
         self._auto_copy = auto_copy
         self._changed = changed
+        self._supercharge = supercharge
+        self._set_supercharge = set_supercharge
         self.plotting = False
         self.status: dict[str, Any] = {'text': '', 'error': False}
         self.suggestions: dict[str, Any] | None = None
@@ -101,12 +105,25 @@ class NativePage:
                 **{k: s.get(k) for k in ('next', 'nextIsNeutron', 'destination', 'jumpsLeft',
                                          'waypoint', 'waypoints', 'finished')},
                 'progress': 1.0 if r.finished else (done / last if last > 0 else 0.0),
+                # Every waypoint, for the list of cards. A long route is a few
+                # hundred entries of short strings, which is fine as JSON.
+                'waypoints_list': [
+                    {
+                        'system': w.system,
+                        'jumps': w.jumps,
+                        'distanceLeft': w.distance_left,
+                        'neutron': w.neutron,
+                        'state': 'done' if i < r.next_index else ('next' if i == r.next_index else 'upcoming'),
+                    }
+                    for i, w in enumerate(r.waypoints)
+                ],
             }
         return {
             'kind': KIND,
             'currentSystem': self._current_system(),
             'jumpRange': self._jump_range(),
             'efficiency': self._efficiency(),
+            'supercharge': self._supercharge(),
             'plotting': self.plotting,
             'status': self.status,
             'route': route,
@@ -129,6 +146,7 @@ class NativePage:
         handler = {
             'plot': self._plot, 'suggest': self._suggest, 'copy': self._copy,
             'step': self._step, 'clear': self._clear, 'import': self._import,
+            'goto': self._goto, 'copy_system': self._copy_system,
         }.get(name)
         if handler is not None:
             handler(args)
@@ -144,17 +162,26 @@ class NativePage:
             efficiency = max(1, min(100, int(args.get('efficiency') or self._efficiency())))
         except (TypeError, ValueError):
             efficiency = self._efficiency()
+        via = [str(v).strip() for v in (args.get('via') or []) if isinstance(v, str) and v.strip()][:20]
+        try:
+            supercharge = int(args.get('supercharge') or self._supercharge())
+        except (TypeError, ValueError):
+            supercharge = 4
+        if supercharge not in spansh.SUPERCHARGE:
+            supercharge = 4
         if not source or not destination:
             self.say('Enter where to plot from and to.', error=True)
         elif jump_range <= 0:
             self.say('Enter your jump range in light years.', error=True)
         elif not self.plotting:
             self._set_efficiency(efficiency)
+            self._set_supercharge(supercharge)
             self.plotting = True
             self.suggestions = None
             self.say('Plotting your route… please wait. Long routes can take up to a minute.')
             spansh.plot_in_background(source, destination, jump_range, efficiency,
-                                      lambda route, error: self._later(lambda: self._plotted(route, error)))
+                                      lambda route, error: self._later(lambda: self._plotted(route, error)),
+                                      via=via, supercharge=supercharge)
             self._watch()
         self.push()
 
@@ -208,6 +235,28 @@ class NativePage:
         self._changed()
         if self._auto_copy():
             self._copy({'quiet': True})
+        self.push()
+
+    def _goto(self, args: dict) -> None:
+        try:
+            index = int(args.get('index'))
+        except (TypeError, ValueError):
+            return
+        self.route.goto(index)
+        self._changed()
+        if self._auto_copy():
+            self._copy({'quiet': True})
+        self.push()
+
+    def _copy_system(self, args: dict) -> None:
+        """Copy any waypoint's name, from its card."""
+        name = args.get('system')
+        root = self._root()
+        if not isinstance(name, str) or not name or root is None:
+            return
+        root.clipboard_clear()
+        root.clipboard_append(name)
+        self.say(f'Copied {name} to the clipboard.')
         self.push()
 
     def _clear(self, args: dict) -> None:

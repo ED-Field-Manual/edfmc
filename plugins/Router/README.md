@@ -15,6 +15,11 @@ Companion it also shows the next jump in the game overlay.
   with the system you are in as soon as the plugin starts, and keeps following
   you until you type a different start. Your jump range comes from your ship's
   loadout.
+- **Spansh's options:** stops on the way ("via" systems, in order), route
+  efficiency, and the neutron supercharge: normal (4×) or overcharged (6×) for
+  Caspian / SCO drives. Swap From and To in one click.
+- **Every waypoint as a card** (EDFM Companion): visited ones dimmed, the next
+  one marked, each with Copy and Set as next.
 - **Predictive text** on both system boxes: start typing and matching system
   names from Spansh appear underneath. Use the arrow keys and Enter, or click
   one.

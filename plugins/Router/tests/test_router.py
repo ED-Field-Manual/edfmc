@@ -106,6 +106,27 @@ class SpanshTest(unittest.TestCase):
         self.assertIn('range=50.00', asked[0][1])
         self.assertTrue(asked[1][1].endswith('/results/ABC'))
 
+    def test_via_systems_and_supercharge_reach_spansh(self) -> None:
+        asked = []
+        replies = [(202, {'job': 'J'}), (200, SOL_ACHENAR)]
+
+        def request(url, method):
+            asked.append(url)
+            return replies.pop(0)
+
+        spansh.plot('Sol', 'Achenar', 50, 60, request=request, sleep=lambda s: None,
+                    via=['Alioth', ' '], supercharge=6)
+        self.assertIn('via=Alioth', asked[0])
+        self.assertEqual(asked[0].count('via='), 1)  # blank via entries are dropped
+        self.assertIn('supercharge_multiplier=6', asked[0])
+
+    def test_an_unknown_supercharge_falls_back_to_normal(self) -> None:
+        asked = []
+        replies = [(202, {'job': 'J'}), (200, SOL_ACHENAR)]
+        spansh.plot('Sol', 'Achenar', 50, request=lambda u, m: (asked.append(u), replies.pop(0))[1],
+                    sleep=lambda s: None, supercharge=9)
+        self.assertIn('supercharge_multiplier=4', asked[0])
+
     def test_spansh_explains_a_bad_system(self) -> None:
         # Verbatim from Spansh for an unknown destination.
         def request(url: str, method: str):
@@ -219,6 +240,15 @@ class NativePageTest(unittest.TestCase):
         self.assertEqual(published[-1]['route']['waypoint'], 3)
         act('clear', {})
         self.assertIsNone(published[-1]['route'])
+
+    def test_every_waypoint_is_published_with_where_it_stands(self) -> None:
+        route = three_stops()
+        route.start_from('Sol', 10477373803)
+        _, act, published = self.make(route)
+        cards = published[-1]['route']['waypoints_list']
+        self.assertEqual([c['state'] for c in cards], ['done', 'next', 'upcoming'])
+        act('goto', {'index': 2})
+        self.assertEqual([c['state'] for c in published[-1]['route']['waypoints_list']], ['done', 'done', 'next'])
 
     def test_a_plot_with_missing_fields_says_why(self) -> None:
         _, act, published = self.make(Route())

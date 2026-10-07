@@ -42,7 +42,6 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
         </section>
       ) : state['kind'] === 'router-v1' ? (
         <>
-          <RouterPage state={state} act={act} />
           <section className="card router-card">
             <h2>In game</h2>
             <HotkeyField
@@ -52,6 +51,7 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
               onSet={snap.setRouteCopyHotkey}
             />
           </section>
+          <RouterPage state={state} act={act} />
         </>
       ) : (
         <section className="card">
@@ -73,7 +73,14 @@ function RouterPage({ state, act }: { state: State; act: Act }) {
 
   return (
     <>
-      {route ? <RouterFollow route={route} act={act} /> : <RouterForm state={state} act={act} />}
+      {route ? (
+        <>
+          <RouterFollow route={route} act={act} />
+          <WaypointList route={route} act={act} />
+        </>
+      ) : (
+        <RouterForm state={state} act={act} />
+      )}
       {/* While plotting, the plotting panel says it; the status line would repeat it. */}
       {statusText && state['plotting'] !== true && (
         <p className={status?.['error'] === true ? 'router-status bad' : 'router-status'}>{statusText}</p>
@@ -92,6 +99,8 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
     return r ? r.toFixed(2) : '';
   });
   const [efficiency, setEfficiency] = useState(String(num(state['efficiency']) ?? 60));
+  const [via, setVia] = useState<string[]>([]);
+  const [supercharge, setSupercharge] = useState(num(state['supercharge']) === 6 ? 6 : 4);
   /** The start the page filled in itself; while the box holds it, it follows the commander. */
   const autoSource = useRef<string | null>(current);
 
@@ -152,10 +161,52 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         <SystemInput id="router-from" field="from" value={source} onChange={setSource} suggestions={suggestions} act={act} />
       </div>
 
+      {via.map((v, i) => (
+        <div className="router-field" key={i}>
+          <div className="router-label-row">
+            <label className="field-label" htmlFor={`router-via-${i}`}>
+              Via {via.length > 1 ? i + 1 : ''}
+            </label>
+            <button type="button" className="link" onClick={() => setVia(via.filter((_, j) => j !== i))}>
+              Remove
+            </button>
+          </div>
+          <SystemInput
+            id={`router-via-${i}`}
+            field={`via-${i}`}
+            value={v}
+            onChange={(next) => setVia(via.map((x, j) => (j === i ? next : x)))}
+            suggestions={suggestions}
+            act={act}
+          />
+        </div>
+      ))}
+
       <div className="router-field">
-        <label className="field-label" htmlFor="router-to">
-          To
-        </label>
+        <div className="router-label-row">
+          <label className="field-label" htmlFor="router-to">
+            To
+          </label>
+          <span className="router-label-actions">
+            {via.length < 10 && (
+              <button type="button" className="link" onClick={() => setVia([...via, ''])}>
+                Add a stop on the way
+              </button>
+            )}
+            <button
+              type="button"
+              className="link"
+              title="Swap From and To"
+              onClick={() => {
+                setSource(destination);
+                setDestination(source);
+                autoSource.current = null;
+              }}
+            >
+              Swap ⇅
+            </button>
+          </span>
+        </div>
         <SystemInput id="router-to" field="to" value={destination} onChange={setDestination} suggestions={suggestions} act={act} />
       </div>
 
@@ -179,13 +230,41 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           />
         </div>
       </div>
+      <p className="field-hint">
+        Efficiency: higher keeps closer to a straight line; lower takes longer detours to reach neutron
+        stars.
+      </p>
+
+      <div className="router-field">
+        <span className="field-label">Neutron supercharge</span>
+        <div className="router-choice" role="radiogroup" aria-label="Neutron supercharge">
+          {[
+            { value: 4, title: 'Normal (4×)', detail: 'Any FSD' },
+            { value: 6, title: 'Overcharged (6×)', detail: 'Caspian / SCO drives' },
+          ].map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={supercharge === o.value}
+              className={supercharge === o.value ? 'active' : ''}
+              onClick={() => setSupercharge(o.value)}
+            >
+              <strong>{o.title}</strong>
+              <span>{o.detail}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="row router-actions">
         <button
           type="button"
           className="primary"
           disabled={plotting}
-          onClick={() => act('plot', { source, destination, range, efficiency })}
+          onClick={() =>
+            act('plot', { source, destination, range, efficiency, supercharge, via: via.filter((v) => v.trim()) })
+          }
         >
           {plotting ? 'Plotting…' : 'Plot route'}
         </button>
@@ -294,6 +373,80 @@ function SystemInput({
         </ul>
       )}
     </div>
+  );
+}
+
+interface WaypointCard {
+  system: string;
+  jumps: number;
+  distanceLeft: number | null;
+  neutron: boolean;
+  state: 'done' | 'next' | 'upcoming';
+}
+
+function readWaypoints(v: unknown): WaypointCard[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((w) => {
+    if (w === null || typeof w !== 'object') return [];
+    const o = w as Record<string, unknown>;
+    const system = str(o['system']);
+    if (!system) return [];
+    const state = o['state'] === 'done' || o['state'] === 'next' ? o['state'] : 'upcoming';
+    return [{ system, jumps: num(o['jumps']) ?? 0, distanceLeft: num(o['distanceLeft']), neutron: o['neutron'] === true, state }];
+  });
+}
+
+/**
+ * Every waypoint as its own card, in order. Done ones are dimmed, the next one
+ * is marked, and any of them can be copied or made the next stop.
+ */
+function WaypointList({ route, act }: { route: State; act: Act }) {
+  const cards = readWaypoints(route['waypoints_list']);
+  const [showDone, setShowDone] = useState(false);
+  const nextRef = useRef<HTMLLIElement | null>(null);
+  const doneCount = cards.filter((c) => c.state === 'done').length;
+  const shown = showDone ? cards.map((c, i) => ({ c, i })) : cards.map((c, i) => ({ c, i })).filter(({ c }) => c.state !== 'done');
+
+  if (cards.length === 0) return null;
+  return (
+    <section className="router-waypoints">
+      <div className="router-waypoints-head">
+        <h2>Waypoints</h2>
+        {doneCount > 0 && (
+          <button type="button" className="link" onClick={() => setShowDone(!showDone)}>
+            {showDone ? 'Hide visited' : `Show ${doneCount} visited`}
+          </button>
+        )}
+      </div>
+      <ol className="router-waypoint-list">
+        {shown.map(({ c, i }) => (
+          <li key={i} ref={c.state === 'next' ? nextRef : undefined} className={`router-waypoint ${c.state}`}>
+            <span className="router-waypoint-index">{c.state === 'done' ? '✓' : i + 1}</span>
+            <div className="router-waypoint-main">
+              <div className="router-waypoint-name">
+                {c.system}
+                {c.neutron && <span className="router-neutron">Neutron</span>}
+                {c.state === 'next' && <span className="router-next-tag">Next</span>}
+              </div>
+              <div className="router-waypoint-meta">
+                {i === 0 ? 'Start' : `${c.jumps} ${c.jumps === 1 ? 'jump' : 'jumps'} from the previous waypoint`}
+                {c.distanceLeft !== null && c.distanceLeft > 0 && ` · ${Math.round(c.distanceLeft).toLocaleString()} ly to go`}
+              </div>
+            </div>
+            <div className="router-waypoint-actions">
+              <button type="button" className="secondary" onClick={() => act('copy_system', { system: c.system })}>
+                Copy
+              </button>
+              {c.state !== 'next' && (
+                <button type="button" className="link" onClick={() => act('goto', { index: i })}>
+                  Set as next
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

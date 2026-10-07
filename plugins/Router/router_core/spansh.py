@@ -42,16 +42,30 @@ def _request(url: str, method: str = 'GET') -> tuple[int, Any]:
         return e.code, body
 
 
+#: Spansh's neutron-boost multipliers: 4x for a normal FSD supercharge, 6x
+#: for an overcharged one (the Caspian / SCO drives).
+SUPERCHARGE = (4, 6)
+
+
 def plot(source: str, destination: str, jump_range: float, efficiency: int = 60,
          request: Callable[[str, str], tuple[int, Any]] = _request,
-         sleep: Callable[[float], None] = time.sleep) -> Route:
-    """Plot a neutron route. Blocks; call it from a worker thread."""
-    query = urllib.parse.urlencode({
-        'efficiency': efficiency,
-        'range': f'{jump_range:.2f}',
-        'from': source,
-        'to': destination,
-    })
+         sleep: Callable[[float], None] = time.sleep,
+         via: list[str] | None = None, supercharge: int = 4) -> Route:
+    """Plot a neutron route. Blocks; call it from a worker thread.
+
+    `via` systems are visited in order on the way. Both options are Spansh's
+    own: checked live, it echoed `via: ['Alioth']` and `supercharge_multiplier:
+    '6'` back and routed Sol, Alioth, Achenar.
+    """
+    params: list[tuple[str, Any]] = [
+        ('efficiency', efficiency),
+        ('range', f'{jump_range:.2f}'),
+        ('from', source),
+        ('to', destination),
+        ('supercharge_multiplier', supercharge if supercharge in SUPERCHARGE else 4),
+    ]
+    params += [('via', v) for v in (via or []) if v.strip()]
+    query = urllib.parse.urlencode(params)
     try:
         status, body = request(f'{API}/route?{query}', 'POST')
     except (urllib.error.URLError, OSError) as e:
@@ -114,11 +128,12 @@ def suggest(prefix: str, limit: int = 8,
 
 
 def plot_in_background(source: str, destination: str, jump_range: float, efficiency: int,
-                       done: Callable[[Route | None, str | None], None]) -> None:
+                       done: Callable[[Route | None, str | None], None],
+                       via: list[str] | None = None, supercharge: int = 4) -> None:
     """Plot on a worker thread. `done(route, error)` is called on that thread."""
     def work() -> None:
         try:
-            done(plot(source, destination, jump_range, efficiency), None)
+            done(plot(source, destination, jump_range, efficiency, via=via, supercharge=supercharge), None)
         except PlotError as e:
             done(None, str(e))
         except Exception as e:  # never let a worker die silently

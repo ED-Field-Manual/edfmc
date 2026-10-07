@@ -1051,3 +1051,43 @@ label.field select:focus-visible {
 }
 @keyframes router-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .router-spinner { animation-duration: 2.4s; } }
+
+/* Router: Spansh's options. */
+.router-label-actions { display: flex; gap: 0.875rem; }
+.router-choice { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.router-choice button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem;
+  background: var(--surface-0); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.5rem 0.875rem; font: inherit; cursor: pointer; min-width: 11rem; text-align: left;
+}
+.router-choice button span { font-size: 0.75rem; color: var(--muted); }
+.router-choice button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-0)); }
+.router-choice button:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+
+/* Router: a card per waypoint. */
+.router-waypoints { max-width: 46rem; margin-bottom: 1rem; }
+.router-waypoints-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0.5rem 0 0.625rem; }
+.router-waypoints-head h2 {
+  margin: 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+}
+.router-waypoint-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.router-waypoint {
+  display: flex; align-items: center; gap: 0.875rem;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 0.625rem 0.875rem;
+}
+.router-waypoint.next { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+.router-waypoint.done { opacity: 0.55; }
+.router-waypoint-index {
+  flex: none; width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-3); color: var(--muted); font-size: 0.8125rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.router-waypoint.next .router-waypoint-index { background: var(--accent); color: #1a1005; }
+.router-waypoint-main { flex: 1; min-width: 0; }
+.router-waypoint-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; flex-wrap: wrap; }
+.router-waypoint-meta { font-size: 0.8125rem; color: var(--muted); margin-top: 0.125rem; }
+.router-waypoint-actions { display: flex; align-items: center; gap: 0.625rem; flex: none; }
+.router-waypoint-actions .secondary { padding: 0.25rem 0.75rem; }
+.router-next-tag {
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 0.375rem;
+}

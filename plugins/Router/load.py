@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.3.1'
+plugin_version = '0.4.0'
 
 try:
     from config import config  # provided by the host
@@ -152,6 +152,8 @@ def _hooks() -> dict[str, Any]:
         jump_range=_jump_range,
         efficiency=lambda: max(1, min(100, _get('efficiency', 60))),
         set_efficiency=lambda v: _set('efficiency', v),
+        supercharge=lambda: 6 if _get('supercharge', 4) == 6 else 4,
+        set_supercharge=lambda v: _set('supercharge', v),
         auto_copy=lambda: _get('autocopy', True),
         changed=_route_changed,
     )

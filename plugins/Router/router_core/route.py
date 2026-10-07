@@ -83,6 +83,11 @@ class Route:
         if self.waypoints and self._is(self.waypoints[0], system, address):
             self.next_index = 1
 
+    def goto(self, index: int) -> None:
+        """Make waypoint `index` the next one, e.g. picked from the list."""
+        if not self.empty:
+            self.next_index = max(0, min(len(self.waypoints) - 1, index))
+
     def step(self, delta: int) -> None:
         """Move the next waypoint by hand, staying within the route."""
         if self.empty:
