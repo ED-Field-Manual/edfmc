@@ -79,27 +79,6 @@ These are constraints, not aspirations:
 
 Everything below is for working on the Companion.
 
-## Building from source
-
-Requires **Node.js 20+** and **Rust stable** with the MSVC toolchain.
-
-```bash
-npm install
-```
-
-```bash
-npm run tauri dev --workspace @edfm/desktop
-```
-
-To produce installers locally:
-
-```bash
-npm run tauri build --workspace @edfm/desktop
-```
-
-Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
-when a version tag is pushed, so cutting one is `git tag v0.1.0 && git push origin v0.1.0`.
-
 ## Tests
 
 ```bash
