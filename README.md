@@ -10,26 +10,6 @@ buy what those sites need.
 **Not an EDMC plugin.** It does not require EDMarketConnector, and it never
 touches the game: no memory reading, no injection, no input automation.
 
-## Download
-
-**[→ Get the latest release](../../releases/latest)**
-
-Download the `.msi`, run it, and start Elite. That is the whole setup — the app
-finds your journal folder by itself.
-
-You need **Windows 10 or 11**. Nothing else: no Node, no Rust, no database, no
-account.
-
-Two things to expect on first run:
-
-- **Windows will warn that the publisher is unrecognised.** The installer is not
-  code-signed. Choose **More info → Run anyway**. Every release publishes
-  SHA-256 checksums and a signed build attestation, so you can check a download
-  came from this repository — but neither removes the warning, and
-  [docs/RELEASING.md](docs/RELEASING.md) is straight about the difference.
-- **Nothing is sent anywhere.** Contributing observations to EDFM is optional and
-  switched off until you turn it on in Settings.
-
 ## What it does
 
 - **Knows where you are** — system, station, ship, missions — and keeps
@@ -97,8 +77,7 @@ These are constraints, not aspirations:
 
 # Development
 
-Everything below is for working on the Companion. If you just want to use it,
-the [download](#download) above is all you need.
+Everything below is for working on the Companion.
 
 ## Building from source
 
