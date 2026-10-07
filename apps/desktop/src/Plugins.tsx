@@ -330,8 +330,10 @@ export function Plugins({ snap }: { snap: CompanionSnapshot }) {
         )}
 
         <p>
-          Plugins may be able to access files on your computer and connect to the internet. Only
-          install plugins from sources you trust.
+          Declarative plugins with a <code>plugin.json</code> are validated data and cannot run
+          code. Python plugins with a <code>load.py</code> run with your user permissions and may
+          read files, connect to the internet or start programs. Installing and reloading one runs
+          it, so install Python plugins only from sources you trust.
         </p>
 
         {py.python === null && py.plugins.length > 0 && (

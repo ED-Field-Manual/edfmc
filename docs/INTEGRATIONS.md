@@ -1,13 +1,17 @@
 # External integrations
 
-Four services, four genuinely different models, one shared rule: **the commander
-can see what leaves their machine before it leaves, and nothing leaves until they
-switch it on.**
+Four built-in services, four genuinely different models, one shared rule: **the
+commander can see what each integration sends before it sends anything, and no
+built-in integration sends until they switch it on.**
+
+Installed Python plugins are separate programs with the commander's user
+permissions. They are not controlled by these integration switches; see
+[PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
 
 Data goes from the game's journal, through the Companion, to the service.
 
-**No community integration's data passes through EDFM**, and your EDDN, EDSM and
-Inara keys are yours alone — the EDFM server never sees one.
+**No community integration's data passes through EDFM.** EDDN needs no key, and
+your EDSM and Inara credentials remain local — the EDFM server never sees them.
 
 **EDFM Commander Journal is the exception, and it is the point of it:** it sends
 derived Activity Journal entries to your own EDFM account, behind a token you
@@ -19,15 +23,16 @@ generate there. It is off until you connect it.
 
 | Service | State | Needs |
 |---|---|---|
-| **EDDN** | **Built and wired** | Nothing — it is anonymous community sharing |
-| EDSM | Designed | Your API key, and a round of live testing |
-| Inara | Sends your location | Your personal Inara API key, and Inara white-listing the app name |
+| **EDDN** | **Built and wired**; covered by schema fixtures | Nothing — it is anonymous community sharing |
+| **EDSM** | **Built and wired**; tested against live API responses | Your personal EDSM API key |
+| **Inara** | **Built and exercised**, but blocked until Inara white-lists the app name | Your personal Inara API key and Inara's approval of `EDFM Companion` |
 | **EDFM Commander Journal** | **Built** — push-only, new activity plus an optional history upload | A journal sync token from your EDFM account |
 
-Every one ships **off**. The unbuilt ones report "Not built yet" in the UI
-rather than offering a switch that does nothing — an integration that looks
-active while sending nothing is worse than one that admits it is unfinished,
-because the commander assumes their data is going somewhere it is not.
+Every one ships **off**. The Connections & Data Sharing screen shows whether a
+service is connected, queued, sending, paused or refusing requests. Inara's
+transport is complete, but its service cannot accept EDFM Companion traffic until
+the application name is approved; that external block is reported rather than
+presented as a working connection.
 
 ---
 
@@ -96,7 +101,7 @@ rather than the message, and backs off on the stored schedule.
 
 ---
 
-## EDSM — designed, needs your key
+## EDSM — built, needs your key
 
 Documented API: `POST https://www.edsm.net/api-journal-v1` with
 `commanderName`, `apiKey`, `fromSoftware`, `fromSoftwareVersion` and the journal
@@ -105,8 +110,10 @@ message.
 **What you need to do:** EDSM → Settings → *My API Key*. The key identifies your
 account; treat it as a password.
 
-Not switched on yet because it warrants testing against a real account first, and
-because of the credential boundary described below.
+The submission queue and Rust transport are wired into the application. Response
+handling was corrected against live API replies from a real account, including
+duplicate, already-stored and discarded-event outcomes. EDSM remains off until the
+commander supplies a key and enables it.
 
 ### What EDSM's answers mean
 
@@ -214,7 +221,8 @@ that fails the suite rather than an oversight.
 
 **The consequence, recorded so it is not rediscovered later: any integration
 needing a credential must perform its HTTP request in Rust.** EDDN needs none,
-which is why it is the one implemented first.
+while EDSM, Inara and EDFM Commander Journal all add their credential on the Rust
+side of the boundary.
 
 ---
 

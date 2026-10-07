@@ -7,10 +7,10 @@
 //! Python plugins share `Documents/EDFMC/plugins` with declarative plugins.
 //!
 //! **This runs code the commander installed, with their full permissions.**
-//! That is the point of the feature and the reason it is off until they switch
-//! it on past a warning (see `docs/PYTHON-PLUGINS.md`). Nothing here starts it
-//! on its own: the frontend calls `plugin_host_start` only when the setting is
-//! on.
+//! Installing the plugin is the consent action, as it is in other companion-tool
+//! hosts. The frontend starts the host during Python-plugin system initialisation;
+//! a stored per-plugin disabled state prevents an individual `load.py` from being
+//! imported (see `docs/PYTHON-PLUGINS.md`).
 //!
 //! The protocol is one JSON object per line in each direction. Lines from the
 //! host are forwarded to the frontend as `plugin-host://message` events, and the

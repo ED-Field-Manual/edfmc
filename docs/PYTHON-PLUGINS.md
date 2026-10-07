@@ -1,19 +1,24 @@
 # Python plugins
 
-Status: **working.** Runs community Python plugins
-written for the standard companion-tool plugin interface: a folder holding a
-`load.py` that defines `plugin_start3`, `journal_entry` and so on.
+Status: **working.** Runs compatible community Python plugins written for the
+standard companion-tool plugin interface: a folder holding a `load.py` that
+defines `plugin_start3`, `journal_entry` and so on.
 
 These are separate from the declarative plugins in [PLUGINS.md](PLUGINS.md).
 Those are data that the app validates and cannot run. These are programs.
+
+The host, compatibility modules and management interface are core EDFM Companion
+infrastructure. Individual Python plugins are separate projects and are not part
+of the core application.
 
 ## Why this exists
 
 Commanders already rely on Python plugins, such as route planners and
 construction trackers. A commander who uses the Companion as their only tool
 should not have to give those up. Plugin authors should not have to rewrite
-anything either: a plugin folder that works with other tools should work here
-unchanged.
+common host integration either: plugins that stay within the supported interface
+can run here unchanged. Compatibility is not universal, and plugins that depend
+on unsupported host internals may need changes.
 
 ## The trade, stated plainly
 
@@ -99,9 +104,9 @@ then crashed, an access violation inside `tk86t.dll` caught by faulthandler in
 Tk's own event loop, as soon as the panel was clicked. Tk's window handling
 assumes a Tk top-level's parent is the desktop or another Tk window. As an owned
 top-level, it is what Tk expects. Checked against a stand-in owner window: 15 of
-SpanshRouter's widgets, including Plot route, were sent mouse-activate and click
-messages and the host stayed up. The panel then followed a move of the owner and
-hid on request.
+a representative plugin's widgets were sent mouse-activate and click messages and
+the host stayed up. The panel then followed a move of the owner and hid on
+request.
 
 Why not draw the panels in the page itself: plugins build them with tkinter,
 which draws real native widgets, and a web page cannot contain those. Rewriting
@@ -119,10 +124,9 @@ nothing else. A plugin's own settings and pop-ups still open as small windows of
 their own.
 
 **Imports.** Both the plugins folder and each plugin's own folder go on
-`sys.path`. The second is needed: SpanshRouter's `load.py` imports
-`SpanshRouter.SpanshRouter`, which has to resolve to the package *inside* its
-folder. With only the plugins folder on the path, the import resolved to the
-outer folder and failed.
+`sys.path`. The second is needed because some `load.py` entrypoints import a
+package nested inside their own folder. With only the shared plugins folder on
+the path, that import can resolve to the outer folder and fail.
 
 **Plugin output** (`print`, uncaught errors) goes to
 `python-host/plugin-host.log`. stdout is reserved for the protocol, so a stray
@@ -141,13 +145,13 @@ closes.
 ## Plugin cards
 
 Each Python plugin gets its own card on the Plugins page, below the Python
-plugins switch, laid out like a declarative plugin's card. The host reports for
+plugins heading, laid out like a declarative plugin's card. The host reports for
 each folder:
 
 - **Name**, from `plugin_start3`'s return value.
 - **Version**, from `plugin_version` or `__version__` in `load.py`, or a bare
-  version string in `version.json` beside it (SpanshRouter does this). If the
-  plugin states none, the card says "Version not stated". Nothing is guessed.
+  version string in `version.json` beside it. If the plugin states none, the card
+  says "Version not stated". Nothing is guessed.
 - **Status**: running, switched off, or could not start, with the reason.
 - Whether it adds a **panel** (`plugin_app`) and has **settings** (`plugin_prefs`).
 - Its **README**, behind "How to use this", shown as plain text and capped at
@@ -185,36 +189,31 @@ every field before using it.
 Each Python plugin's card shows whether GitHub has a newer version
 (`src/lib/pluginUpdates.ts`). The check is notify-only and nothing is
 downloaded into the plugin folder, because replacing a plugin's folder would also
-replace data it keeps there. ConstructionTracker keeps its construction sites
-there.
+replace any state it keeps there.
 
 **Which repository.** Tried in order:
 
 1. A link the commander pasted on the card. Used when nothing else finds one.
 2. The `origin` in the plugin's `.git/config`, if it was installed with `git clone`.
 3. EDMC's wiki "Plugins" page, the community index, matched by link text or
-   repository name. This is how SpanshRouter resolves, to `norohind/EDMC_SpanshRouter`.
+   repository name.
 4. A GitHub link in the plugin's README, but only one whose repository name
    matches the plugin. READMEs link EDMC and other tools too, so an unrelated
-   link is never taken. ConstructionTracker's README links only EDMC, so it needs
-   a pasted link (`Greybaer/EDMC-ConstructionTracker`).
+   link is never taken.
 
 Names are compared case-insensitively, without punctuation or a leading `EDMC`,
-so `EDMC_SpanshRouter`, `SpanshRouter` and `EDMC-ConstructionTracker` /
-`Construction Tracker` match.
+so common repository-name prefixes and punctuation differences do not prevent a
+match.
 
 **Which version.** The latest GitHub release if there is one. Otherwise the
 version the plugin states on its default branch: a `version.json` (bare text or
 `{"version": ...}`), or `plugin_version`/`__version__` in `load.py`. Either file
-is found anywhere in the repository via the git tree, shallowest first. Neither of
-the commander's plugins publishes releases, and ConstructionTracker's repo keeps
-`load.py` one folder deeper than it installs.
+is found anywhere in the repository via the git tree, shallowest first.
 
-**Results.** *Update available*, *Up to date*, *newer than GitHub* (the
-commander's ConstructionTracker is 1.4.0 against GitHub's 1.3.0 because it was
-changed locally, and it is not reported as out of date), or *unknown* with the
-reason. Versions are compared numerically, part by part. A scheme that is not
-dotted numbers is reported as unknown rather than ordered by guesswork.
+**Results.** *Update available*, *Up to date*, *newer than GitHub*, or *unknown*
+with the reason. A locally modified build that reports a later version is not
+called out of date. Versions are compared numerically, part by part. A scheme that
+is not dotted numbers is reported as unknown rather than ordered by guesswork.
 
 **When.** At most once a day, once the plugin host has reported what is installed,
 plus a "Check for updates" button. Results are stored in the
@@ -223,18 +222,13 @@ allows 60 unauthenticated requests an hour, and a check costs at most four per
 plugin plus one for the index. The setting is on by default and can be turned off
 on the Plugins page. See `docs/PRIVACY.md`.
 
-Checked live on 2026-10-06: SpanshRouter resolved through the index and was up
-to date (3.1.0 from `version.json`). ConstructionTracker was unknown until its
-link was pasted, then reported as newer than GitHub (1.4.0 against 1.3.0 from
-`load.py`).
-
 ## Python
 
 **A Python runtime ships with the app**, at `resources/python/`, and is always
 preferred. Plugins assume the libraries a plugin host normally provides, most
-importantly `requests`, and a standard Python install lacks them. SpanshRouter
-failed with `ModuleNotFoundError: No module named 'requests'` until this was
-bundled.
+importantly `requests`, and a standard Python install may lack them. The bundled
+runtime keeps that dependency available without relying on the commander's Python
+installation.
 
 What is bundled:
 
@@ -271,12 +265,12 @@ which opens the Store instead of running Python.
 - **Python 2 era plugins** that define only `plugin_start`. These are refused
   with that reason, not loaded half-working.
 
-## Tested against
+## Compatibility coverage
 
-| Plugin | Result |
-|---|---|
-| ConstructionTracker 1.4.0 | Loads, reads the journal folder and carrier cargo, saves its data on stop |
-| SpanshRouter 3.1.0 | Loads with the bundled runtime |
+Compatibility testing covers plugins that use panels, settings, journal and
+status hooks, HTTP libraries, local state and orderly shutdown. That is evidence
+for the supported interface, not a promise that every companion-tool plugin will
+run unchanged.
 
 Tests: `npm run test:plugin-host --workspace @edfm/desktop`, which runs
 `plugin-host/tests/test_host.py` with real journal lines.

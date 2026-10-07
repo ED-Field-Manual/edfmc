@@ -4,6 +4,10 @@ Status: **built.** Plugins contribute context rules and research projects, load
 at startup, can be switched on and off individually, and can be reloaded
 without restarting. They have their own screen in the app.
 
+This repository contains the loader, schema and management interface. Individual
+declarative plugins are distributed separately and are not core EDFM Companion
+features.
+
 ## Installing one
 
 A plugin is a folder containing a `plugin.json`. Installing it means putting
@@ -53,9 +57,12 @@ nothing is downloaded or executed.
 
 ## Why it is safe to install a stranger's plugin
 
-Everything on this page is about **declarative plugins**. Python plugins are a
-separate, opt-in feature that does run code, with its own folder and warning;
-see [PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
+Everything on this page is about **declarative plugins**. The shared plugins
+folder may also contain Python plugins, but the loaders distinguish them by
+entrypoint: `plugin.json` is validated data, while `load.py` is trusted code run
+in the separate Python host. Installing a Python plugin is the consent action,
+and each Python plugin can be disabled individually. See
+[PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
 
 **A plugin is data, not code.** There is no way to ship JavaScript through this
 system and no code path that would run it if you did. A plugin contributes

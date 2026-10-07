@@ -7,11 +7,13 @@ commitment we hold ourselves to.
 
 ## Current state
 
-**Nothing leaves the machine unless you switch something on.** Everything that
-sends is off by default, and there is no telemetry and no analytics in any
-configuration.
+**No background contribution or community-service sharing from EDFM Companion's
+own features starts unless you switch it on.** Those controls are off by default,
+and the application has no telemetry and no analytics. Commander-initiated market
+searches and the separately controlled Python-plugin update check are described
+below.
 
-There are now four such switches, and this section used to name only the first.
+There are six network controls, and this section used to name only the first.
 Verification was once the only thing that sent anything, so "with verification
 off the application makes no network requests at all" was true when it was
 written and stopped being true as each integration was built. Keeping it would
@@ -26,8 +28,14 @@ have been the most reassuring sentence on the page and the least accurate:
 | **EDFM Commander Journal** | Off | Derived Activity Journal entries, to your own EDFM account |
 | **Plugin update checks** | On, only if Python plugins are installed | Nothing about you: read-only requests to GitHub for each plugin's repository |
 
-With **all of them off**, the app makes no network request on its own. The one
-exception is an action you take yourself: see *Contribution being off* below.
+These controls govern the core application, not installed Python plugins. A Python
+plugin runs as a separate program with the commander's user permissions and may
+read files or make its own network requests. Install one only from a source you
+trust; see [PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
+
+With **all six controls off**, EDFM Companion's own code makes no background
+network request. An explicit action can still request data; see
+*Commander-initiated traffic* below.
 
 **Plugin update checks are the one switch that ships on**, at the user's request,
 and only do anything once a Python plugin is installed. At most once a day the app
@@ -35,8 +43,9 @@ reads EDMC's public plugin list and, for each plugin, its GitHub repository's
 latest release or stated version. The requests go to `api.github.com/repos/*` and
 `raw.githubusercontent.com/*` (both named in the HTTP allowlist) and carry
 nothing about you or your game. GitHub sees your IP address, as with any web
-request. Turn it off on the Plugins page and no request is made. `docs/INTEGRATIONS.md` and `docs/JOURNAL-SYNC.md` are the full
-account of the last four.
+request. Turn it off on the Plugins page and no request is made. The service
+payloads and journal-sync boundary are documented in
+`docs/INTEGRATIONS.md` and `docs/JOURNAL-SYNC.md`.
 
 With verification **on**, exactly two things happen, both only for stations you dock
 at or fly past:
@@ -63,8 +72,8 @@ build, and the Companion version.
 
 ### Commander-initiated traffic
 
-Contribution being off means the app initiates nothing on its own. It does not
-mean the app never makes a request.
+Contribution being off means the contribution feature initiates nothing on its
+own. It does not mean the application never makes a request.
 
 Building a sourcing plan queries `/v1/market/search`. That is not contribution
 and is deliberately not gated behind the contribution setting: it is the feature
@@ -145,7 +154,9 @@ can contain arbitrary commander detail, and we have no reason to keep it.
 
 ## What is never done
 
-- The journal is never copied, uploaded, or transmitted in whole or in part.
+- The raw journal files are never copied or uploaded wholesale. Optional
+  integrations transmit only the documented events or derived records after the
+  commander enables them; see [INTEGRATIONS.md](INTEGRATIONS.md).
 - Chat (`ReceiveText`, `SendText`), friends, squadron membership and private-group
   names are read only insofar as they pass through the pipeline; none is persisted
   and none is logged.
