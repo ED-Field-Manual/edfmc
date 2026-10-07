@@ -182,3 +182,26 @@ describe('a route a plugin publishes', () => {
     expect(readPluginRoute({ next: 42, jumpsLeft: -3 })).toMatchObject({ next: null, jumpsLeft: 0 });
   });
 });
+
+describe('the route hotkey', () => {
+  it('asks the plugin that owns the route to copy its next waypoint', async () => {
+    const { PythonPlugins } = await import('../src/lib/pythonPlugins');
+    const plugins = new PythonPlugins({ getSetting: async () => null, setSetting: async () => {}, changed: () => {} });
+    const sent: Array<[string, string]> = [];
+    plugins.action = async (folder: string, action: string) => {
+      sent.push([folder, action]);
+    };
+    // No route yet: nothing to copy, nothing asked.
+    (plugins as unknown as { pages: Record<string, unknown> }).pages = {
+      Router: { kind: 'router-v1', route: null },
+    };
+    await plugins.copyRouteWaypoint();
+    expect(sent).toEqual([]);
+    (plugins as unknown as { pages: Record<string, unknown> }).pages = {
+      Other: { kind: 'something-else' },
+      Router: { kind: 'router-v1', route: { next: 'Achenar' } },
+    };
+    await plugins.copyRouteWaypoint();
+    expect(sent).toEqual([['Router', 'copy']]);
+  });
+});

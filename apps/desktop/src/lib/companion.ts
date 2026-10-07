@@ -451,6 +451,9 @@ export interface CompanionSnapshot {
   readonly saveScreenshot: (draft: ScreenshotSaveRequest) => Promise<void>;
   readonly discardScreenshotDraft: () => void;
   readonly setScreenshotHotkey: (binding: string | null) => Promise<string | null>;
+  /** Hotkey that copies the next route waypoint (Router), or null when unset. */
+  readonly routeCopyHotkey: string | null;
+  readonly setRouteCopyHotkey: (binding: string | null) => Promise<string | null>;
   readonly setScreenshotFolder: (path: string) => Promise<boolean>;
   readonly updateScreenshot: (id: string, patch: Partial<ScreenshotRecord>) => Promise<void>;
   readonly removeScreenshotFromCatalog: (id: string) => Promise<void>;
@@ -2251,6 +2254,12 @@ export class Companion {
   private captureRepliesBound = false;
   private screenshotList: ScreenshotRecord[] = [];
   private screenshotError: string | null = null;
+  /**
+   * Copies the next waypoint of the route a plugin is following, from inside
+   * the game. Like the capture hotkey, unset until the commander picks one.
+   */
+  private routeCopyHotkey: string | null = null;
+  private routeHotkeyError: string | null = null;
   /** Rebuilt on every catalog read; never persisted, because it is not a fact
       about the screenshot but about the disk at this moment. */
   private missingScreenshots: ReadonlySet<string> = new Set();
@@ -2300,6 +2309,7 @@ export class Companion {
     }
 
     this.screenshotFolderOk = await this.checkScreenshotFolder();
+    this.routeCopyHotkey = (await this.getSetting('route.copyHotkey')) || null;
     await this.registerScreenshotHotkey();
     this.notify();
   }
@@ -2345,23 +2355,69 @@ export class Companion {
    * something they rely on mid-flight.
    */
   private async registerScreenshotHotkey(): Promise<void> {
+    // Every hotkey the app owns is (re)bound here, together: `unregisterAll`
+    // would otherwise drop whichever one was not being changed.
+    let unregisterAll: () => Promise<void>;
+    let register: typeof import('@tauri-apps/plugin-global-shortcut').register;
     try {
-      const { unregisterAll, register } = await import('@tauri-apps/plugin-global-shortcut');
+      ({ unregisterAll, register } = await import('@tauri-apps/plugin-global-shortcut'));
       await unregisterAll();
-      if (!this.screenshotHotkey) return;
-      await register(this.screenshotHotkey, (event) => {
-        // The plugin fires for press and release; one capture per press.
-        if (event.state !== undefined && event.state !== 'Pressed') return;
-        void this.captureScreenshot();
-      });
     } catch (err) {
-      // A combination the OS will not give us is a normal outcome, not a crash.
-      this.screenshotError =
-        'That key combination could not be registered. Another application may already own it.';
-      logger.warn('screenshot', 'Hotkey registration failed', { error: String(err) });
+      logger.warn('screenshot', 'Global shortcuts unavailable', { error: String(err) });
+      return;
+    }
+    const bind = async (binding: string | null, run: () => void): Promise<boolean> => {
+      if (!binding) return true;
+      try {
+        await register(binding, (event) => {
+          // The plugin fires for press and release; act once per press.
+          if (event.state !== undefined && event.state !== 'Pressed') return;
+          run();
+        });
+        return true;
+      } catch (err) {
+        logger.warn('screenshot', 'Hotkey registration failed', { error: String(err) });
+        return false;
+      }
+    };
+    const taken = 'That key combination could not be registered. Another application may already own it.';
+    // A combination the OS will not give us is a normal outcome, not a crash.
+    if (!(await bind(this.screenshotHotkey, () => void this.captureScreenshot()))) {
+      this.screenshotError = taken;
+      this.notify();
+    }
+    if (!(await bind(this.routeCopyHotkey, () => void this.pythonPlugins.copyRouteWaypoint()))) {
+      this.routeHotkeyError = taken;
       this.notify();
     }
   }
+
+  /**
+   * Choose or clear the hotkey that copies the next route waypoint.
+   * Returns null on success, or a reason, exactly like the capture hotkey.
+   */
+  readonly setRouteCopyHotkey = async (binding: string | null): Promise<string | null> => {
+    if (binding !== null) {
+      const check = validateHotkey(binding);
+      if (!check.ok) return check.reason;
+      if (binding === this.screenshotHotkey) return 'That combination already captures screenshots.';
+    }
+    const previous = this.routeCopyHotkey;
+    this.routeCopyHotkey = binding;
+    this.routeHotkeyError = null;
+    await this.registerScreenshotHotkey();
+    if (this.routeHotkeyError !== null) {
+      const reason = this.routeHotkeyError;
+      this.routeCopyHotkey = previous;
+      await this.registerScreenshotHotkey();
+      this.routeHotkeyError = reason;
+      this.notify();
+      return reason;
+    }
+    await this.setSetting('route.copyHotkey', binding ?? '');
+    this.notify();
+    return null;
+  };
 
   /**
    * Choose or clear the capture hotkey.
@@ -2373,6 +2429,7 @@ export class Companion {
     if (binding !== null) {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
+      if (binding === this.routeCopyHotkey) return 'That combination already copies the next waypoint.';
     }
 
     const previous = this.screenshotHotkey;
@@ -3519,6 +3576,8 @@ export class Companion {
         saveScreenshot: this.saveScreenshot,
         discardScreenshotDraft: this.discardScreenshotDraft,
         setScreenshotHotkey: this.setScreenshotHotkey,
+        routeCopyHotkey: this.routeCopyHotkey,
+        setRouteCopyHotkey: this.setRouteCopyHotkey,
         setScreenshotFolder: this.setScreenshotFolder,
         updateScreenshot: this.updateScreenshot,
         removeScreenshotFromCatalog: this.removeScreenshotFromCatalog,

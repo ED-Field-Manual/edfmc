@@ -292,6 +292,15 @@ neutron star, then the jumps left, the waypoint count and the destination. The
 plugin has already put the system on the clipboard, so a commander can paste it
 into the galaxy map without leaving the game.
 
+**Copying from the game.** The overlay ignores the mouse, so it has no Copy
+button. Router already copies the next system on every arrival. For the rest,
+there is a **Copy the next waypoint** hotkey on the Router tab, chosen by the
+commander and unset by default, like the capture hotkey. It asks the plugin that
+owns the route to copy, so the clipboard has a single writer. All of the app's
+hotkeys are bound together, because the shortcut plugin's `unregisterAll` would
+otherwise drop whichever one was not being changed. The two hotkeys cannot share
+a combination.
+
 It is on by default because it only appears while a plugin has a route. A
 commander without one never sees it. The app checks every published field on
 arrival, because the data comes from a plugin: strings are capped, and counts

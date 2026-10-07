@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
+import { HotkeyField } from './HotkeyField';
 import { companion, type CompanionSnapshot } from './lib/companion';
 import type { PythonPluginStatus } from './lib/pythonPlugins';
 
@@ -40,7 +41,18 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
           <p className="muted">Waiting for the plugin…</p>
         </section>
       ) : state['kind'] === 'router-v1' ? (
-        <RouterPage state={state} act={act} />
+        <>
+          <RouterPage state={state} act={act} />
+          <section className="card router-card">
+            <h2>In game</h2>
+            <HotkeyField
+              label="Copy the next waypoint"
+              hint="Works while you are in the game. The next system goes to the clipboard, ready to paste into the galaxy map. Needs a modifier and one key."
+              binding={snap.routeCopyHotkey}
+              onSet={snap.setRouteCopyHotkey}
+            />
+          </section>
+        </>
       ) : (
         <section className="card">
           <p className="muted">This plugin's page needs a newer version of EDFM Companion.</p>

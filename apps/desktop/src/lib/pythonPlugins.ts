@@ -236,6 +236,19 @@ export class PythonPlugins {
     }
   }
 
+  /**
+   * Copy the next waypoint of the route being followed (the route hotkey).
+   * Asked of the plugin that owns the route, which already copies on arrival,
+   * so the clipboard has one writer.
+   */
+  async copyRouteWaypoint(): Promise<void> {
+    const folder = Object.keys(this.pages).find((f) => {
+      const page = this.pages[f]!;
+      return page['kind'] === 'router-v1' && page['route'] !== null;
+    });
+    if (folder !== undefined) await this.action(folder, 'copy');
+  }
+
   /** Send the commander's input on a native page to its plugin. */
   async action(folder: string, action: string, args: Record<string, unknown> = {}): Promise<void> {
     try {
