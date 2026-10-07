@@ -75,83 +75,9 @@ These are constraints, not aspirations:
 
 ---
 
-# Development
+## Development
 
-Everything below is for working on the Companion.
-
-## Tests
-
-```bash
-npm test --workspaces --if-present
-```
-
-Tests needing PostgreSQL skip unless `EDFM_TEST_DSN` is set, and refuse to run
-against a database not named for testing — they `TRUNCATE`, and pointing them at
-the development database while the EDDN worker was ingesting into it wiped a
-table mid-run.
-
-```bash
-createdb edfm_test
-```
-
-## Validating against a game update
-
-Elite changes. After any update, re-measure rather than assuming:
-
-```bash
-pwsh scripts/profile-journal.ps1 -Events Docked,MissionAccepted
-```
-
-Any field that drops below 100% presence must become optional in the parser. The
-corpus tests replay your real journals and fail if parsing regresses; they skip
-automatically on machines without a journal folder. This is not theoretical — it
-is how `ApproachSettlement` was found to fire for Guardian ruins, which had been
-quietly polluting the research corpus.
-
-## Repository layout
-
-```
-apps/desktop         Tauri 2 + React/TypeScript client
-packages/
-  elite-journal      Journal engine: tailer, parser, normalizer, state, replay
-  context            Deterministic context rules
-  missions           Mission tracking and delivery progress
-  verification       Evidence model, spoiler gating, comparison engine
-  research           Research framework and the settlement-materials project
-  logistics          Market confidence, sourcing plans, construction projects
-  plugins            Plugin manifest schema and validation
-services/
-  api                Backend API: reference data, submissions, notification
-  eddn-worker        EDDN ingestion, Python
-docs/                Architecture and subsystem documentation
-scripts/             Journal profiling tooling
-```
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Stack decisions and why, component boundaries, risks |
-| [JOURNAL.md](docs/JOURNAL.md) | Measured journal behaviour, field presence rates, edge cases |
-| [PRIVACY.md](docs/PRIVACY.md) | What is stored, what is sent, what never leaves the machine |
-| [SPOILERS.md](docs/SPOILERS.md) | Discovery gating and how spoiler safety is enforced |
-| [VERIFICATION.md](docs/VERIFICATION.md) | Verification engine, evidence model, discrepancy lifecycle |
-| [API.md](docs/API.md) | Backend endpoints, identity hashing, notification rules |
-| [DISCORD.md](docs/DISCORD.md) | Forum reporting, duplicate policy, tag configuration |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | How the API and EDDN worker are hosted and updated |
-| [RELEASING.md](docs/RELEASING.md) | Release process, the code-signing gap, checksums and provenance |
-| [ACTIVITY-JOURNAL.md](docs/ACTIVITY-JOURNAL.md) | The commander field journal: what is recorded, and what the journal cannot prove |
-| [RESEARCH.md](docs/RESEARCH.md) | Research framework, session model, data-quality rules |
-| [LOGISTICS.md](docs/LOGISTICS.md) | Confidence engine, sourcing planner, construction projects |
-| [INTEGRATIONS.md](docs/INTEGRATIONS.md) | EDDN, EDSM, Inara: what each sends, and where credentials live |
-| [INARA.md](docs/INARA.md) | Inara: the journal-to-Inara matrix, batching, dedup, and the app white-list |
-| [JOURNAL-SYNC.md](docs/JOURNAL-SYNC.md) | EDFM Commander Journal: tokens, what is uploaded, the history rebuild and what it cannot recover |
-| [PLUGINS.md](docs/PLUGINS.md) | Installing and writing plugins, and why they are safe |
-| [EXTENSIONS.md](docs/EXTENSIONS.md) | Extension architecture: tiers, threat model, API boundaries, roadmap |
-| [EDDN.md](docs/EDDN.md) | EDDN ingestion, schemas, normalization decisions |
-| [OVERLAY.md](docs/OVERLAY.md) | Overlay design and the no-injection boundary |
-| [CONTEXT.md](docs/CONTEXT.md) | Context rules and how they are evaluated |
-| [MISSIONS.md](docs/MISSIONS.md) | Mission tracking and delivery progress |
+EDFM Companion is under active development.
 
 ## Licence
 
