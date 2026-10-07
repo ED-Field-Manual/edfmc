@@ -50,6 +50,14 @@ data, as compiled by the Coriolis project
 Frontier's terms. They are the same figures Spansh uses.
 `tools/build_fsd_data.py` rebuilds the file from a pinned commit.
 
+**Any of your ships.** Router reads every ship you own from your journals, not
+just the one you are in: each ship's last `Loadout` (from the last time you
+flew it), with the shipyard's stored-ships list deciding what you still own, so
+sold ships drop out. Pick a ship and both plotters use it: the exact plotter
+plans with its drive and tanks, and the neutron plotter takes its range and
+supercharge. A ship not flown since your journals began has no figures yet;
+board it once.
+
 Normal jumps are available in EDFM Companion. In EDMC, Router plots neutron
 routes.
 

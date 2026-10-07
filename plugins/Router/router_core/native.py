@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Callable
 
-from . import bridge, ship, spansh
+from . import bridge, fleet as fleet_mod, ship, spansh
 from .route import Route
 
 POLL_MS = 150
@@ -36,7 +36,8 @@ class NativePage:
                  set_supercharge: Callable[[int], None] = lambda v: None,
                  loadout: Callable[[], dict | None] = lambda: None,
                  settings: Callable[[], dict] = lambda: {},
-                 save_settings: Callable[[dict], None] = lambda v: None) -> None:
+                 save_settings: Callable[[dict], None] = lambda v: None,
+                 journal_dir: Callable[[], str | None] = lambda: None) -> None:
         self.route = route
         self._current_system = current_system
         self._current_address = current_address
@@ -50,6 +51,8 @@ class NativePage:
         self._loadout = loadout
         self._settings = settings
         self._save_settings = save_settings
+        #: Every owned ship, read from all the journals on a worker at start.
+        self.fleet: fleet_mod.Fleet | None = None
         self.plotting = False
         self.status: dict[str, Any] = {'text': '', 'error': False}
         self.suggestions: dict[str, Any] | None = None
@@ -58,6 +61,46 @@ class NativePage:
         self._outstanding = 0
         self.page = register(self.on_action)
         self.push()
+        self._load_fleet(journal_dir())
+
+    def _load_fleet(self, journal_dir: str | None) -> None:
+        if not journal_dir:
+            return
+
+        def work() -> None:
+            try:
+                built = fleet_mod.from_journals(journal_dir)
+            except Exception:
+                built = None
+            self._later(lambda: self._fleet_loaded(built))
+
+        threading.Thread(target=work, name='router-fleet', daemon=True).start()
+        self._watch()
+
+    def _fleet_loaded(self, built: 'fleet_mod.Fleet | None') -> None:
+        if built is None:
+            return
+        # Events that arrived while reading are already in a newer Loadout etc.;
+        # the journals included them, so the read result simply replaces.
+        self.fleet = built
+        self.push()
+
+    def journal_event(self, entry: dict) -> None:
+        """Keep the fleet current: a new Loadout, a shipyard visit, a purchase."""
+        if self.fleet is not None and self.fleet.fold(entry):
+            self.push()
+
+    def _selected_id(self) -> int | None:
+        sid = self._settings().get('shipId')
+        if self.fleet is not None and isinstance(sid, int) and sid in self.fleet.loadouts:
+            return sid
+        return self.fleet.current if self.fleet is not None else None
+
+    def _selected_loadout(self) -> dict | None:
+        sid = self._selected_id()
+        if self.fleet is not None and sid is not None and sid in self.fleet.loadouts:
+            return self.fleet.loadouts[sid]
+        return self._loadout()
 
     # -- the main thread ---------------------------------------------------
 
@@ -136,6 +179,8 @@ class NativePage:
             'supercharge': self._supercharge(),
             'settings': self._settings(),
             'ship': self._ship_state(),
+            'fleet': self.fleet.ships() if self.fleet is not None else None,
+            'selectedShip': self._selected_id(),
             'plotting': self.plotting,
             'status': self.status,
             'route': route,
@@ -144,7 +189,7 @@ class NativePage:
 
     def _ship_state(self) -> dict[str, Any]:
         """What the exact plotter will use: the ship, and whether its figures check out."""
-        loadout = self._loadout()
+        loadout = self._selected_loadout()
         if not loadout:
             return {'ready': False, 'reason': 'Waiting for your ship. Log in, or open the outfitting screen once.'}
         try:
@@ -180,6 +225,7 @@ class NativePage:
             'plot': self._plot, 'suggest': self._suggest, 'copy': self._copy,
             'step': self._step, 'clear': self._clear, 'import': self._import,
             'goto': self._goto, 'copy_system': self._copy_system,
+            'select_ship': self._select_ship,
         }.get(name)
         if handler is not None:
             handler(args)
@@ -204,7 +250,7 @@ class NativePage:
             supercharge = 4
         exact = None
         if args.get('type') == 'exact':
-            loadout = self._loadout()
+            loadout = self._selected_loadout()
             try:
                 figures = ship.from_loadout(loadout) if loadout else None
             except ship.ShipError:
@@ -288,6 +334,12 @@ class NativePage:
         if self._auto_copy():
             self._copy({'quiet': True})
         self.push()
+
+    def _select_ship(self, args: dict) -> None:
+        sid = args.get('id')
+        if isinstance(sid, int) and self.fleet is not None and sid in self.fleet.loadouts:
+            self._save_settings({**self._settings(), 'shipId': sid})
+            self.push()
 
     def _goto(self, args: dict) -> None:
         try:

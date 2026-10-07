@@ -155,7 +155,20 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           ? "Spansh's neutron plotter. Start typing a system name for suggestions."
           : "Spansh's exact plotter, using your ship's drive and fuel tanks from the game. Start typing a system name for suggestions."}
       </p>
-      {type === 'exact' && <ShipStatus ship={shipInfo} />}
+      <ShipPicker
+        fleet={state['fleet']}
+        selected={num(state['selectedShip'])}
+        onPick={(ship) => {
+          act('select_ship', { id: ship.id });
+          // The neutron plotter takes a range and a supercharge rather than a
+          // ship, so picking one fills both in.
+          if (ship.maxJump) setRange(ship.maxJump.toFixed(2));
+          setSupercharge(ship.supercharge === 6 ? 6 : 4);
+        }}
+      />
+      {type === 'exact' && shipInfo && shipInfo['ready'] !== true && (
+        <p className="note">{str(shipInfo['reason']) ?? 'Router cannot read this ship yet.'}</p>
+      )}
 
       {plotting && (
         <div className="router-plotting" role="status" aria-live="polite">
@@ -355,22 +368,135 @@ const ALGORITHMS: Array<{ value: ExactOptions['algorithm']; label: string }> = [
   { value: 'guided', label: 'Guided: follows a neutron-plotter route as its guide' },
 ];
 
-function ShipStatus({ ship }: { ship: State | null }) {
-  if (!ship) return null;
-  if (ship['ready'] !== true) {
-    return <p className="note">{str(ship['reason']) ?? 'Router cannot read your ship yet.'}</p>;
-  }
-  const name = str(ship['name']);
-  const model = str(ship['ship']);
-  return (
-    <div className="router-ship">
-      <span className="field-label">Your ship</span>
-      <div>
-        <strong>{name ?? model ?? 'Current ship'}</strong>
-        {name && model && <span className="muted"> · {model}</span>}
-        <span className="muted"> · {num(ship['gameRange'])?.toFixed(2) ?? '—'} ly max jump, matches the game</span>
+interface FleetShip {
+  id: number;
+  name: string | null;
+  model: string | null;
+  current: boolean;
+  maxJump: number | null;
+  asOf: string | null;
+  ready: boolean;
+  supercharge: number | null;
+  reason: string | null;
+}
+
+function readFleet(v: unknown): FleetShip[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.flatMap((x) => {
+    if (x === null || typeof x !== 'object') return [];
+    const o = x as Record<string, unknown>;
+    const id = num(o['id']);
+    if (id === null) return [];
+    return [
+      {
+        id,
+        name: str(o['name']),
+        model: str(o['model']),
+        current: o['current'] === true,
+        maxJump: num(o['maxJump']),
+        asOf: str(o['asOf']),
+        ready: o['ready'] === true,
+        supercharge: num(o['supercharge']),
+        reason: str(o['reason']),
+      },
+    ];
+  });
+}
+
+const shortDate = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null;
+
+/**
+ * Every ship you own, to plot with, whichever you are flying. Each one's
+ * figures are from the last time you flew it; one never flown since your
+ * journals began cannot be picked, and says so.
+ */
+function ShipPicker({
+  fleet,
+  selected,
+  onPick,
+}: {
+  fleet: unknown;
+  selected: number | null;
+  onPick: (ship: FleetShip) => void;
+}) {
+  const ships = readFleet(fleet);
+  const [open, setOpen] = useState(false);
+  if (ships === null) {
+    // Still reading the journals; say which ship is in use meanwhile.
+    return (
+      <div className="router-ship">
+        <span className="field-label">Ship</span>
+        <div className="muted">Reading your ships from the journal…</div>
       </div>
+    );
+  }
+  const chosen = ships.find((s) => s.id === selected) ?? ships.find((s) => s.current) ?? null;
+  const title = (s: FleetShip) => s.name ?? s.model ?? `Ship ${s.id}`;
+
+  return (
+    <div className="router-ship-picker">
+      <div className="router-label-row">
+        <span className="field-label">Plot for</span>
+        <button type="button" className="link" onClick={() => setOpen(!open)}>
+          {open ? 'Done' : `Change ship (${ships.filter((s) => s.ready).length} available)`}
+        </button>
+      </div>
+      {chosen && !open && <ShipTile ship={chosen} selected title={title(chosen)} onPick={() => setOpen(true)} />}
+      {open && (
+        <div className="router-ship-grid" role="radiogroup" aria-label="Ship to plot for">
+          {ships.map((s) => (
+            <ShipTile
+              key={s.id}
+              ship={s}
+              title={title(s)}
+              selected={chosen?.id === s.id}
+              onPick={() => {
+                if (!s.ready) return;
+                onPick(s);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ShipTile({
+  ship,
+  title,
+  selected,
+  onPick,
+}: {
+  ship: FleetShip;
+  title: string;
+  selected: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={!ship.ready}
+      title={ship.reason ?? undefined}
+      className={`router-ship-tile${selected ? ' active' : ''}`}
+      onClick={onPick}
+    >
+      <span className="router-ship-top">
+        <strong>{title}</strong>
+        {ship.current && <span className="router-next-tag">Flying</span>}
+      </span>
+      <span className="router-ship-sub">
+        {ship.name && ship.model ? `${ship.model} · ` : ''}
+        {ship.ready && ship.maxJump !== null ? `${ship.maxJump.toFixed(2)} ly max jump` : ship.reason}
+      </span>
+      {ship.ready && !ship.current && ship.asOf && (
+        <span className="router-ship-asof">As last flown, {shortDate(ship.asOf)}</span>
+      )}
+    </button>
   );
 }
 

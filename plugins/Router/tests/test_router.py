@@ -330,6 +330,48 @@ class ExactTest(unittest.TestCase):
         self.assertAlmostEqual(sent['optimal_mass'], 1894.099976, places=3)
 
 
+class FleetTest(unittest.TestCase):
+    """Every owned ship, from the journals, without being in it."""
+
+    # From a real StoredShips (2026-10-04), trimmed to two ships.
+    STORED = {'timestamp': '2026-10-04T03:50:50Z', 'event': 'StoredShips', 'ShipsHere': [
+        {'ShipID': 28, 'ShipType': 'explorer_nx', 'ShipType_Localised': 'Caspian Explorer', 'Value': 1, 'Hot': False},
+        {'ShipID': 10, 'ShipType': 'dolphin', 'Name': 'FGS SOFIE', 'Value': 1, 'Hot': False}],
+        'ShipsRemote': []}
+
+    def build(self):
+        from router_core.fleet import Fleet
+        f = Fleet()
+        caspian = fixture('loadout_caspian.json')
+        caspian['ShipID'] = 28
+        corsair = fixture('loadout_corsair.json')
+        f.fold(caspian)
+        f.fold(corsair)  # now flying the Corsair
+        f.fold(self.STORED)
+        return f
+
+    def test_lists_owned_ships_with_their_last_figures(self) -> None:
+        ships = {s['id']: s for s in self.build().ships()}
+        self.assertTrue(ships[18]['current'])
+        self.assertEqual(ships[28]['model'], 'Caspian Explorer')
+        self.assertTrue(ships[28]['ready'])
+        self.assertEqual(ships[28]['supercharge'], 6)
+        self.assertAlmostEqual(ships[28]['maxJump'], 36.029522, places=4)
+
+    def test_a_ship_never_flown_is_listed_with_why_it_cannot_plot(self) -> None:
+        dolphin = {s['id']: s for s in self.build().ships()}[10]
+        self.assertEqual(dolphin['name'], 'FGS SOFIE')
+        self.assertEqual(dolphin['model'], 'Dolphin')
+        self.assertFalse(dolphin['ready'])
+
+    def test_a_ship_no_longer_listed_or_sold_drops_out(self) -> None:
+        f = self.build()
+        f.fold({'event': 'StoredShips', 'ShipsHere': [], 'ShipsRemote': []})
+        self.assertEqual([s['id'] for s in f.ships()], [18])  # only the one being flown
+        f.fold({'event': 'ShipyardSell', 'SellShipID': 18})
+        self.assertEqual(f.ships(), [])
+
+
 class BridgeTest(unittest.TestCase):
     def test_summary_for_the_overlay(self) -> None:
         route = three_stops()

@@ -1106,3 +1106,18 @@ label.field select:focus-visible {
 .router-check input { margin-top: 0.2rem; accent-color: var(--accent); }
 .router-check small { display: block; color: var(--muted); font-size: 0.75rem; }
 .router-refuel { color: var(--accent); font-weight: 600; }
+
+/* Router: choosing which ship to plot for. */
+.router-ship-picker { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.375rem; }
+.router-ship-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.5rem; }
+.router-ship-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; text-align: left;
+  background: var(--surface-0); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.5rem 0.75rem; font: inherit; cursor: pointer;
+}
+.router-ship-tile:hover:not(:disabled):not(.active) { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.router-ship-tile.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-0)); }
+.router-ship-tile:disabled { opacity: 0.5; cursor: not-allowed; }
+.router-ship-top { display: flex; align-items: center; gap: 0.5rem; }
+.router-ship-sub { font-size: 0.8125rem; color: var(--muted); }
+.router-ship-asof { font-size: 0.6875rem; color: var(--muted); }

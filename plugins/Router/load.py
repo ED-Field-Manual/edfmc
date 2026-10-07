@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.5.0'
+plugin_version = '0.6.0'
 
 try:
     from config import config  # provided by the host
@@ -188,6 +188,7 @@ def _native_hooks() -> dict[str, Any]:
         loadout=lambda: _state['loadout'],
         settings=lambda: _settings_get(),
         save_settings=_settings_set,
+        journal_dir=lambda: getattr(monitor, 'currentdir', None) if monitor is not None else None,
     )
 
 
@@ -246,6 +247,8 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     # Jump range: the game states it on every Loadout (login, outfitting, ship swap).
     if event == 'Loadout':
         _state['loadout'] = entry
+    if isinstance(_state['panel'], NativePage):
+        _state['panel'].journal_event(entry)
     if event == 'Loadout' and isinstance(entry.get('MaxJumpRange'), (int, float)):
         _set('range', f"{entry['MaxJumpRange']:.2f}")
         panel = _state['panel']
