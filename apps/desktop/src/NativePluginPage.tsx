@@ -46,8 +46,8 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
           <section className="card router-card">
             <h2>In game</h2>
             <HotkeyField
-              label="Copy the next waypoint"
-              hint="Works while you are in the game. The next system goes to the clipboard, ready to paste into the galaxy map. Needs a modifier and one key."
+              label="Set a hotkey to copy the next waypoint without leaving the game"
+              hint="The next system on your route is copied to the clipboard, ready to paste into the galaxy map. Use a modifier with one key, for example Ctrl + Shift + C."
               binding={snap.routeCopyHotkey}
               onSet={snap.setRouteCopyHotkey}
             />

@@ -294,7 +294,7 @@ into the galaxy map without leaving the game.
 
 **Copying from the game.** The overlay ignores the mouse, so it has no Copy
 button. Router already copies the next system on every arrival. For the rest,
-there is a **Copy the next waypoint** hotkey on the Router tab, chosen by the
+there is a hotkey on the Router tab to copy the next waypoint, chosen by the
 commander and unset by default, like the capture hotkey. It asks the plugin that
 owns the route to copy, so the clipboard has a single writer. All of the app's
 hotkeys are bound together, because the shortcut plugin's `unregisterAll` would
