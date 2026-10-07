@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Callable
 
-from . import bridge, spansh
+from . import bridge, ship, spansh
 from .route import Route
 
 POLL_MS = 150
@@ -33,7 +33,10 @@ class NativePage:
                  set_efficiency: Callable[[int], None], auto_copy: Callable[[], bool],
                  changed: Callable[[], None],
                  supercharge: Callable[[], int] = lambda: 4,
-                 set_supercharge: Callable[[int], None] = lambda v: None) -> None:
+                 set_supercharge: Callable[[int], None] = lambda v: None,
+                 loadout: Callable[[], dict | None] = lambda: None,
+                 settings: Callable[[], dict] = lambda: {},
+                 save_settings: Callable[[dict], None] = lambda v: None) -> None:
         self.route = route
         self._current_system = current_system
         self._current_address = current_address
@@ -44,6 +47,9 @@ class NativePage:
         self._changed = changed
         self._supercharge = supercharge
         self._set_supercharge = set_supercharge
+        self._loadout = loadout
+        self._settings = settings
+        self._save_settings = save_settings
         self.plotting = False
         self.status: dict[str, Any] = {'text': '', 'error': False}
         self.suggestions: dict[str, Any] | None = None
@@ -107,12 +113,16 @@ class NativePage:
                 'progress': 1.0 if r.finished else (done / last if last > 0 else 0.0),
                 # Every waypoint, for the list of cards. A long route is a few
                 # hundred entries of short strings, which is fine as JSON.
+                'type': 'exact' if r.source == 'spansh-exact' else 'neutron',
                 'waypoints_list': [
                     {
                         'system': w.system,
                         'jumps': w.jumps,
                         'distanceLeft': w.distance_left,
                         'neutron': w.neutron,
+                        'distance': w.distance,
+                        'scoopable': w.scoopable,
+                        'refuel': w.refuel,
                         'state': 'done' if i < r.next_index else ('next' if i == r.next_index else 'upcoming'),
                     }
                     for i, w in enumerate(r.waypoints)
@@ -124,10 +134,33 @@ class NativePage:
             'jumpRange': self._jump_range(),
             'efficiency': self._efficiency(),
             'supercharge': self._supercharge(),
+            'settings': self._settings(),
+            'ship': self._ship_state(),
             'plotting': self.plotting,
             'status': self.status,
             'route': route,
             'suggestions': self.suggestions,
+        }
+
+    def _ship_state(self) -> dict[str, Any]:
+        """What the exact plotter will use: the ship, and whether its figures check out."""
+        loadout = self._loadout()
+        if not loadout:
+            return {'ready': False, 'reason': 'Waiting for your ship. Log in, or open the outfitting screen once.'}
+        try:
+            f = ship.from_loadout(loadout)
+        except ship.ShipError as e:
+            return {'ready': False, 'reason': str(e)}
+        return {
+            'ready': f.agrees,
+            'ship': f.ship,
+            'name': f.name,
+            'gameRange': f.game_range,
+            'calculatedRange': round(f.calculated_range, 2),
+            'superchargeMultiplier': f.supercharge_multiplier,
+            'reason': None if f.agrees else (
+                f'These figures give {f.calculated_range:.2f} ly but the game says {f.game_range:.2f} ly, '
+                'so a normal route would be planned on wrong numbers.'),
         }
 
     def push(self) -> None:
@@ -169,6 +202,25 @@ class NativePage:
             supercharge = 4
         if supercharge not in spansh.SUPERCHARGE:
             supercharge = 4
+        exact = None
+        if args.get('type') == 'exact':
+            loadout = self._loadout()
+            try:
+                figures = ship.from_loadout(loadout) if loadout else None
+            except ship.ShipError:
+                figures = None
+            if figures is None or not figures.agrees:
+                # The ship card says why; the plotter must not route on bad numbers.
+                self.say(self._ship_state().get('reason') or 'Router cannot read your ship yet.', error=True)
+                self.push()
+                return
+            options = args.get('options') if isinstance(args.get('options'), dict) else {}
+            exact = (figures, options)
+            jump_range = figures.calculated_range  # not used by the exact plotter; keeps the check below quiet
+        remembered = {'type': 'exact' if exact else 'neutron'}
+        if exact:
+            remembered['options'] = exact[1]
+        self._save_settings({**self._settings(), **remembered})
         if not source or not destination:
             self.say('Enter where to plot from and to.', error=True)
         elif jump_range <= 0:
@@ -181,7 +233,7 @@ class NativePage:
             self.say('Plotting your route… please wait. Long routes can take up to a minute.')
             spansh.plot_in_background(source, destination, jump_range, efficiency,
                                       lambda route, error: self._later(lambda: self._plotted(route, error)),
-                                      via=via, supercharge=supercharge)
+                                      via=via, supercharge=supercharge, exact=exact)
             self._watch()
         self.push()
 

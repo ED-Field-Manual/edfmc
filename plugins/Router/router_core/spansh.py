@@ -29,8 +29,12 @@ class PlotError(Exception):
     """A plot that failed, with a message fit to show the commander."""
 
 
-def _request(url: str, method: str = 'GET') -> tuple[int, Any]:
-    req = urllib.request.Request(url, method=method, headers={'User-Agent': USER_AGENT})
+def _request(url: str, method: str = 'GET', form: dict[str, Any] | None = None) -> tuple[int, Any]:
+    data = urllib.parse.urlencode(form).encode('utf-8') if form is not None else None
+    headers = {'User-Agent': USER_AGENT}
+    if data is not None:
+        headers['Content-Type'] = 'application/x-www-form-urlencoded'
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return r.status, json.loads(r.read().decode('utf-8'))
@@ -96,6 +100,69 @@ def plot(source: str, destination: str, jump_range: float, efficiency: int = 60,
         sleep(POLL_EVERY_S)
 
 
+#: The exact plotter's search strategies, as Spansh names them.
+ALGORITHMS = ('optimistic', 'pessimistic', 'fuel', 'fuel_jumps', 'guided')
+
+
+def plot_exact(source: str, destination: str, ship: Any, options: dict[str, Any] | None = None,
+               request: Callable[[str, str], tuple[int, Any]] = _request,
+               sleep: Callable[[float], None] = time.sleep) -> Route:
+    """Plot normal jumps with Spansh's exact plotter. Blocks; call from a worker.
+
+    `ship` is a `ship.Figures`. `options` are the plotter's own settings; any
+    left out take Spansh's defaults. Checked live: Sol to Achenar in the
+    commander's Corsair came back as 7 jumps with refuel stops marked.
+    """
+    o = options or {}
+    algorithm = o.get('algorithm') if o.get('algorithm') in ALGORITHMS else 'optimistic'
+    params: dict[str, Any] = {
+        'source': source,
+        'destination': destination,
+        'is_supercharged': 1 if o.get('is_supercharged') else 0,
+        'use_supercharge': 1 if o.get('use_supercharge') else 0,
+        'use_injections': 1 if o.get('use_injections') else 0,
+        'exclude_secondary': 1 if o.get('exclude_secondary') else 0,
+        'refuel_every_scoopable': 0 if o.get('refuel_every_scoopable') is False else 1,
+        'reserve_size': max(0.0, float(o.get('reserve_size') or 0)),
+        'cargo': max(0, int(o.get('cargo') or 0)),
+        'max_time': max(60, min(120, int(o.get('max_time') or 60))),
+        'algorithm': algorithm,
+        'injection_multiplier': 1,
+        **ship.params(),
+    }
+    try:
+        status, body = request(f'{API}/generic/route', 'POST', params)  # type: ignore[call-arg]
+    except (urllib.error.URLError, OSError) as e:
+        raise PlotError(f'Spansh could not be reached ({e}).') from e
+    if status not in (200, 202) or not isinstance(body, dict) or 'job' not in body:
+        message = body.get('error') if isinstance(body, dict) else None
+        raise PlotError(message or f'Spansh refused the request (HTTP {status}).')
+    # The plotter is allowed `max_time` seconds to search, then needs a moment.
+    result = _await(str(body['job']), request, sleep, timeout=params['max_time'] + 60)
+    route = Route.from_exact(result)
+    if route.empty:
+        raise PlotError('Spansh returned an empty route.')
+    return route
+
+
+def _await(job: str, request: Callable[..., tuple[int, Any]], sleep: Callable[[float], None],
+           timeout: float) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            status, body = request(f'{API}/results/{urllib.parse.quote(job)}', 'GET')
+        except (urllib.error.URLError, OSError) as e:
+            raise PlotError(f'Spansh could not be reached ({e}).') from e
+        if status == 200 and isinstance(body, dict) and isinstance(body.get('result'), dict):
+            return body['result']
+        if status != 202:
+            message = body.get('error') if isinstance(body, dict) else None
+            raise PlotError(message or f'Spansh could not plot the route (HTTP {status}).')
+        if time.monotonic() > deadline:
+            raise PlotError('Spansh is taking too long. Try again in a moment.')
+        sleep(POLL_EVERY_S)
+
+
 def suggest(prefix: str, limit: int = 8,
             request: Callable[[str, str], tuple[int, Any]] = _request) -> list[str]:
     """System names starting with `prefix`, for predictive text. Blocks.
@@ -129,11 +196,19 @@ def suggest(prefix: str, limit: int = 8,
 
 def plot_in_background(source: str, destination: str, jump_range: float, efficiency: int,
                        done: Callable[[Route | None, str | None], None],
-                       via: list[str] | None = None, supercharge: int = 4) -> None:
-    """Plot on a worker thread. `done(route, error)` is called on that thread."""
+                       via: list[str] | None = None, supercharge: int = 4,
+                       exact: tuple[Any, dict[str, Any]] | None = None) -> None:
+    """Plot on a worker thread. `done(route, error)` is called on that thread.
+
+    With `exact=(ship_figures, options)` it plots normal jumps with the exact
+    plotter instead of a neutron route.
+    """
     def work() -> None:
         try:
-            done(plot(source, destination, jump_range, efficiency, via=via, supercharge=supercharge), None)
+            if exact is not None:
+                done(plot_exact(source, destination, exact[0], exact[1]), None)
+            else:
+                done(plot(source, destination, jump_range, efficiency, via=via, supercharge=supercharge), None)
         except PlotError as e:
             done(None, str(e))
         except Exception as e:  # never let a worker die silently

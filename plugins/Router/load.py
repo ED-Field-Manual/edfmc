@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.4.0'
+plugin_version = '0.5.0'
 
 try:
     from config import config  # provided by the host
@@ -51,6 +51,8 @@ _state: dict[str, Any] = {
     'panel': None,
     'system': None,
     'address': None,
+    #: The newest Loadout: the ship being flown, for the exact plotter.
+    'loadout': None,
 }
 
 
@@ -112,15 +114,17 @@ def _where_am_i() -> None:
         _state['system'] = name
         address = state.get('SystemAddress') or getattr(monitor, 'systemaddress', None)
         _state['address'] = address if isinstance(address, int) else None
-    if _jump_range() is None:
-        path = getattr(monitor, 'logfile', None)
-        jump = _last_loadout_range(path) if isinstance(path, str) else None
-        if jump:
+    path = getattr(monitor, 'logfile', None)
+    loadout = _last_loadout(path) if isinstance(path, str) else None
+    if loadout is not None:
+        _state['loadout'] = loadout
+        jump = loadout.get('MaxJumpRange')
+        if _jump_range() is None and isinstance(jump, (int, float)) and jump > 0:
             _set('range', f'{jump:.2f}')
 
 
-def _last_loadout_range(path: str) -> float | None:
-    """MaxJumpRange from the newest Loadout in a journal file. Read only."""
+def _last_loadout(path: str) -> dict[str, Any] | None:
+    """The newest Loadout in a journal file: the ship being flown. Read only."""
     found = None
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -128,14 +132,33 @@ def _last_loadout_range(path: str) -> float | None:
                 if '"event":"Loadout"' not in line.replace(' ', ''):
                     continue
                 try:
-                    v = json.loads(line).get('MaxJumpRange')
+                    entry = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(v, (int, float)) and v > 0:
-                    found = float(v)
+                if isinstance(entry, dict):
+                    found = entry
     except OSError:
         return None
     return found
+
+
+def _last_loadout_range(path: str) -> float | None:
+    """MaxJumpRange from the newest Loadout in a journal file. Read only."""
+    loadout = _last_loadout(path)
+    v = loadout.get('MaxJumpRange') if loadout else None
+    return float(v) if isinstance(v, (int, float)) and v > 0 else None
+
+
+def _settings_get() -> dict[str, Any]:
+    """Plot settings remembered between sessions (route type, exact options)."""
+    try:
+        return json.loads(_get('settings', '{}')) or {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _settings_set(values: dict[str, Any]) -> None:
+    _set('settings', json.dumps(values))
 
 
 # --- entry points --------------------------------------------------------
@@ -159,6 +182,15 @@ def _hooks() -> dict[str, Any]:
     )
 
 
+def _native_hooks() -> dict[str, Any]:
+    return dict(
+        **_hooks(),
+        loadout=lambda: _state['loadout'],
+        settings=lambda: _settings_get(),
+        save_settings=_settings_set,
+    )
+
+
 def plugin_start3(plugin_dir: str) -> str:
     _state['dir'] = plugin_dir
     _state['route'] = Route.load(_route_path())
@@ -167,7 +199,7 @@ def plugin_start3(plugin_dir: str) -> str:
     # published here, instead of hosting a tkinter panel. Elsewhere there is no
     # `edfmc`, and plugin_app draws the panel as usual.
     if bridge.edfmc is not None and hasattr(bridge.edfmc, 'register_page'):
-        _state['panel'] = NativePage(bridge.edfmc.register_page, _state['route'], **_hooks())
+        _state['panel'] = NativePage(bridge.edfmc.register_page, _state['route'], **_native_hooks())
     return plugin_name
 
 
@@ -212,6 +244,8 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     event = entry.get('event')
 
     # Jump range: the game states it on every Loadout (login, outfitting, ship swap).
+    if event == 'Loadout':
+        _state['loadout'] = entry
     if event == 'Loadout' and isinstance(entry.get('MaxJumpRange'), (int, float)):
         _set('range', f"{entry['MaxJumpRange']:.2f}")
         panel = _state['panel']

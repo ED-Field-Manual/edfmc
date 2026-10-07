@@ -257,6 +257,79 @@ class NativePageTest(unittest.TestCase):
         self.assertFalse(published[-1]['plotting'])
 
 
+def fixture(name):
+    with open(os.path.join(ROOT, 'tests', 'fixtures', name), encoding='utf-8') as f:
+        return json.loads(f.read())
+
+
+class ShipTest(unittest.TestCase):
+    """Figures for the exact plotter, checked against the range the game states."""
+
+    def test_an_engineered_drive_matches_the_game(self) -> None:
+        from router_core import ship
+        # The commander's Corsair: an engineered SCO drive (FSDOptimalMass 1894.1).
+        f = ship.from_loadout(fixture('loadout_corsair.json'))
+        self.assertAlmostEqual(f.optimal_mass, 1894.099976, places=3)
+        self.assertEqual(f.max_fuel_per_jump, 5.2)
+        self.assertEqual((f.tank_size, f.internal_tank_size), (32.0, 0.41))
+        self.assertAlmostEqual(f.calculated_range, 27.648792, places=3)
+        self.assertTrue(f.agrees)
+        self.assertEqual(f.supercharge_multiplier, 4)
+
+    def test_the_caspian_drive_supercharges_six_times(self) -> None:
+        from router_core import ship
+        f = ship.from_loadout(fixture('loadout_caspian.json'))
+        self.assertTrue(f.agrees)
+        self.assertEqual(f.supercharge_multiplier, 6)
+
+    def test_figures_that_disagree_with_the_game_are_flagged(self) -> None:
+        from router_core import ship
+        loadout = fixture('loadout_corsair.json')
+        loadout['MaxJumpRange'] = 30.0
+        self.assertFalse(ship.from_loadout(loadout).agrees)
+
+    def test_an_unknown_drive_says_so(self) -> None:
+        from router_core import ship
+        loadout = fixture('loadout_corsair.json')
+        for m in loadout['Modules']:
+            if m['Slot'] == 'FrameShiftDrive':
+                m['Item'] = 'int_hyperdrive_newthing'
+        with self.assertRaisesRegex(ship.ShipError, 'does not know the drive'):
+            ship.from_loadout(loadout)
+
+
+class ExactTest(unittest.TestCase):
+    def test_reads_a_real_exact_plotter_result(self) -> None:
+        # Spansh's real answer for Sol to Achenar in the commander's Corsair.
+        route = Route.from_exact(fixture('spansh_exact_sol_achenar.json')['result'])
+        self.assertEqual(route.waypoints[0].system, 'Sol')
+        self.assertEqual(route.waypoints[-1].system, 'Achenar')
+        self.assertEqual(route.total_jumps(), len(route.waypoints) - 1)
+        self.assertTrue(route.waypoints[1].refuel)
+        self.assertTrue(route.waypoints[1].scoopable)
+        self.assertAlmostEqual(route.waypoints[1].distance, 26.56, places=2)
+
+    def test_sends_the_ship_and_options(self) -> None:
+        from router_core import ship
+        sent = {}
+        replies = [(202, {'job': 'J'}), (200, fixture('spansh_exact_sol_achenar.json'))]
+
+        def request(url, method, form=None):
+            if form is not None:
+                sent.update(form)
+            return replies.pop(0)
+
+        f = ship.from_loadout(fixture('loadout_corsair.json'))
+        route = spansh.plot_exact('Sol', 'Achenar', f, {'algorithm': 'fuel', 'exclude_secondary': True,
+                                                         'max_time': 999}, request=request, sleep=lambda s: None)
+        self.assertEqual(route.destination.system, 'Achenar')
+        self.assertEqual(sent['algorithm'], 'fuel')
+        self.assertEqual(sent['exclude_secondary'], 1)
+        self.assertEqual(sent['use_supercharge'], 0)  # normal jumps unless asked
+        self.assertEqual(sent['max_time'], 120)  # Spansh's limit
+        self.assertAlmostEqual(sent['optimal_mass'], 1894.099976, places=3)
+
+
 class BridgeTest(unittest.TestCase):
     def test_summary_for_the_overlay(self) -> None:
         route = three_stops()

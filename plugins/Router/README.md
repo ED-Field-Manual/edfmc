@@ -33,6 +33,26 @@ Companion it also shows the next jump in the game overlay.
 - **EDFM Companion only:** the overlay's Route widget shows the next system,
   jumps left and destination over the game.
 
+## Normal jumps (exact plotter)
+
+Choose **Normal jumps** to route without relying on neutron stars, using
+Spansh's exact plotter. Router reads your ship from the game's own `Loadout`:
+the drive's stock figures, replaced by the engineered values the game reports,
+plus your tanks and mass. Before plotting, it checks those figures reproduce
+the jump range the game states for the ship, and refuses to route if they
+don't. Every jump is listed with its distance, and planned refuel stops are
+marked. Options: routing strategy, cargo, fuel reserve, search time, refuel at
+every scoopable star, avoid secondary stars, neutron boosts, injections.
+
+Drive figures (`router_core/data/fsd.json`) are Frontier Developments' game
+data, as compiled by the Coriolis project
+([EDCD/coriolis-data](https://github.com/EDCD/coriolis-data)) and used under
+Frontier's terms. They are the same figures Spansh uses.
+`tools/build_fsd_data.py` rebuilds the file from a pinned commit.
+
+Normal jumps are available in EDFM Companion. In EDMC, Router plots neutron
+routes.
+
 ## Install
 
 1. Download this repository as a ZIP (Code → Download ZIP) and unzip it.

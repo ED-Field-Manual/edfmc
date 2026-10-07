@@ -25,6 +25,13 @@ class Waypoint:
     address: int | None = None
     distance_left: float | None = None
     neutron: bool = False
+    # Exact-plotter routes say more about each jump:
+    #: Light years of this jump. None for neutron routes, whose waypoints are legs.
+    distance: float | None = None
+    #: The star can be fuel-scooped.
+    scoopable: bool = False
+    #: The plotter plans a refuel here.
+    refuel: bool = False
 
 
 @dataclass
@@ -118,6 +125,26 @@ class Route:
                 neutron=bool(j.get('neutron_star', False)),
             ))
         return cls(waypoints=waypoints, source='spansh')
+
+    @classmethod
+    def from_exact(cls, result: dict[str, Any]) -> 'Route':
+        """From the `result` of a finished Spansh exact-plotter job: one waypoint per jump."""
+        waypoints = []
+        for i, j in enumerate(result.get('jumps') or []):
+            name = j.get('name')
+            if not isinstance(name, str) or not name:
+                continue
+            waypoints.append(Waypoint(
+                system=name,
+                jumps=0 if i == 0 else 1,
+                address=j.get('id64') if isinstance(j.get('id64'), int) else None,
+                distance_left=_float(j.get('distance_to_destination')),
+                neutron=bool(j.get('has_neutron', False)),
+                distance=_float(j.get('distance')) if i > 0 else None,
+                scoopable=bool(j.get('is_scoopable', False)),
+                refuel=bool(j.get('must_refuel', False)),
+            ))
+        return cls(waypoints=waypoints, source='spansh-exact')
 
     @classmethod
     def from_csv(cls, text: str) -> 'Route':

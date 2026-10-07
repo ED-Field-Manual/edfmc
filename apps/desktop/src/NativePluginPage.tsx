@@ -100,7 +100,16 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
   });
   const [efficiency, setEfficiency] = useState(String(num(state['efficiency']) ?? 60));
   const [via, setVia] = useState<string[]>([]);
-  const [supercharge, setSupercharge] = useState(num(state['supercharge']) === 6 ? 6 : 4);
+  const remembered = state['settings'] && typeof state['settings'] === 'object' ? (state['settings'] as State) : {};
+  const shipInfo = state['ship'] && typeof state['ship'] === 'object' ? (state['ship'] as State) : null;
+  const [supercharge, setSupercharge] = useState(() =>
+    num(shipInfo?.['superchargeMultiplier']) === 6 || num(state['supercharge']) === 6 ? 6 : 4,
+  );
+  const [type, setType] = useState<'neutron' | 'exact'>(remembered['type'] === 'exact' ? 'exact' : 'neutron');
+  const [exact, setExact] = useState<ExactOptions>(() => ({
+    ...EXACT_DEFAULTS,
+    ...((remembered['options'] && typeof remembered['options'] === 'object' ? remembered['options'] : {}) as Partial<ExactOptions>),
+  }));
   /** The start the page filled in itself; while the box holds it, it follows the commander. */
   const autoSource = useRef<string | null>(current);
 
@@ -123,7 +132,30 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
   return (
     <section className="card router-card">
       <h2>Plot a route</h2>
-      <p className="muted">Neutron-boosted routes from Spansh. Start typing a system name for suggestions.</p>
+      <div className="router-choice router-type" role="radiogroup" aria-label="Route type">
+        {[
+          { value: 'neutron' as const, title: 'Neutron route', detail: 'Fastest: boosts at neutron stars' },
+          { value: 'exact' as const, title: 'Normal jumps', detail: 'Every jump and fuel stop, for your ship' },
+        ].map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={type === o.value}
+            className={type === o.value ? 'active' : ''}
+            onClick={() => setType(o.value)}
+          >
+            <strong>{o.title}</strong>
+            <span>{o.detail}</span>
+          </button>
+        ))}
+      </div>
+      <p className="muted">
+        {type === 'neutron'
+          ? "Spansh's neutron plotter. Start typing a system name for suggestions."
+          : "Spansh's exact plotter, using your ship's drive and fuel tanks from the game. Start typing a system name for suggestions."}
+      </p>
+      {type === 'exact' && <ShipStatus ship={shipInfo} />}
 
       {plotting && (
         <div className="router-plotting" role="status" aria-live="polite">
@@ -131,8 +163,11 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           <div>
             <strong>Plotting your route… please wait</strong>
             <div className="muted">
-              Spansh is working out the neutron route to {destination || 'your destination'}. Long routes can
-              take up to a minute.
+              Spansh is working out the {type === 'exact' ? 'jumps' : 'neutron route'} to{' '}
+              {destination || 'your destination'}.{' '}
+              {type === 'exact'
+                ? `This can take up to ${Math.round(exact.max_time / 60) || 1}–${Math.round(exact.max_time / 60) + 1} minutes.`
+                : 'Long routes can take up to a minute.'}
             </div>
           </div>
         </div>
@@ -161,7 +196,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         <SystemInput id="router-from" field="from" value={source} onChange={setSource} suggestions={suggestions} act={act} />
       </div>
 
-      {via.map((v, i) => (
+      {type === 'neutron' && via.map((v, i) => (
         <div className="router-field" key={i}>
           <div className="router-label-row">
             <label className="field-label" htmlFor={`router-via-${i}`}>
@@ -188,7 +223,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
             To
           </label>
           <span className="router-label-actions">
-            {via.length < 10 && (
+            {type === 'neutron' && via.length < 10 && (
               <button type="button" className="link" onClick={() => setVia([...via, ''])}>
                 Add a stop on the way
               </button>
@@ -210,6 +245,10 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         <SystemInput id="router-to" field="to" value={destination} onChange={setDestination} suggestions={suggestions} act={act} />
       </div>
 
+      {type === 'exact' ? (
+        <ExactFields options={exact} onChange={setExact} />
+      ) : (
+      <>
       <div className="router-pair">
         <div className="router-field">
           <label className="field-label" htmlFor="router-range">
@@ -239,8 +278,8 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         <span className="field-label">Neutron supercharge</span>
         <div className="router-choice" role="radiogroup" aria-label="Neutron supercharge">
           {[
-            { value: 4, title: 'Normal (4×)', detail: 'Any FSD' },
-            { value: 6, title: 'Overcharged (6×)', detail: 'Caspian / SCO drives' },
+            { value: 4, title: 'Standard (4×)', detail: 'Every drive but the Caspian’s' },
+            { value: 6, title: 'Caspian (6×)', detail: 'Overcharge booster Mk II drive' },
           ].map((o) => (
             <button
               key={o.value}
@@ -256,14 +295,18 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           ))}
         </div>
       </div>
+      </>
+      )}
 
       <div className="row router-actions">
         <button
           type="button"
           className="primary"
-          disabled={plotting}
+          disabled={plotting || (type === 'exact' && shipInfo?.['ready'] !== true)}
           onClick={() =>
-            act('plot', { source, destination, range, efficiency, supercharge, via: via.filter((v) => v.trim()) })
+            type === 'exact'
+              ? act('plot', { type, source, destination, options: exact })
+              : act('plot', { type, source, destination, range, efficiency, supercharge, via: via.filter((v) => v.trim()) })
           }
         >
           {plotting ? 'Plotting…' : 'Plot route'}
@@ -274,6 +317,140 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
       </div>
       </fieldset>
     </section>
+  );
+}
+
+/** The exact plotter's own options, named as Spansh names them. */
+interface ExactOptions {
+  algorithm: 'optimistic' | 'pessimistic' | 'fuel' | 'fuel_jumps' | 'guided';
+  use_supercharge: boolean;
+  is_supercharged: boolean;
+  use_injections: boolean;
+  exclude_secondary: boolean;
+  refuel_every_scoopable: boolean;
+  cargo: number;
+  reserve_size: number;
+  max_time: number;
+}
+
+/** Spansh's own defaults, apart from neutron boosts: this is the normal-jump plotter. */
+const EXACT_DEFAULTS: ExactOptions = {
+  algorithm: 'optimistic',
+  use_supercharge: false,
+  is_supercharged: false,
+  use_injections: false,
+  exclude_secondary: false,
+  refuel_every_scoopable: true,
+  cargo: 0,
+  reserve_size: 0,
+  max_time: 60,
+};
+
+/** In Spansh's own terms, shortened (from its plotter's descriptions). */
+const ALGORITHMS: Array<{ value: ExactOptions['algorithm']; label: string }> = [
+  { value: 'optimistic', label: 'Optimistic: favours neutron boosts, usually the fewest jumps' },
+  { value: 'pessimistic', label: 'Pessimistic: calculates faster, routes usually a little longer' },
+  { value: 'fuel', label: 'Fuel: smallest jumps to save fuel, no scooping or boosts' },
+  { value: 'fuel_jumps', label: 'Fuel, then fewest jumps: saves fuel, then uses the whole tank' },
+  { value: 'guided', label: 'Guided: follows a neutron-plotter route as its guide' },
+];
+
+function ShipStatus({ ship }: { ship: State | null }) {
+  if (!ship) return null;
+  if (ship['ready'] !== true) {
+    return <p className="note">{str(ship['reason']) ?? 'Router cannot read your ship yet.'}</p>;
+  }
+  const name = str(ship['name']);
+  const model = str(ship['ship']);
+  return (
+    <div className="router-ship">
+      <span className="field-label">Your ship</span>
+      <div>
+        <strong>{name ?? model ?? 'Current ship'}</strong>
+        {name && model && <span className="muted"> · {model}</span>}
+        <span className="muted"> · {num(ship['gameRange'])?.toFixed(2) ?? '—'} ly max jump, matches the game</span>
+      </div>
+    </div>
+  );
+}
+
+function ExactFields({ options, onChange }: { options: ExactOptions; onChange: (o: ExactOptions) => void }) {
+  const set = <K extends keyof ExactOptions>(key: K, value: ExactOptions[K]) => onChange({ ...options, [key]: value });
+  const check = (key: keyof ExactOptions, label: string, hint: string) => (
+    <label className="router-check">
+      <input type="checkbox" checked={options[key] as boolean} onChange={(e) => set(key, e.target.checked as never)} />
+      <span>
+        {label}
+        <small>{hint}</small>
+      </span>
+    </label>
+  );
+  return (
+    <>
+      <div className="router-field">
+        <label className="field-label" htmlFor="router-algorithm">
+          Routing
+        </label>
+        <select
+          id="router-algorithm"
+          value={options.algorithm}
+          onChange={(e) => set('algorithm', e.target.value as ExactOptions['algorithm'])}
+        >
+          {ALGORITHMS.map((a) => (
+            <option key={a.value} value={a.value}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="router-pair">
+        <div className="router-field">
+          <label className="field-label" htmlFor="router-cargo">
+            Cargo carried (t)
+          </label>
+          <input
+            id="router-cargo"
+            type="text"
+            inputMode="numeric"
+            value={String(options.cargo)}
+            onChange={(e) => set('cargo', Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+        <div className="router-field">
+          <label className="field-label" htmlFor="router-reserve">
+            Fuel to keep in reserve (t)
+          </label>
+          <input
+            id="router-reserve"
+            type="text"
+            inputMode="decimal"
+            value={String(options.reserve_size)}
+            onChange={(e) => set('reserve_size', Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+        <div className="router-field">
+          <label className="field-label" htmlFor="router-time">
+            Search time (s)
+          </label>
+          <input
+            id="router-time"
+            type="text"
+            inputMode="numeric"
+            value={String(options.max_time)}
+            onChange={(e) => set('max_time', Math.min(120, Math.max(60, Number(e.target.value) || 60)))}
+          />
+        </div>
+      </div>
+
+      <div className="router-checks">
+        {check('refuel_every_scoopable', 'Refuel at every scoopable star', 'Keeps the tank topped up instead of only when needed.')}
+        {check('exclude_secondary', 'Avoid secondary stars', 'Only arrive at a system’s main star.')}
+        {check('use_supercharge', 'Use neutron boosts where they help', 'Off for strictly normal jumps.')}
+        {check('is_supercharged', 'Already supercharged', 'Your drive is boosted from a neutron star right now.')}
+        {check('use_injections', 'Use FSD injections', 'Synthesised jump boosts, when they help.')}
+      </div>
+    </>
   );
 }
 
@@ -380,6 +557,9 @@ interface WaypointCard {
   system: string;
   jumps: number;
   distanceLeft: number | null;
+  distance: number | null;
+  scoopable: boolean;
+  refuel: boolean;
   neutron: boolean;
   state: 'done' | 'next' | 'upcoming';
 }
@@ -392,7 +572,18 @@ function readWaypoints(v: unknown): WaypointCard[] {
     const system = str(o['system']);
     if (!system) return [];
     const state = o['state'] === 'done' || o['state'] === 'next' ? o['state'] : 'upcoming';
-    return [{ system, jumps: num(o['jumps']) ?? 0, distanceLeft: num(o['distanceLeft']), neutron: o['neutron'] === true, state }];
+    return [
+      {
+        system,
+        jumps: num(o['jumps']) ?? 0,
+        distanceLeft: num(o['distanceLeft']),
+        distance: num(o['distance']),
+        scoopable: o['scoopable'] === true,
+        refuel: o['refuel'] === true,
+        neutron: o['neutron'] === true,
+        state,
+      },
+    ];
   });
 }
 
@@ -429,8 +620,14 @@ function WaypointList({ route, act }: { route: State; act: Act }) {
                 {c.state === 'next' && <span className="router-next-tag">Next</span>}
               </div>
               <div className="router-waypoint-meta">
-                {i === 0 ? 'Start' : `${c.jumps} ${c.jumps === 1 ? 'jump' : 'jumps'} from the previous waypoint`}
+                {i === 0
+                  ? 'Start'
+                  : c.distance !== null
+                    ? `${c.distance.toFixed(2)} ly jump`
+                    : `${c.jumps} ${c.jumps === 1 ? 'jump' : 'jumps'} from the previous waypoint`}
                 {c.distanceLeft !== null && c.distanceLeft > 0 && ` · ${Math.round(c.distanceLeft).toLocaleString()} ly to go`}
+                {c.refuel && <span className="router-refuel"> · Refuel here</span>}
+                {!c.refuel && c.scoopable && ' · Scoopable'}
               </div>
             </div>
             <div className="router-waypoint-actions">
