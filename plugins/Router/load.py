@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.6.0'
+plugin_version = '0.7.0'
 
 try:
     from config import config  # provided by the host
@@ -192,6 +192,14 @@ def _native_hooks() -> dict[str, Any]:
     )
 
 
+def _arrived(system: str | None, address: int | None) -> None:
+    panel = _state['panel']
+    if panel is not None:
+        panel.arrived(system, address)
+    elif _state['route'].arrived(system, address):
+        _save()
+
+
 def plugin_start3(plugin_dir: str) -> str:
     _state['dir'] = plugin_dir
     _state['route'] = Route.load(_route_path())
@@ -260,12 +268,18 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     if event in ('Location', 'FSDJump', 'CarrierJump'):
         _state['system'] = entry.get('StarSystem')
         _state['address'] = entry.get('SystemAddress')
-        panel = _state['panel']
-        if panel is not None:
-            panel.arrived(_state['system'], _state['address'])
-        else:
-            if _state['route'].arrived(_state['system'], _state['address']):
-                _save()
+        # A carrier route moves with the carrier, not with the commander's own
+        # ship: only a jump made aboard the carrier counts here.
+        if not _state['route'].is_carrier or event == 'CarrierJump':
+            _arrived(_state['system'], _state['address'])
+        elif _state['panel'] is not None:
+            _state['panel'].located()
+    elif event == 'CarrierLocation' and _state['route'].is_carrier:
+        # Written at login and after the carrier jumps, even when the commander
+        # is elsewhere. Only the kind of carrier the route was plotted for counts.
+        kind = {'FleetCarrier': 'fleet', 'SquadronCarrier': 'squadron'}.get(entry.get('CarrierType'))
+        if kind is not None and kind == _settings_get().get('carrierType', 'fleet'):
+            _arrived(entry.get('StarSystem'), entry.get('SystemAddress'))
     elif _state['system'] is None and system:
         # Started mid-session: the host knows the system even before a jump.
         _state['system'] = system

@@ -1,0 +1,105 @@
+{
+ "created_at": "2026-10-07T05:08:11",
+ "job": "17AB804A-C20D-11F1-9881-FFDBED7EE314",
+ "parameters": {
+  "calculate_starting_fuel": 1,
+  "capacity": 25000,
+  "capacity_used": 1200,
+  "current_fuel": 0,
+  "destination_systems": [
+   "1109989017963",
+   "164098653"
+  ],
+  "mass": 25000,
+  "refuel_destinations": [],
+  "source_system": "10477373803",
+  "tritium_amount": 0
+ },
+ "result": {
+  "calculate_starting_fuel": true,
+  "capacity": 25000,
+  "capacity_used": 1200,
+  "destinations": [
+   "1109989017963",
+   "164098653"
+  ],
+  "fuel_loaded": 0,
+  "jumps": [
+   {
+    "distance": 0,
+    "distance_to_destination": 82.5296525782552,
+    "fuel_in_tank": 50,
+    "fuel_used": 0,
+    "has_icy_ring": false,
+    "id64": 10477373803,
+    "is_desired_destination": 1,
+    "is_system_pristine": false,
+    "must_restock": 1,
+    "name": "Sol",
+    "restock_amount": 50,
+    "tritium_in_market": 0,
+    "x": 0,
+    "y": 0,
+    "z": 0
+   },
+   {
+    "distance": 82.5296525782552,
+    "distance_to_destination": 0,
+    "fuel_in_tank": 34,
+    "fuel_used": 16,
+    "has_icy_ring": false,
+    "id64": 1109989017963,
+    "is_desired_destination": 1,
+    "is_system_pristine": false,
+    "must_restock": 0,
+    "name": "Alioth",
+    "restock_amount": 0,
+    "tritium_in_market": 0,
+    "x": -33.65625,
+    "y": 72.46875,
+    "z": -20.65625
+   },
+   {
+    "distance": 0,
+    "distance_to_destination": 221.681845942135,
+    "fuel_in_tank": 34,
+    "fuel_used": 0,
+    "has_icy_ring": false,
+    "id64": 1109989017963,
+    "is_desired_destination": 1,
+    "is_system_pristine": false,
+    "must_restock": 0,
+    "name": "Alioth",
+    "restock_amount": 0,
+    "tritium_in_market": 0,
+    "x": -33.65625,
+    "y": 72.46875,
+    "z": -20.65625
+   },
+   {
+    "distance": 221.681845942135,
+    "distance_to_destination": 0,
+    "fuel_in_tank": 0,
+    "fuel_used": 34,
+    "has_icy_ring": false,
+    "id64": 164098653,
+    "is_desired_destination": 1,
+    "is_system_pristine": false,
+    "must_restock": 0,
+    "name": "Achenar",
+    "restock_amount": 0,
+    "tritium_in_market": 0,
+    "x": 67.5,
+    "y": -119.46875,
+    "z": 24.84375
+   }
+  ],
+  "mass": 25000,
+  "refuel_destinations": [],
+  "source": "10477373803",
+  "tritium_stored": 0
+ },
+ "state": "completed",
+ "status": "ok",
+ "updated_at": "2026-10-07T05:08:13"
+}

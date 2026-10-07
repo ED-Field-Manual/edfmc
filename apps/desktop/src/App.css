@@ -1140,3 +1140,10 @@ label.field select:focus-visible {
   color: var(--text); padding: 0.5rem 0.625rem; font: inherit; width: 100%; max-width: 28rem;
 }
 .credential-field input:focus-visible { outline: 2px solid var(--accent); }
+
+/* Router: the fleet carrier planner. */
+.router-checks { display: flex; flex-direction: column; gap: 0.25rem; }
+.router-stop-tag {
+  font-size: 0.6875rem; padding: 0.0625rem 0.375rem; border-radius: 999px; margin-left: 0.375rem;
+  border: 1px solid var(--line); color: var(--muted);
+}

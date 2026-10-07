@@ -105,7 +105,15 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
   const [supercharge, setSupercharge] = useState(() =>
     num(shipInfo?.['superchargeMultiplier']) === 6 || num(state['supercharge']) === 6 ? 6 : 4,
   );
-  const [type, setType] = useState<'neutron' | 'exact'>(remembered['type'] === 'exact' ? 'exact' : 'neutron');
+  const [type, setType] = useState<RouteType>(
+    remembered['type'] === 'exact' || remembered['type'] === 'carrier' ? remembered['type'] : 'neutron',
+  );
+  const carriers = readCarriers(state['carriers']);
+  const [carrier, setCarrier] = useState<CarrierForm>(() => ({
+    ...CARRIER_DEFAULTS,
+    kind: remembered['carrierType'] === 'squadron' ? 'squadron' : 'fleet',
+  }));
+  const ownCarrier = carriers?.[carrier.kind] ?? null;
   const [exact, setExact] = useState<ExactOptions>(() => ({
     ...EXACT_DEFAULTS,
     ...((remembered['options'] && typeof remembered['options'] === 'object' ? remembered['options'] : {}) as Partial<ExactOptions>),
@@ -127,6 +135,20 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state['jumpRange']]);
 
+  useEffect(() => {
+    if (type !== 'carrier' || !ownCarrier) return;
+    setCarrier((c) => ({
+      ...c,
+      usedCapacity: c.usedCapacity === '' && ownCarrier.usedCapacity !== null ? String(ownCarrier.usedCapacity) : c.usedCapacity,
+      fuel: c.fuel === '' && ownCarrier.fuel !== null ? String(ownCarrier.fuel) : c.fuel,
+    }));
+    if (ownCarrier.system && (source === '' || source === autoSource.current)) {
+      setSource(ownCarrier.system);
+      autoSource.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, carrier.kind, ownCarrier?.system, ownCarrier?.fuel, ownCarrier?.usedCapacity]);
+
   const suggestions = state['suggestions'] && typeof state['suggestions'] === 'object' ? (state['suggestions'] as State) : null;
 
   return (
@@ -136,6 +158,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         {[
           { value: 'neutron' as const, title: 'Neutron route', detail: 'Fastest: boosts at neutron stars' },
           { value: 'exact' as const, title: 'Normal jumps', detail: 'Every jump and fuel stop, for your ship' },
+          { value: 'carrier' as const, title: 'Fleet carrier', detail: 'Carrier jumps and the tritium they burn' },
         ].map((o) => (
           <button
             key={o.value}
@@ -153,8 +176,11 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
       <p className="muted">
         {type === 'neutron'
           ? "Spansh's neutron plotter. Start typing a system name for suggestions."
-          : "Spansh's exact plotter, using your ship's drive and fuel tanks from the game. Start typing a system name for suggestions."}
+          : type === 'exact'
+            ? "Spansh's exact plotter, using your ship's drive and fuel tanks from the game. Start typing a system name for suggestions."
+            : "Spansh's fleet carrier planner: each jump of up to 500 ly, the tritium it burns, and where to restock. Start typing a system name for suggestions."}
       </p>
+      {type !== 'carrier' && (
       <ShipPicker
         fleet={state['fleet']}
         selected={num(state['selectedShip'])}
@@ -166,6 +192,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           setSupercharge(ship.supercharge === 6 ? 6 : 4);
         }}
       />
+      )}
       {type === 'exact' && shipInfo && shipInfo['ready'] !== true && (
         <p className="note">{str(shipInfo['reason']) ?? 'Router cannot read this ship yet.'}</p>
       )}
@@ -176,7 +203,8 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           <div>
             <strong>Plotting your route… please wait</strong>
             <div className="muted">
-              Spansh is working out the {type === 'exact' ? 'jumps' : 'neutron route'} to{' '}
+              Spansh is working out the{' '}
+              {type === 'exact' ? 'jumps' : type === 'carrier' ? 'carrier jumps' : 'neutron route'} to{' '}
               {destination || 'your destination'}.{' '}
               {type === 'exact'
                 ? `This can take up to ${Math.round(exact.max_time / 60) || 1}–${Math.round(exact.max_time / 60) + 1} minutes.`
@@ -193,23 +221,37 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           <label className="field-label" htmlFor="router-from">
             From
           </label>
-          {current && source !== current && (
+          {type === 'carrier' && ownCarrier?.system && source !== ownCarrier.system ? (
             <button
               type="button"
               className="link"
               onClick={() => {
-                setSource(current);
-                autoSource.current = current;
+                setSource(ownCarrier.system!);
+                autoSource.current = null;
               }}
             >
-              Use current system
+              Use where your carrier is
             </button>
+          ) : (
+            current &&
+            source !== current && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setSource(current);
+                  autoSource.current = current;
+                }}
+              >
+                Use current system
+              </button>
+            )
           )}
         </div>
         <SystemInput id="router-from" field="from" value={source} onChange={setSource} suggestions={suggestions} act={act} />
       </div>
 
-      {type === 'neutron' && via.map((v, i) => (
+      {type !== 'exact' && via.map((v, i) => (
         <div className="router-field" key={i}>
           <div className="router-label-row">
             <label className="field-label" htmlFor={`router-via-${i}`}>
@@ -236,7 +278,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
             To
           </label>
           <span className="router-label-actions">
-            {type === 'neutron' && via.length < 10 && (
+            {type !== 'exact' && via.length < 10 && (
               <button type="button" className="link" onClick={() => setVia([...via, ''])}>
                 Add a stop on the way
               </button>
@@ -258,7 +300,14 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         <SystemInput id="router-to" field="to" value={destination} onChange={setDestination} suggestions={suggestions} act={act} />
       </div>
 
-      {type === 'exact' ? (
+      {type === 'carrier' ? (
+        <CarrierFields
+          form={carrier}
+          onChange={setCarrier}
+          carriers={carriers}
+          stops={[...via.filter((v) => v.trim()), destination].filter((v) => v.trim())}
+        />
+      ) : type === 'exact' ? (
         <ExactFields options={exact} onChange={setExact} />
       ) : (
       <>
@@ -317,9 +366,22 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           className="primary"
           disabled={plotting || (type === 'exact' && shipInfo?.['ready'] !== true)}
           onClick={() =>
-            type === 'exact'
-              ? act('plot', { type, source, destination, options: exact })
-              : act('plot', { type, source, destination, range, efficiency, supercharge, via: via.filter((v) => v.trim()) })
+            type === 'carrier'
+              ? act('plot', {
+                  type,
+                  source,
+                  destination,
+                  via: via.filter((v) => v.trim()),
+                  carrier: carrier.kind,
+                  usedCapacity: carrier.usedCapacity,
+                  fuelMode: carrier.fuelMode,
+                  fuel: carrier.fuel,
+                  market: carrier.market,
+                  refuelAt: carrier.refuelAt,
+                })
+              : type === 'exact'
+                ? act('plot', { type, source, destination, options: exact })
+                : act('plot', { type, source, destination, range, efficiency, supercharge, via: via.filter((v) => v.trim()) })
           }
         >
           {plotting ? 'Plotting…' : 'Plot route'}
@@ -330,6 +392,208 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
       </div>
       </fieldset>
     </section>
+  );
+}
+
+type RouteType = 'neutron' | 'exact' | 'carrier';
+
+interface CarrierInfo {
+  name: string | null;
+  callsign: string | null;
+  fuel: number | null;
+  usedCapacity: number | null;
+  capacity: number | null;
+  system: string | null;
+  asOf: string | null;
+}
+
+function readCarriers(v: unknown): Partial<Record<'fleet' | 'squadron', CarrierInfo>> | null {
+  if (v === null || typeof v !== 'object') return null;
+  const out: Partial<Record<'fleet' | 'squadron', CarrierInfo>> = {};
+  for (const kind of ['fleet', 'squadron'] as const) {
+    const o = (v as Record<string, unknown>)[kind];
+    if (o === null || typeof o !== 'object') continue;
+    const c = o as Record<string, unknown>;
+    out[kind] = {
+      name: str(c['name']),
+      callsign: str(c['callsign']),
+      fuel: num(c['fuel']),
+      usedCapacity: num(c['used_capacity']),
+      capacity: num(c['capacity']),
+      system: str(c['system']),
+      asOf: str(c['as_of']),
+    };
+  }
+  return out;
+}
+
+interface CarrierForm {
+  kind: 'fleet' | 'squadron';
+  usedCapacity: string;
+  /** `calculate`: Spansh works out the tritium to start with and where to restock. */
+  fuelMode: 'calculate' | 'current';
+  fuel: string;
+  market: string;
+  /** Stops where restocking is allowed, when Spansh calculates the tritium. */
+  refuelAt: string[];
+}
+
+const CARRIER_DEFAULTS: CarrierForm = {
+  kind: 'fleet',
+  usedCapacity: '',
+  fuelMode: 'calculate',
+  fuel: '',
+  market: '0',
+  refuelAt: [],
+};
+
+/** Capacity from Spansh's own planner: a fleet carrier 25,000 t, a squadron carrier 60,000 t. */
+const CARRIER_CAPACITY = { fleet: 25000, squadron: 60000 } as const;
+
+function CarrierFields({
+  form,
+  onChange,
+  carriers,
+  stops,
+}: {
+  form: CarrierForm;
+  onChange: (f: CarrierForm) => void;
+  carriers: Partial<Record<'fleet' | 'squadron', CarrierInfo>> | null;
+  stops: string[];
+}) {
+  const set = (patch: Partial<CarrierForm>) => onChange({ ...form, ...patch });
+  const own = carriers?.[form.kind] ?? null;
+  return (
+    <>
+      <div className="router-field">
+        <span className="field-label">Carrier</span>
+        <div className="router-choice" role="radiogroup" aria-label="Carrier">
+          {(['fleet', 'squadron'] as const).map((kind) => {
+            const c = carriers?.[kind];
+            return (
+              <button
+                key={kind}
+                type="button"
+                role="radio"
+                aria-checked={form.kind === kind}
+                className={form.kind === kind ? 'active' : ''}
+                // Switching carrier clears what the other one filled in.
+                onClick={() => set({ kind, usedCapacity: '', fuel: '' })}
+              >
+                <strong>{kind === 'fleet' ? 'Fleet carrier' : 'Squadron carrier'}</strong>
+                <span>
+                  {c?.name ? `${c.name}${c.callsign ? ` (${c.callsign})` : ''}` : `${CARRIER_CAPACITY[kind].toLocaleString()} t capacity`}
+                  {c?.system ? ` · in ${c.system}` : ''}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {own ? (
+          <p className="field-hint">
+            Filled in from the game{own.asOf ? `, as of ${new Date(own.asOf).toLocaleString()}` : ''}. Open carrier
+            management in game to refresh it.
+          </p>
+        ) : (
+          <p className="field-hint">
+            Router has not seen this carrier in your journals yet. Open its carrier management screen in game once, or
+            fill this in yourself.
+          </p>
+        )}
+      </div>
+
+      <div className="router-field">
+        <label className="field-label" htmlFor="router-capacity">
+          Capacity used (t)
+        </label>
+        <input
+          id="router-capacity"
+          type="text"
+          inputMode="numeric"
+          value={form.usedCapacity}
+          onChange={(e) => set({ usedCapacity: e.target.value })}
+        />
+        <span className="field-hint">
+          Cargo, crew, services and stored ships all count: a heavier carrier burns more tritium per jump.
+        </span>
+      </div>
+
+      <div className="router-field">
+        <span className="field-label">Tritium</span>
+        <div className="router-choice" role="radiogroup" aria-label="Tritium">
+          {[
+            { value: 'calculate' as const, title: 'Work it out', detail: 'How much to load, and where to restock' },
+            { value: 'current' as const, title: 'What I have', detail: 'Plan with the tank and market as they are' },
+          ].map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={form.fuelMode === o.value}
+              className={form.fuelMode === o.value ? 'active' : ''}
+              onClick={() => set({ fuelMode: o.value })}
+            >
+              <strong>{o.title}</strong>
+              <span>{o.detail}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {form.fuelMode === 'current' ? (
+        <div className="router-pair">
+          <div className="router-field">
+            <label className="field-label" htmlFor="router-tank">
+              In the tank (t)
+            </label>
+            <input
+              id="router-tank"
+              type="text"
+              inputMode="numeric"
+              value={form.fuel}
+              onChange={(e) => set({ fuel: e.target.value })}
+            />
+          </div>
+          <div className="router-field">
+            <label className="field-label" htmlFor="router-market">
+              In the carrier&apos;s market (t)
+            </label>
+            <input
+              id="router-market"
+              type="text"
+              inputMode="numeric"
+              value={form.market}
+              onChange={(e) => set({ market: e.target.value })}
+            />
+          </div>
+        </div>
+      ) : (
+        stops.length > 1 && (
+          <div className="router-field">
+            <span className="field-label">Restock only at</span>
+            <div className="router-checks">
+              {stops.slice(0, -1).map((stop) => (
+                <label key={stop} className="check">
+                  <input
+                    type="checkbox"
+                    checked={form.refuelAt.includes(stop)}
+                    onChange={(e) =>
+                      set({
+                        refuelAt: e.target.checked
+                          ? [...form.refuelAt, stop]
+                          : form.refuelAt.filter((s) => s !== stop),
+                      })
+                    }
+                  />
+                  <span>{stop}</span>
+                </label>
+              ))}
+            </div>
+            <span className="field-hint">Leave all unticked and Spansh picks where to restock.</span>
+          </div>
+        )
+      )}
+    </>
   );
 }
 
@@ -687,6 +951,13 @@ interface WaypointCard {
   scoopable: boolean;
   refuel: boolean;
   neutron: boolean;
+  /** Carrier routes only. */
+  tritiumUsed: number | null;
+  tritiumLeft: number | null;
+  restock: number | null;
+  icyRing: boolean;
+  pristine: boolean;
+  stop: boolean;
   state: 'done' | 'next' | 'upcoming';
 }
 
@@ -707,6 +978,12 @@ function readWaypoints(v: unknown): WaypointCard[] {
         scoopable: o['scoopable'] === true,
         refuel: o['refuel'] === true,
         neutron: o['neutron'] === true,
+        tritiumUsed: num(o['tritiumUsed']),
+        tritiumLeft: num(o['tritiumLeft']),
+        restock: num(o['restock']),
+        icyRing: o['icyRing'] === true,
+        pristine: o['pristine'] === true,
+        stop: o['stop'] === true,
         state,
       },
     ];
@@ -743,6 +1020,7 @@ function WaypointList({ route, act }: { route: State; act: Act }) {
               <div className="router-waypoint-name">
                 {c.system}
                 {c.neutron && <span className="router-neutron">Neutron</span>}
+                {c.stop && <span className="router-stop-tag">Your stop</span>}
                 {c.state === 'next' && <span className="router-next-tag">Next</span>}
               </div>
               <div className="router-waypoint-meta">
@@ -754,6 +1032,12 @@ function WaypointList({ route, act }: { route: State; act: Act }) {
                 {c.distanceLeft !== null && c.distanceLeft > 0 && ` · ${Math.round(c.distanceLeft).toLocaleString()} ly to go`}
                 {c.refuel && <span className="router-refuel"> · Refuel here</span>}
                 {!c.refuel && c.scoopable && ' · Scoopable'}
+                {c.tritiumUsed !== null && ` · ${c.tritiumUsed} t tritium`}
+                {c.tritiumLeft !== null && ` · ${c.tritiumLeft} t left in the tank`}
+                {c.restock !== null && (
+                  <span className="router-refuel"> · Load {c.restock.toLocaleString()} t of tritium here</span>
+                )}
+                {c.icyRing && ` · Icy ring${c.pristine ? ' (pristine)' : ''}: tritium can be mined`}
               </div>
             </div>
             <div className="router-waypoint-actions">
@@ -820,7 +1104,25 @@ function RouterFollow({ route, act }: { route: State; act: Act }) {
           <div className="field-label">Destination</div>
           <div className="router-stat">{str(route['destination']) ?? '—'}</div>
         </div>
+        {route['type'] === 'carrier' && (
+          <div>
+            <div className="field-label">Tritium to go</div>
+            <div className="router-stat">
+              {readWaypoints(route['waypoints_list'])
+                .filter((w) => w.state !== 'done')
+                .reduce((t, w) => t + (w.tritiumUsed ?? 0), 0)
+                .toLocaleString()}{' '}
+              t
+            </div>
+          </div>
+        )}
       </div>
+      {route['type'] === 'carrier' && (
+        <p className="field-hint">
+          Paste the next system into the carrier&apos;s galaxy map to schedule the jump. The route moves on when your
+          carrier arrives, whether or not you are aboard.
+        </p>
+      )}
 
       <div className="row router-actions">
         <button type="button" className="secondary" onClick={() => act('step', { delta: -1 })}>

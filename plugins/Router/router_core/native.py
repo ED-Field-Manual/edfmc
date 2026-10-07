@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Callable
 
-from . import bridge, fleet as fleet_mod, ship, spansh
+from . import bridge, carrier as carrier_mod, fleet as fleet_mod, ship, spansh
 from .route import Route
 
 POLL_MS = 150
@@ -53,6 +53,8 @@ class NativePage:
         self._save_settings = save_settings
         #: Every owned ship, read from all the journals on a worker at start.
         self.fleet: fleet_mod.Fleet | None = None
+        #: The commander's carriers, for the carrier planner's form.
+        self.carriers: carrier_mod.Carriers | None = None
         self.plotting = False
         self.status: dict[str, Any] = {'text': '', 'error': False}
         self.suggestions: dict[str, Any] | None = None
@@ -72,22 +74,31 @@ class NativePage:
                 built = fleet_mod.from_journals(journal_dir)
             except Exception:
                 built = None
-            self._later(lambda: self._fleet_loaded(built))
+            try:
+                carriers = carrier_mod.from_journals(journal_dir)
+            except Exception:
+                carriers = None
+            self._later(lambda: self._fleet_loaded(built, carriers))
 
         threading.Thread(target=work, name='router-fleet', daemon=True).start()
         self._watch()
 
-    def _fleet_loaded(self, built: 'fleet_mod.Fleet | None') -> None:
-        if built is None:
-            return
-        # Events that arrived while reading are already in a newer Loadout etc.;
-        # the journals included them, so the read result simply replaces.
-        self.fleet = built
+    def _fleet_loaded(self, built: 'fleet_mod.Fleet | None',
+                      carriers: 'carrier_mod.Carriers | None' = None) -> None:
+        # Events that arrived while reading are already in the journals read,
+        # so the read result simply replaces.
+        if built is not None:
+            self.fleet = built
+        if carriers is not None:
+            self.carriers = carriers
         self.push()
 
     def journal_event(self, entry: dict) -> None:
         """Keep the fleet current: a new Loadout, a shipyard visit, a purchase."""
-        if self.fleet is not None and self.fleet.fold(entry):
+        changed = self.fleet is not None and self.fleet.fold(entry)
+        if self.carriers is not None and self.carriers.fold(entry):
+            changed = True
+        if changed:
             self.push()
 
     def _selected_id(self) -> int | None:
@@ -156,7 +167,7 @@ class NativePage:
                 'progress': 1.0 if r.finished else (done / last if last > 0 else 0.0),
                 # Every waypoint, for the list of cards. A long route is a few
                 # hundred entries of short strings, which is fine as JSON.
-                'type': 'exact' if r.source == 'spansh-exact' else 'neutron',
+                'type': 'carrier' if r.is_carrier else ('exact' if r.source == 'spansh-exact' else 'neutron'),
                 'waypoints_list': [
                     {
                         'system': w.system,
@@ -166,6 +177,12 @@ class NativePage:
                         'distance': w.distance,
                         'scoopable': w.scoopable,
                         'refuel': w.refuel,
+                        'tritiumUsed': w.tritium_used,
+                        'tritiumLeft': w.tritium_left,
+                        'restock': w.restock,
+                        'icyRing': w.icy_ring,
+                        'pristine': w.pristine,
+                        'stop': w.stop,
                         'state': 'done' if i < r.next_index else ('next' if i == r.next_index else 'upcoming'),
                     }
                     for i, w in enumerate(r.waypoints)
@@ -181,6 +198,7 @@ class NativePage:
             'ship': self._ship_state(),
             'fleet': self.fleet.ships() if self.fleet is not None else None,
             'selectedShip': self._selected_id(),
+            'carriers': self.carriers.to_json() if self.carriers is not None else None,
             'plotting': self.plotting,
             'status': self.status,
             'route': route,
@@ -248,6 +266,9 @@ class NativePage:
             supercharge = 4
         if supercharge not in spansh.SUPERCHARGE:
             supercharge = 4
+        if args.get('type') == 'carrier':
+            self._plot_carrier(source, destination, args)
+            return
         exact = None
         if args.get('type') == 'exact':
             loadout = self._selected_loadout()
@@ -283,14 +304,61 @@ class NativePage:
             self._watch()
         self.push()
 
+    def _plot_carrier(self, source: str, destination: str, args: dict) -> None:
+        """A fleet carrier route. Stops on the way come first, then the destination."""
+        kind = 'squadron' if args.get('carrier') == 'squadron' else 'fleet'
+        stops = [str(v).strip() for v in (args.get('via') or []) if isinstance(v, str) and v.strip()][:20]
+        stops.append(destination)
+        try:
+            used = max(0, int(float(args.get('usedCapacity') or 0)))
+        except (TypeError, ValueError):
+            used = 0
+        fuel: int | None = None
+        market = 0
+        if args.get('fuelMode') == 'current':
+            try:
+                fuel = max(0, min(spansh.CARRIER_TANK, int(float(args.get('fuel') or 0))))
+                market = max(0, int(float(args.get('market') or 0)))
+            except (TypeError, ValueError):
+                self.say('Enter the tritium in the tank and in the market as whole tonnes.', error=True)
+                self.push()
+                return
+        refuel_at = [str(v) for v in (args.get('refuelAt') or []) if isinstance(v, str)]
+        self._save_settings({**self._settings(), 'type': 'carrier', 'carrierType': kind})
+        if not source or not destination:
+            self.say('Enter where the carrier is and where it should go.', error=True)
+        elif not self.plotting:
+            self.plotting = True
+            self.suggestions = None
+            self.say('Plotting the carrier route… please wait.')
+            spansh.plot_in_background(
+                source, destination, 0, 0,
+                lambda route, error: self._later(lambda: self._plotted(route, error)),
+                carrier={'stops': stops, 'type': kind, 'used': used, 'fuel': fuel,
+                         'market': market, 'refuel_at': refuel_at})
+            self._watch()
+        self.push()
+
+    def carrier_kind(self) -> str:
+        """Which carrier the current route is for: 'fleet' or 'squadron'."""
+        return 'squadron' if self._settings().get('carrierType') == 'squadron' else 'fleet'
+
     def _plotted(self, route: Route | None, error: str | None) -> None:
         self.plotting = False
         if error or route is None:
             self.say(error or 'Spansh returned no route.', error=True)
         else:
-            route.start_from(self._current_system(), self._current_address())
+            if route.is_carrier:
+                # The carrier starts where it is, which is the route's first system.
+                route.next_index = min(1, len(route.waypoints))
+            else:
+                route.start_from(self._current_system(), self._current_address())
             self._set_route(route)
-            self.say(f'Route plotted: {len(route.waypoints)} waypoints, {route.total_jumps()} jumps.')
+            if route.is_carrier:
+                tritium = sum(w.tritium_used or 0 for w in route.waypoints)
+                self.say(f'Carrier route plotted: {route.total_jumps()} jumps, {tritium:,} t of tritium.')
+            else:
+                self.say(f'Route plotted: {len(route.waypoints)} waypoints, {route.total_jumps()} jumps.')
             if self._auto_copy():
                 self._copy({'quiet': True})
         self.push()

@@ -30,7 +30,8 @@ class PlotError(Exception):
 
 
 def _request(url: str, method: str = 'GET', form: dict[str, Any] | None = None) -> tuple[int, Any]:
-    data = urllib.parse.urlencode(form).encode('utf-8') if form is not None else None
+    # doseq: a list (the carrier planner's destinations) goes as repeated fields.
+    data = urllib.parse.urlencode(form, doseq=True).encode('utf-8') if form is not None else None
     headers = {'User-Agent': USER_AGENT}
     if data is not None:
         headers['Content-Type'] = 'application/x-www-form-urlencoded'
@@ -163,6 +164,81 @@ def _await(job: str, request: Callable[..., tuple[int, Any]], sleep: Callable[[f
         sleep(POLL_EVERY_S)
 
 
+#: Spansh's figures for each kind of carrier, from its own fleet carrier planner:
+#: a player's carrier has 25,000 t of capacity and masses 25,000 t; a squadron
+#: carrier has 60,000 t and masses 15,000 t.
+CARRIERS = {
+    'fleet': {'capacity': 25000, 'mass': 25000},
+    'squadron': {'capacity': 60000, 'mass': 15000},
+}
+#: A carrier's tank holds this much tritium.
+CARRIER_TANK = 1000
+
+
+def resolve_system(name: str, request: Callable[..., tuple[int, Any]] = _request) -> int:
+    """A system's id64, which the carrier planner needs instead of a name.
+
+    Only an exact (case-insensitive) match counts: Spansh's search returns the
+    closest names first, and sending a carrier to a near miss would be worse
+    than saying the name was not found.
+    """
+    try:
+        status, body = request(f'{API}/search/systems?q={urllib.parse.quote(name)}', 'GET')
+    except (urllib.error.URLError, OSError) as e:
+        raise PlotError(f'Spansh could not be reached ({e}).') from e
+    if status == 200 and isinstance(body, dict):
+        for r in body.get('results') or []:
+            if (isinstance(r, dict) and isinstance(r.get('name'), str)
+                    and r['name'].lower() == name.strip().lower() and r.get('id64') is not None):
+                return int(r['id64'])
+    raise PlotError(f'Spansh does not know a system called "{name}".')
+
+
+def plot_carrier(source: str, stops: list[str], carrier: str = 'fleet', used_capacity: int = 0,
+                 fuel: int | None = None, tritium_market: int = 0, refuel_at: list[str] | None = None,
+                 request: Callable[..., tuple[int, Any]] = _request,
+                 sleep: Callable[[float], None] = time.sleep) -> Route:
+    """Plot a fleet carrier route with Spansh's carrier planner. Blocks.
+
+    `stops` are visited in order; the last is the destination. With `fuel`
+    None, Spansh works out how much tritium to start with and where to restock
+    (only at `refuel_at`, if any are given); with a number, it plans with that
+    much in the tank and `tritium_market` in the carrier's market. The field
+    names are the ones Spansh's own page sends; checked live on 2026-10-07.
+    """
+    stats = CARRIERS.get(carrier, CARRIERS['fleet'])
+    names = [source, *stops]
+    ids = [resolve_system(n, request) for n in names]
+    form: dict[str, Any] = {
+        'source': ids[0],
+        'destinations': ids[1:],
+        'capacity': stats['capacity'],
+        'mass': stats['mass'],
+        'capacity_used': max(0, min(stats['capacity'], int(used_capacity))),
+    }
+    if fuel is None:
+        form['calculate_starting_fuel'] = 1
+        wanted = {n.lower() for n in (refuel_at or [])}
+        refuel = [i for n, i in zip(names[1:], ids[1:]) if n.lower() in wanted]
+        if refuel:
+            form['refuel_destinations'] = refuel
+    else:
+        form['calculate_starting_fuel'] = 0
+        form['fuel_loaded'] = max(0, min(CARRIER_TANK, int(fuel)))
+        form['tritium_stored'] = max(0, int(tritium_market))
+    try:
+        status, body = request(f'{API}/fleetcarrier/route', 'POST', form)
+    except (urllib.error.URLError, OSError) as e:
+        raise PlotError(f'Spansh could not be reached ({e}).') from e
+    if status not in (200, 202) or not isinstance(body, dict) or 'job' not in body:
+        message = body.get('error') if isinstance(body, dict) else None
+        raise PlotError(message or f'Spansh refused the request (HTTP {status}).')
+    route = Route.from_carrier(_await(str(body['job']), request, sleep, timeout=TIMEOUT_S))
+    if route.empty:
+        raise PlotError('Spansh returned an empty route.')
+    return route
+
+
 def suggest(prefix: str, limit: int = 8,
             request: Callable[[str, str], tuple[int, Any]] = _request) -> list[str]:
     """System names starting with `prefix`, for predictive text. Blocks.
@@ -197,7 +273,8 @@ def suggest(prefix: str, limit: int = 8,
 def plot_in_background(source: str, destination: str, jump_range: float, efficiency: int,
                        done: Callable[[Route | None, str | None], None],
                        via: list[str] | None = None, supercharge: int = 4,
-                       exact: tuple[Any, dict[str, Any]] | None = None) -> None:
+                       exact: tuple[Any, dict[str, Any]] | None = None,
+                       carrier: dict[str, Any] | None = None) -> None:
     """Plot on a worker thread. `done(route, error)` is called on that thread.
 
     With `exact=(ship_figures, options)` it plots normal jumps with the exact
@@ -205,7 +282,10 @@ def plot_in_background(source: str, destination: str, jump_range: float, efficie
     """
     def work() -> None:
         try:
-            if exact is not None:
+            if carrier is not None:
+                done(plot_carrier(source, carrier['stops'], carrier['type'], carrier['used'],
+                                  carrier['fuel'], carrier['market'], carrier['refuel_at']), None)
+            elif exact is not None:
                 done(plot_exact(source, destination, exact[0], exact[1]), None)
             else:
                 done(plot(source, destination, jump_range, efficiency, via=via, supercharge=supercharge), None)

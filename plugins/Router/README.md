@@ -61,6 +61,33 @@ board it once.
 Normal jumps are available in EDFM Companion. In EDMC, Router plots neutron
 routes.
 
+## Fleet carrier routes
+
+Choose **Fleet carrier** to plan a carrier's jumps with Spansh's
+[fleet carrier planner](https://spansh.co.uk/fleet-carrier): each jump of up to
+500 ly, the tritium it burns, what is left in the tank, and where to load more.
+
+- **Your carrier or your squadron's.** A player carrier is planned as 25,000 t
+  of capacity and 25,000 t of mass, a squadron carrier as 60,000 t and 15,000 t,
+  the figures Spansh's own planner uses.
+- **Filled in from the game:** where the carrier is (`CarrierLocation`), and
+  the tritium in its tank and capacity used (`CarrierStats`, written when you
+  open carrier management). You can change any of them.
+- **Tritium:** let Spansh work out how much to start with and where to restock
+  (optionally only at stops you tick), or plan with what is in the tank and the
+  carrier's market now.
+- **Stops on the way**, in order, like the neutron plotter's.
+- **Each jump as a card**, with its tritium, the tank after it, where to load
+  more, and systems with an icy ring where tritium can be mined.
+- **Moves with the carrier, not with you.** The next waypoint advances when
+  your carrier arrives (`CarrierLocation`, or a `CarrierJump` while aboard),
+  even if you are flying elsewhere. Your own jumps do not move it on. The copy
+  hotkey copies the next system, ready to paste into the carrier's galaxy map.
+
+System names are looked up with Spansh's search and must match exactly; a near
+miss is refused rather than guessed. Fleet carrier routes are available in EDFM
+Companion.
+
 ## Install
 
 1. Download this repository as a ZIP (Code → Download ZIP) and unzip it.
@@ -100,7 +127,7 @@ transparent) as with any plugin.
 python tests/test_router.py
 ```
 
-`tests/fixtures/spansh_sol_achenar.json` is a real Spansh response.
+`tests/fixtures/spansh_sol_achenar.json` and `spansh_carrier_sol_alioth_achenar.json` are real Spansh responses.
 
 ## License
 

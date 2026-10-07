@@ -387,6 +387,106 @@ class BridgeTest(unittest.TestCase):
         bridge.publish(three_stops())  # must not raise
 
 
+with open(os.path.join(ROOT, 'tests', 'fixtures', 'spansh_carrier_sol_alioth_achenar.json'), encoding='utf-8') as f:
+    CARRIER_RESULT = json.load(f)
+
+
+class CarrierTest(unittest.TestCase):
+    """The fleet carrier planner. The fixture is a real Spansh job (2026-10-07)."""
+
+    def test_reads_a_real_carrier_result_one_waypoint_per_place(self) -> None:
+        route = Route.from_carrier(CARRIER_RESULT['result'])
+        # Spansh lists the Alioth stop twice (arrive, then a 0 ly "jump" on);
+        # the commander sees it once.
+        self.assertEqual([w.system for w in route.waypoints], ['Sol', 'Alioth', 'Achenar'])
+        self.assertTrue(route.is_carrier)
+        self.assertEqual(route.total_jumps(), 2)
+        sol, alioth, achenar = route.waypoints
+        self.assertEqual(sol.restock, 50)  # load 50 t before leaving
+        self.assertIsNone(sol.tritium_used)
+        self.assertEqual((alioth.tritium_used, alioth.tritium_left), (16, 34))
+        self.assertTrue(alioth.stop and achenar.stop)
+        self.assertEqual(achenar.tritium_left, 0)
+        self.assertAlmostEqual(achenar.distance, 221.68, places=1)
+
+    def test_a_saved_carrier_route_reloads_and_an_older_save_still_loads(self) -> None:
+        route = Route.from_carrier(CARRIER_RESULT['result'])
+        again = Route.from_json(route.to_json())
+        self.assertEqual(again.waypoints, route.waypoints)
+        self.assertTrue(again.is_carrier)
+        old = json.loads(three_stops().to_json())
+        for w in old['waypoints']:
+            for k in ('tritium_used', 'tritium_left', 'restock', 'icy_ring', 'pristine', 'stop'):
+                w.pop(k)
+        self.assertEqual(len(Route.from_json(json.dumps(old)).waypoints), 3)
+        newer = json.loads(three_stops().to_json())
+        newer['waypoints'][0]['from_the_future'] = 1
+        self.assertEqual(len(Route.from_json(json.dumps(newer)).waypoints), 3)
+
+    def _fake(self, sent: list) -> object:
+        ids = {'Sol': 10477373803, 'Alioth': 1109989017963, 'Achenar': 164098653}
+
+        def request(url: str, method: str = 'GET', form: dict | None = None):
+            sent.append((url, method, form))
+            if '/search/systems' in url:
+                q = url.split('q=')[1].replace('%20', ' ')
+                return 200, {'results': [{'name': n, 'id64': i} for n, i in ids.items() if n.lower().startswith(q.lower())]
+                             + [{'name': q + ' Extra', 'id64': 1}]}
+            if url.endswith('/fleetcarrier/route'):
+                return 202, {'job': 'J', 'status': 'queued'}
+            return 200, CARRIER_RESULT
+        return request
+
+    def test_sends_spanshs_own_field_names(self) -> None:
+        sent: list = []
+        route = spansh.plot_carrier('Sol', ['Alioth', 'Achenar'], 'fleet', 1200, refuel_at=['alioth'],
+                                    request=self._fake(sent), sleep=lambda s: None)
+        self.assertEqual(len(route.waypoints), 3)
+        form = next(f for u, m, f in sent if u.endswith('/fleetcarrier/route'))
+        self.assertEqual(form, {
+            'source': 10477373803,
+            'destinations': [1109989017963, 164098653],
+            'capacity': 25000,
+            'mass': 25000,
+            'capacity_used': 1200,
+            'calculate_starting_fuel': 1,
+            'refuel_destinations': [1109989017963],
+        })
+
+    def test_planning_with_the_tritium_on_board(self) -> None:
+        sent: list = []
+        spansh.plot_carrier('Sol', ['Achenar'], 'squadron', 99999, fuel=5000, tritium_market=300,
+                            request=self._fake(sent), sleep=lambda s: None)
+        form = next(f for u, m, f in sent if u.endswith('/fleetcarrier/route'))
+        self.assertEqual((form['capacity'], form['mass']), (60000, 15000))
+        self.assertEqual(form['capacity_used'], 60000)  # clamped to the carrier
+        self.assertEqual(form['calculate_starting_fuel'], 0)
+        self.assertEqual(form['fuel_loaded'], 1000)  # the tank holds 1,000 t
+        self.assertEqual(form['tritium_stored'], 300)
+
+    def test_a_near_miss_name_is_refused_not_guessed(self) -> None:
+        with self.assertRaises(spansh.PlotError) as e:
+            spansh.plot_carrier('Sol', ['Alio'], request=self._fake([]), sleep=lambda s: None)
+        self.assertIn('Alio', str(e.exception))
+
+    def test_reads_the_carriers_from_journal_lines(self) -> None:
+        from router_core.carrier import Carriers
+        c = Carriers()
+        # Shapes as in the journal corpus; names and numbers changed.
+        c.fold({'timestamp': '2026-10-07T00:22:39Z', 'event': 'CarrierStats', 'CarrierID': 1, 'CarrierType': 'SquadronCarrier',
+                'Callsign': 'ABCD', 'Name': 'TEST SQUADRON', 'FuelLevel': 839,
+                'SpaceUsage': {'TotalCapacity': 60000, 'Crew': 4520, 'Cargo': 1236, 'FreeSpace': 54244}})
+        c.fold({'timestamp': '2026-10-07T04:42:42Z', 'event': 'CarrierLocation', 'CarrierType': 'SquadronCarrier',
+                'CarrierID': 1, 'StarSystem': 'Wregoe KO-G c24-7', 'SystemAddress': 2008870359762, 'BodyID': 13})
+        c.fold({'timestamp': '2026-10-03T01:32:07Z', 'event': 'CarrierLocation', 'CarrierType': 'FleetCarrier',
+                'CarrierID': 2, 'StarSystem': 'Sol', 'SystemAddress': 10477373803, 'BodyID': 0})
+        sq = c.by_kind['squadron']
+        self.assertEqual((sq.name, sq.fuel, sq.used_capacity, sq.capacity), ('TEST SQUADRON', 839, 5756, 60000))
+        self.assertEqual(sq.system, 'Wregoe KO-G c24-7')
+        self.assertEqual(c.by_kind['fleet'].system, 'Sol')
+        self.assertFalse(c.fold({'event': 'CarrierStats', 'CarrierType': 'Something'}))
+
+
 class EntryPointTest(unittest.TestCase):
     def test_follows_jumps_without_a_window(self) -> None:
         import load
@@ -398,6 +498,34 @@ class EntryPointTest(unittest.TestCase):
         load.journal_entry('Cmdr', False, 'Sol', None, FSDJUMP_ACHENAR, {})
         self.assertTrue(load._state['route'].finished)
         self.assertTrue(os.path.exists(os.path.join(d, 'route.json')))
+
+
+    def test_a_carrier_route_moves_with_the_carrier_not_the_commander(self) -> None:
+        import load
+        d = tempfile.mkdtemp()
+        load.plugin_start3(d)
+        route = Route.from_carrier(CARRIER_RESULT['result'])
+        route.next_index = 1
+        load._state['route'] = route
+        load._settings_set({'carrierType': 'fleet'})
+        # The commander flies to Alioth in their own ship: the carrier has not moved.
+        load.journal_entry('Cmdr', False, 'Alioth', None,
+                           {'event': 'FSDJump', 'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
+        self.assertEqual(load._state['route'].next_index, 1)
+        # A squadron carrier arriving there is not the carrier this route is for.
+        load.journal_entry('Cmdr', False, 'Alioth', None,
+                           {'event': 'CarrierLocation', 'CarrierType': 'SquadronCarrier', 'CarrierID': 9,
+                            'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
+        self.assertEqual(load._state['route'].next_index, 1)
+        # Their own carrier arriving there is.
+        load.journal_entry('Cmdr', False, 'Alioth', None,
+                           {'event': 'CarrierLocation', 'CarrierType': 'FleetCarrier', 'CarrierID': 2,
+                            'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
+        self.assertEqual(load._state['route'].next_index, 2)
+        # And a jump made aboard counts too.
+        load.journal_entry('Cmdr', False, 'Achenar', None,
+                           {'event': 'CarrierJump', 'Docked': True, 'StarSystem': 'Achenar', 'SystemAddress': 164098653}, {})
+        self.assertTrue(load._state['route'].finished)
 
 
 if __name__ == '__main__':

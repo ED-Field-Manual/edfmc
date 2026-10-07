@@ -32,6 +32,18 @@ class Waypoint:
     scoopable: bool = False
     #: The plotter plans a refuel here.
     refuel: bool = False
+    # Fleet carrier routes say what each jump costs in tritium:
+    #: Tritium burned by the jump into this system.
+    tritium_used: int | None = None
+    #: Tritium left in the carrier's tank after arriving.
+    tritium_left: int | None = None
+    #: Tritium to load here before jumping on, when the plotter says to restock.
+    restock: int | None = None
+    #: A system with an icy ring, where tritium can be mined, and whether it is pristine.
+    icy_ring: bool = False
+    pristine: bool = False
+    #: One of the commander's chosen stops, rather than a system on the way.
+    stop: bool = False
 
 
 @dataclass
@@ -147,6 +159,49 @@ class Route:
         return cls(waypoints=waypoints, source='spansh-exact')
 
     @classmethod
+    def from_carrier(cls, result: dict[str, Any]) -> 'Route':
+        """From the `result` of a finished Spansh fleet carrier job: one waypoint per carrier jump.
+
+        Fields checked against a live job (Sol to Achenar, 2026-10-07):
+        `name`, `id64`, `distance`, `distance_to_destination`, `fuel_used`,
+        `fuel_in_tank`, `must_restock`, `restock_amount`, `has_icy_ring`,
+        `is_system_pristine`, `is_desired_destination`.
+        """
+        waypoints = []
+        for i, j in enumerate(result.get('jumps') or []):
+            name = j.get('name')
+            if not isinstance(name, str) or not name:
+                continue
+            restock = _int(j.get('restock_amount')) if j.get('must_restock') else 0
+            address = j.get('id64') if isinstance(j.get('id64'), int) else None
+            prev = waypoints[-1] if waypoints else None
+            if prev is not None and address is not None and prev.address == address:
+                # Spansh lists a stop twice, arriving then leaving (a 0 ly
+                # "jump"). One waypoint per place: the second only updates it.
+                prev.stop = prev.stop or bool(j.get('is_desired_destination', False))
+                prev.restock = max(prev.restock or 0, restock) or None
+                prev.tritium_left = _int(j.get('fuel_in_tank'))
+                continue
+            waypoints.append(Waypoint(
+                system=name,
+                jumps=0 if i == 0 else 1,
+                address=j.get('id64') if isinstance(j.get('id64'), int) else None,
+                distance_left=_float(j.get('distance_to_destination')),
+                distance=_float(j.get('distance')) if i > 0 else None,
+                tritium_used=_int(j.get('fuel_used')) if i > 0 else None,
+                tritium_left=_int(j.get('fuel_in_tank')),
+                restock=restock or None,
+                icy_ring=bool(j.get('has_icy_ring', False)),
+                pristine=bool(j.get('is_system_pristine', False)),
+                stop=bool(j.get('is_desired_destination', False)) and i > 0,
+            ))
+        return cls(waypoints=waypoints, source='spansh-carrier')
+
+    @property
+    def is_carrier(self) -> bool:
+        return self.source == 'spansh-carrier'
+
+    @classmethod
     def from_csv(cls, text: str) -> 'Route':
         """From a CSV exported by Spansh: a `System Name` column, and `Jumps` if present."""
         reader = csv.DictReader(io.StringIO(text.lstrip('﻿')))
@@ -181,7 +236,9 @@ class Route:
     def from_json(cls, text: str) -> 'Route':
         d = json.loads(text)
         return cls(
-            waypoints=[Waypoint(**w) for w in d.get('waypoints', [])],
+            # Unknown keys are dropped, so a route saved by a newer version still loads.
+            waypoints=[Waypoint(**{k: v for k, v in w.items() if k in _FIELDS})
+                       for w in d.get('waypoints', [])],
             next_index=int(d.get('next_index', 0)),
             source=str(d.get('source', '')),
         )
@@ -199,6 +256,9 @@ class Route:
                 return cls.from_json(f.read())
         except (OSError, ValueError, TypeError, KeyError):
             return cls()
+
+
+_FIELDS = set(Waypoint.__dataclass_fields__)
 
 
 def _int(v: Any) -> int:
