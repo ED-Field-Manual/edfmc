@@ -81,8 +81,24 @@ Choose **Fleet carrier** to plan a carrier's jumps with Spansh's
   more, and systems with an icy ring where tritium can be mined.
 - **Moves with the carrier, not with you.** The next waypoint advances when
   your carrier arrives (`CarrierLocation`, or a `CarrierJump` while aboard),
-  even if you are flying elsewhere. Your own jumps do not move it on. The copy
-  hotkey copies the next system, ready to paste into the carrier's galaxy map.
+  even if you are flying elsewhere. Your own jumps do not move it on.
+
+## Both at once
+
+Your own route and your carrier's are separate, and Router follows both at the
+same time: fly yourself along one while you move the carrier along the other.
+
+- The page has a tab for each, **Your route** and **Carrier route**, each
+  showing its next stop; both keep following the game whichever is open.
+- Each has its own copy hotkey in EDFM Companion, so the next system for your
+  galaxy map and the next for the carrier's are each one keypress away.
+- Copying on arrival follows your own route while you have one, so a carrier
+  arriving never replaces the system you are about to paste. With no route of
+  your own, the carrier's next jump is copied when it arrives.
+- A jump made aboard the carrier moves both routes on.
+- The overlay shows your next waypoint, with a line for the carrier's.
+- Each is saved separately (`route.json`, `carrier_route.json`). A carrier
+  route saved by Router 0.7.0 moves to its own slot on first start.
 
 System names are looked up with Spansh's search and must match exactly; a near
 miss is refused rather than guessed. Fleet carrier routes are available in EDFM

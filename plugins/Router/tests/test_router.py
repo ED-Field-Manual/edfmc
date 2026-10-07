@@ -500,32 +500,118 @@ class EntryPointTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(d, 'route.json')))
 
 
-    def test_a_carrier_route_moves_with_the_carrier_not_the_commander(self) -> None:
+    def _two_routes(self):
         import load
         d = tempfile.mkdtemp()
         load.plugin_start3(d)
-        route = Route.from_carrier(CARRIER_RESULT['result'])
-        route.next_index = 1
-        load._state['route'] = route
+        ship = Route(waypoints=[Waypoint('Sol', 0, 10477373803), Waypoint('Alioth', 4, 1109989017963),
+                                Waypoint('Shinrarta Dezhra', 6, 3932277478106)])
+        ship.next_index = 1
+        carrier = Route.from_carrier(CARRIER_RESULT['result'])
+        carrier.next_index = 1
+        load._state['route'] = ship
+        load._state['carrier_route'] = carrier
         load._settings_set({'carrierType': 'fleet'})
-        # The commander flies to Alioth in their own ship: the carrier has not moved.
+        return load, d
+
+    def test_both_routes_are_followed_at_the_same_time(self) -> None:
+        load, d = self._two_routes()
+        # The commander flies to Alioth in their own ship: their route moves on,
+        # the carrier's does not, though its next stop is Alioth too.
         load.journal_entry('Cmdr', False, 'Alioth', None,
                            {'event': 'FSDJump', 'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
-        self.assertEqual(load._state['route'].next_index, 1)
-        # A squadron carrier arriving there is not the carrier this route is for.
+        self.assertEqual(load._state['route'].next_index, 2)
+        self.assertEqual(load._state['carrier_route'].next_index, 1)
+        # A squadron carrier arriving there is not the carrier being routed.
         load.journal_entry('Cmdr', False, 'Alioth', None,
                            {'event': 'CarrierLocation', 'CarrierType': 'SquadronCarrier', 'CarrierID': 9,
                             'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
-        self.assertEqual(load._state['route'].next_index, 1)
-        # Their own carrier arriving there is.
+        self.assertEqual(load._state['carrier_route'].next_index, 1)
+        # The commander's own carrier arriving there is; their ship route is untouched.
         load.journal_entry('Cmdr', False, 'Alioth', None,
                            {'event': 'CarrierLocation', 'CarrierType': 'FleetCarrier', 'CarrierID': 2,
                             'StarSystem': 'Alioth', 'SystemAddress': 1109989017963}, {})
+        self.assertEqual(load._state['carrier_route'].next_index, 2)
         self.assertEqual(load._state['route'].next_index, 2)
-        # And a jump made aboard counts too.
+        # Each is saved to its own file.
+        self.assertTrue(os.path.exists(os.path.join(d, 'route.json')))
+        self.assertTrue(os.path.exists(os.path.join(d, 'carrier_route.json')))
+        self.assertEqual(Route.load(os.path.join(d, 'carrier_route.json')).next_index, 2)
+
+    def test_a_jump_aboard_the_carrier_moves_both(self) -> None:
+        load, _ = self._two_routes()
+        load._state['route'].next_index = 0
+        load._state['route'].waypoints.insert(1, Waypoint('Achenar', 1, 164098653))
+        load._state['carrier_route'].next_index = 2
         load.journal_entry('Cmdr', False, 'Achenar', None,
                            {'event': 'CarrierJump', 'Docked': True, 'StarSystem': 'Achenar', 'SystemAddress': 164098653}, {})
-        self.assertTrue(load._state['route'].finished)
+        self.assertTrue(load._state['carrier_route'].finished)
+        self.assertEqual(load._state['route'].next_index, 2)
+
+    def test_a_carrier_route_saved_by_0_7_0_moves_to_its_own_slot(self) -> None:
+        import load
+        d = tempfile.mkdtemp()
+        Route.from_carrier(CARRIER_RESULT['result']).save(os.path.join(d, 'route.json'))
+        load.plugin_start3(d)
+        self.assertTrue(load._state['route'].empty)
+        self.assertTrue(load._state['carrier_route'].is_carrier)
+        self.assertEqual(len(load._state['carrier_route'].waypoints), 3)
+
+    def test_the_overlay_gets_both_routes(self) -> None:
+        carrier = Route.from_carrier(CARRIER_RESULT['result'])
+        carrier.next_index = 1
+        both = bridge.overlay(three_stops(), carrier)
+        self.assertEqual(both['next'], 'Sol')
+        self.assertEqual(both['carrier'], {'next': 'Alioth', 'destination': 'Achenar', 'jumpsLeft': 2, 'finished': False})
+        only_carrier = bridge.overlay(Route(), carrier)
+        self.assertIsNone(only_carrier['next'])
+        self.assertTrue(only_carrier['noShipRoute'])
+        self.assertIsNone(bridge.overlay(Route(), Route()))
+        self.assertNotIn('carrier', bridge.overlay(three_stops(), Route()))
+
+
+class NativeSlotsTest(unittest.TestCase):
+    """The page's actions name a route; without one they mean the ship route, as before."""
+
+    def _page(self):
+        from router_core.native import NativePage
+
+        class Page:
+            def update(self, state):
+                self.state = state
+        page = Page()
+        changed = {'ship': 0, 'carrier': 0}
+        carrier = Route.from_carrier(CARRIER_RESULT['result'])
+        carrier.next_index = 1
+        p = NativePage(lambda on_action: page, three_stops(), current_system=lambda: 'Sol',
+                       current_address=lambda: 10477373803, jump_range=lambda: 30.0, efficiency=lambda: 60,
+                       set_efficiency=lambda v: None, auto_copy=lambda: False,
+                       changed=lambda: changed.__setitem__('ship', changed['ship'] + 1),
+                       carrier_route=carrier,
+                       carrier_changed=lambda: changed.__setitem__('carrier', changed['carrier'] + 1))
+        return p, page, changed
+
+    def test_each_route_steps_and_clears_on_its_own(self) -> None:
+        p, page, changed = self._page()
+        p.on_action('step', {'delta': 1})
+        self.assertEqual((p.route.next_index, p.carrier_route.next_index), (1, 1))
+        p.on_action('step', {'delta': 1, 'slot': 'carrier'})
+        self.assertEqual((p.route.next_index, p.carrier_route.next_index), (1, 2))
+        p.on_action('clear', {'slot': 'carrier'})
+        self.assertTrue(p.carrier_route.empty)
+        self.assertFalse(p.route.empty)
+        self.assertEqual(changed, {'ship': 1, 'carrier': 2})
+        self.assertIsNone(page.state['carrierRoute'])
+        self.assertEqual(page.state['route']['type'], 'neutron')
+
+    def test_publishes_both_routes(self) -> None:
+        p, page, _ = self._page()
+        p.push()
+        self.assertEqual(page.state['carrierRoute']['type'], 'carrier')
+        self.assertEqual(page.state['carrierRoute']['next'], 'Alioth')
+        self.assertEqual(page.state['route']['next'], 'Sol')
+        self.assertFalse(page.state['plotting'])
+        self.assertFalse(page.state['carrierPlotting'])
 
 
 if __name__ == '__main__':

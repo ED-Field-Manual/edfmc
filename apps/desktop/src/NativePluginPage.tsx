@@ -50,6 +50,12 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
               binding={snap.routeCopyHotkey}
               onSet={snap.setRouteCopyHotkey}
             />
+            <HotkeyField
+              label="Set a hotkey to copy your carrier's next jump"
+              hint="The next system on your fleet carrier's route, ready to paste into the carrier's galaxy map. Works alongside the one above, so you can fly one route and move your carrier along another."
+              binding={snap.carrierCopyHotkey}
+              onSet={snap.setCarrierCopyHotkey}
+            />
           </section>
           <RouterPage state={state} act={act} />
         </>
@@ -66,32 +72,80 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
 
 type Act = (action: string, args?: Record<string, unknown>) => void;
 
+type Slot = 'ship' | 'carrier';
+
+const obj = (v: unknown): State | null => (v && typeof v === 'object' ? (v as State) : null);
+
+/**
+ * Two routes followed at once: the commander's own, and their fleet carrier's.
+ * Each has its own tab; both keep following the game whichever is shown.
+ */
 function RouterPage({ state, act }: { state: State; act: Act }) {
-  const route = state['route'] && typeof state['route'] === 'object' ? (state['route'] as State) : null;
-  const status = state['status'] && typeof state['status'] === 'object' ? (state['status'] as State) : null;
-  const statusText = status ? str(status['text']) : null;
+  const ship = obj(state['route']);
+  const carrier = obj(state['carrierRoute']);
+  const status = obj(state['status']);
+  const [slot, setSlot] = useState<Slot>(() => (!ship && carrier ? 'carrier' : 'ship'));
+  const route = slot === 'carrier' ? carrier : ship;
+  const plotting = state[slot === 'carrier' ? 'carrierPlotting' : 'plotting'] === true;
+  const statusSlot = status?.['slot'] === 'carrier' ? 'carrier' : 'ship';
+  const statusText = status && statusSlot === slot ? str(status['text']) : null;
+  // Each action names the route it is for.
+  const slotAct: Act = (action, args = {}) => act(action, { ...args, slot });
+
+  const summary = (r: State | null, busy: boolean) =>
+    busy ? 'Plotting…' : !r ? 'No route' : r['finished'] === true ? 'Arrived' : `Next: ${str(r['next']) ?? '—'}`;
 
   return (
     <>
+      <div className="router-choice router-slots" role="tablist" aria-label="Which route">
+        {(
+          [
+            { value: 'ship' as const, title: 'Your route', r: ship, busy: state['plotting'] === true },
+            { value: 'carrier' as const, title: 'Carrier route', r: carrier, busy: state['carrierPlotting'] === true },
+          ]
+        ).map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={slot === o.value}
+            className={slot === o.value ? 'active' : ''}
+            onClick={() => setSlot(o.value)}
+          >
+            <strong>{o.title}</strong>
+            <span>{summary(o.r, o.busy)}</span>
+          </button>
+        ))}
+      </div>
       {route ? (
         <>
-          <RouterFollow route={route} act={act} />
-          <WaypointList route={route} act={act} />
+          <RouterFollow route={route} act={slotAct} />
+          <WaypointList route={route} act={slotAct} />
         </>
       ) : (
-        <RouterForm state={state} act={act} />
+        <RouterForm key={slot} state={state} act={act} mode={slot} plotting={plotting} />
       )}
       {/* While plotting, the plotting panel says it; the status line would repeat it. */}
-      {statusText && state['plotting'] !== true && (
+      {statusText && !plotting && (
         <p className={status?.['error'] === true ? 'router-status bad' : 'router-status'}>{statusText}</p>
       )}
     </>
   );
 }
 
-function RouterForm({ state, act }: { state: State; act: Act }) {
+function RouterForm({
+  state,
+  act,
+  mode,
+  plotting,
+}: {
+  state: State;
+  act: Act;
+  /** Which route this form plots: the commander's own, or their carrier's. */
+  mode: Slot;
+  plotting: boolean;
+}) {
   const current = str(state['currentSystem']);
-  const plotting = state['plotting'] === true;
   const [source, setSource] = useState(current ?? '');
   const [destination, setDestination] = useState('');
   const [range, setRange] = useState(() => {
@@ -106,7 +160,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
     num(shipInfo?.['superchargeMultiplier']) === 6 || num(state['supercharge']) === 6 ? 6 : 4,
   );
   const [type, setType] = useState<RouteType>(
-    remembered['type'] === 'exact' || remembered['type'] === 'carrier' ? remembered['type'] : 'neutron',
+    mode === 'carrier' ? 'carrier' : remembered['type'] === 'exact' ? 'exact' : 'neutron',
   );
   const carriers = readCarriers(state['carriers']);
   const [carrier, setCarrier] = useState<CarrierForm>(() => ({
@@ -153,12 +207,12 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
 
   return (
     <section className="card router-card">
-      <h2>Plot a route</h2>
+      <h2>{mode === 'carrier' ? 'Plot a carrier route' : 'Plot a route'}</h2>
+      {mode === 'ship' && (
       <div className="router-choice router-type" role="radiogroup" aria-label="Route type">
         {[
           { value: 'neutron' as const, title: 'Neutron route', detail: 'Fastest: boosts at neutron stars' },
           { value: 'exact' as const, title: 'Normal jumps', detail: 'Every jump and fuel stop, for your ship' },
-          { value: 'carrier' as const, title: 'Fleet carrier', detail: 'Carrier jumps and the tritium they burn' },
         ].map((o) => (
           <button
             key={o.value}
@@ -173,6 +227,7 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
           </button>
         ))}
       </div>
+      )}
       <p className="muted">
         {type === 'neutron'
           ? "Spansh's neutron plotter. Start typing a system name for suggestions."
@@ -386,9 +441,11 @@ function RouterForm({ state, act }: { state: State; act: Act }) {
         >
           {plotting ? 'Plotting…' : 'Plot route'}
         </button>
-        <button type="button" className="secondary" onClick={() => act('import')}>
-          Import CSV…
-        </button>
+        {mode === 'ship' && (
+          <button type="button" className="secondary" onClick={() => act('import')}>
+            Import CSV…
+          </button>
+        )}
       </div>
       </fieldset>
     </section>

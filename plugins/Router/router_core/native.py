@@ -7,6 +7,10 @@ changes, and the app draws the Router tab itself: it scrolls, resizes and moves
 with the window like every other page. The commander's input comes back as
 actions (`plot`, `suggest`, `copy`, `step`, `clear`, `import`).
 
+There are two routes, followed at the same time: the commander's own (`ship`)
+and their fleet carrier's (`carrier`). Actions that act on a route name it in
+`slot`; without one they mean the ship route, as before.
+
 The route logic is the same as the tkinter panel's (`route.py`, `spansh.py`);
 only who draws it differs. In EDMC this module is never used.
 """
@@ -37,8 +41,12 @@ class NativePage:
                  loadout: Callable[[], dict | None] = lambda: None,
                  settings: Callable[[], dict] = lambda: {},
                  save_settings: Callable[[dict], None] = lambda v: None,
-                 journal_dir: Callable[[], str | None] = lambda: None) -> None:
+                 journal_dir: Callable[[], str | None] = lambda: None,
+                 carrier_route: Route | None = None,
+                 carrier_changed: Callable[[], None] = lambda: None) -> None:
         self.route = route
+        self.carrier_route = carrier_route if carrier_route is not None else Route()
+        self._carrier_changed = carrier_changed
         self._current_system = current_system
         self._current_address = current_address
         self._jump_range = jump_range
@@ -55,8 +63,9 @@ class NativePage:
         self.fleet: fleet_mod.Fleet | None = None
         #: The commander's carriers, for the carrier planner's form.
         self.carriers: carrier_mod.Carriers | None = None
-        self.plotting = False
-        self.status: dict[str, Any] = {'text': '', 'error': False}
+        #: Per route: the ship and the carrier can be plotted at the same time.
+        self.plotting: dict[str, bool] = {'ship': False, 'carrier': False}
+        self.status: dict[str, Any] = {'text': '', 'error': False, 'slot': 'ship'}
         self.suggestions: dict[str, Any] | None = None
         self._done: queue.Queue[Callable[[], None]] = queue.Queue()
         self._polling = False
@@ -155,7 +164,27 @@ class NativePage:
     # -- state -------------------------------------------------------------
 
     def state(self) -> dict[str, Any]:
-        r = self.route
+        return {
+            'kind': KIND,
+            'currentSystem': self._current_system(),
+            'jumpRange': self._jump_range(),
+            'efficiency': self._efficiency(),
+            'supercharge': self._supercharge(),
+            'settings': self._settings(),
+            'ship': self._ship_state(),
+            'fleet': self.fleet.ships() if self.fleet is not None else None,
+            'selectedShip': self._selected_id(),
+            'carriers': self.carriers.to_json() if self.carriers is not None else None,
+            'plotting': self.plotting['ship'],
+            'carrierPlotting': self.plotting['carrier'],
+            'status': self.status,
+            'route': self._route_view(self.route),
+            'carrierRoute': self._route_view(self.carrier_route),
+            'suggestions': self.suggestions,
+        }
+
+    @staticmethod
+    def _route_view(r: Route) -> dict[str, Any] | None:
         route = None
         if not r.empty:
             s = bridge.summary(r) or {}
@@ -188,22 +217,7 @@ class NativePage:
                     for i, w in enumerate(r.waypoints)
                 ],
             }
-        return {
-            'kind': KIND,
-            'currentSystem': self._current_system(),
-            'jumpRange': self._jump_range(),
-            'efficiency': self._efficiency(),
-            'supercharge': self._supercharge(),
-            'settings': self._settings(),
-            'ship': self._ship_state(),
-            'fleet': self.fleet.ships() if self.fleet is not None else None,
-            'selectedShip': self._selected_id(),
-            'carriers': self.carriers.to_json() if self.carriers is not None else None,
-            'plotting': self.plotting,
-            'status': self.status,
-            'route': route,
-            'suggestions': self.suggestions,
-        }
+        return route
 
     def _ship_state(self) -> dict[str, Any]:
         """What the exact plotter will use: the ship, and whether its figures check out."""
@@ -231,10 +245,17 @@ class NativePage:
             self.page.update(self.state())
         except Exception:
             pass
-        bridge.publish(self.route)
+        bridge.publish(self.route, self.carrier_route)
 
-    def say(self, text: str, error: bool = False) -> None:
-        self.status = {'text': text, 'error': error}
+    def say(self, text: str, error: bool = False, slot: str = 'ship') -> None:
+        self.status = {'text': text, 'error': error, 'slot': slot}
+
+    @staticmethod
+    def _slot(args: dict) -> str:
+        return 'carrier' if args.get('slot') == 'carrier' else 'ship'
+
+    def _route_for(self, slot: str) -> Route:
+        return self.carrier_route if slot == 'carrier' else self.route
 
     # -- actions -----------------------------------------------------------
 
@@ -284,7 +305,7 @@ class NativePage:
             options = args.get('options') if isinstance(args.get('options'), dict) else {}
             exact = (figures, options)
             jump_range = figures.calculated_range  # not used by the exact plotter; keeps the check below quiet
-        remembered = {'type': 'exact' if exact else 'neutron'}
+        remembered: dict[str, Any] = {'type': 'exact' if exact else 'neutron'}
         if exact:
             remembered['options'] = exact[1]
         self._save_settings({**self._settings(), **remembered})
@@ -292,14 +313,14 @@ class NativePage:
             self.say('Enter where to plot from and to.', error=True)
         elif jump_range <= 0:
             self.say('Enter your jump range in light years.', error=True)
-        elif not self.plotting:
+        elif not self.plotting['ship']:
             self._set_efficiency(efficiency)
             self._set_supercharge(supercharge)
-            self.plotting = True
+            self.plotting['ship'] = True
             self.suggestions = None
             self.say('Plotting your route… please wait. Long routes can take up to a minute.')
             spansh.plot_in_background(source, destination, jump_range, efficiency,
-                                      lambda route, error: self._later(lambda: self._plotted(route, error)),
+                                      lambda route, error: self._later(lambda: self._plotted(route, error, 'ship')),
                                       via=via, supercharge=supercharge, exact=exact)
             self._watch()
         self.push()
@@ -320,20 +341,20 @@ class NativePage:
                 fuel = max(0, min(spansh.CARRIER_TANK, int(float(args.get('fuel') or 0))))
                 market = max(0, int(float(args.get('market') or 0)))
             except (TypeError, ValueError):
-                self.say('Enter the tritium in the tank and in the market as whole tonnes.', error=True)
+                self.say('Enter the tritium in the tank and in the market as whole tonnes.', error=True, slot='carrier')
                 self.push()
                 return
         refuel_at = [str(v) for v in (args.get('refuelAt') or []) if isinstance(v, str)]
-        self._save_settings({**self._settings(), 'type': 'carrier', 'carrierType': kind})
+        self._save_settings({**self._settings(), 'carrierType': kind})
         if not source or not destination:
-            self.say('Enter where the carrier is and where it should go.', error=True)
-        elif not self.plotting:
-            self.plotting = True
+            self.say('Enter where the carrier is and where it should go.', error=True, slot='carrier')
+        elif not self.plotting['carrier']:
+            self.plotting['carrier'] = True
             self.suggestions = None
-            self.say('Plotting the carrier route… please wait.')
+            self.say('Plotting the carrier route… please wait.', slot='carrier')
             spansh.plot_in_background(
                 source, destination, 0, 0,
-                lambda route, error: self._later(lambda: self._plotted(route, error)),
+                lambda route, error: self._later(lambda: self._plotted(route, error, 'carrier')),
                 carrier={'stops': stops, 'type': kind, 'used': used, 'fuel': fuel,
                          'market': market, 'refuel_at': refuel_at})
             self._watch()
@@ -343,25 +364,31 @@ class NativePage:
         """Which carrier the current route is for: 'fleet' or 'squadron'."""
         return 'squadron' if self._settings().get('carrierType') == 'squadron' else 'fleet'
 
-    def _plotted(self, route: Route | None, error: str | None) -> None:
-        self.plotting = False
+    def _plotted(self, route: Route | None, error: str | None, slot: str = 'ship') -> None:
+        self.plotting[slot] = False
         if error or route is None:
-            self.say(error or 'Spansh returned no route.', error=True)
+            self.say(error or 'Spansh returned no route.', error=True, slot=slot)
         else:
-            if route.is_carrier:
+            if slot == 'carrier':
                 # The carrier starts where it is, which is the route's first system.
                 route.next_index = min(1, len(route.waypoints))
+                tritium = sum(w.tritium_used or 0 for w in route.waypoints)
+                self.say(f'Carrier route plotted: {route.total_jumps()} jumps, {tritium:,} t of tritium.', slot=slot)
             else:
                 route.start_from(self._current_system(), self._current_address())
-            self._set_route(route)
-            if route.is_carrier:
-                tritium = sum(w.tritium_used or 0 for w in route.waypoints)
-                self.say(f'Carrier route plotted: {route.total_jumps()} jumps, {tritium:,} t of tritium.')
-            else:
                 self.say(f'Route plotted: {len(route.waypoints)} waypoints, {route.total_jumps()} jumps.')
-            if self._auto_copy():
-                self._copy({'quiet': True})
+            self._set_route(route, slot)
+            if self._auto_copy() and self._may_auto_copy(slot):
+                self._copy({'quiet': True, 'slot': slot})
         self.push()
+
+    def _may_auto_copy(self, slot: str) -> bool:
+        """The clipboard has one owner: the ship route, while there is one.
+
+        Copying a carrier jump as the carrier arrives would replace the system
+        the commander is about to paste into their own galaxy map.
+        """
+        return slot == 'ship' or self.route.empty or self.route.finished
 
     def _suggest(self, args: dict) -> None:
         field = str(args.get('field') or '')
@@ -382,14 +409,15 @@ class NativePage:
         self.push()
 
     def _copy(self, args: dict) -> None:
-        nxt = self.route.next
+        slot = self._slot(args)
+        nxt = self._route_for(slot).next
         root = self._root()
         if nxt is None or root is None:
             return
         root.clipboard_clear()
         root.clipboard_append(nxt.system)
         if not args.get('quiet'):
-            self.say(f'Copied {nxt.system} to the clipboard.')
+            self.say(f'Copied {nxt.system} to the clipboard.', slot=slot)
             self.push()
 
     def _step(self, args: dict) -> None:
@@ -397,10 +425,11 @@ class NativePage:
             delta = int(args.get('delta') or 0)
         except (TypeError, ValueError):
             return
-        self.route.step(delta)
-        self._changed()
+        slot = self._slot(args)
+        self._route_for(slot).step(delta)
+        self._notify_changed(slot)
         if self._auto_copy():
-            self._copy({'quiet': True})
+            self._copy({'quiet': True, 'slot': slot})
         self.push()
 
     def _select_ship(self, args: dict) -> None:
@@ -414,10 +443,11 @@ class NativePage:
             index = int(args.get('index'))
         except (TypeError, ValueError):
             return
-        self.route.goto(index)
-        self._changed()
+        slot = self._slot(args)
+        self._route_for(slot).goto(index)
+        self._notify_changed(slot)
         if self._auto_copy():
-            self._copy({'quiet': True})
+            self._copy({'quiet': True, 'slot': slot})
         self.push()
 
     def _copy_system(self, args: dict) -> None:
@@ -432,8 +462,9 @@ class NativePage:
         self.push()
 
     def _clear(self, args: dict) -> None:
-        self._set_route(Route())
-        self.say('')
+        slot = self._slot(args)
+        self._set_route(Route(), slot)
+        self.say('', slot=slot)
         self.push()
 
     def _import(self, args: dict) -> None:
@@ -453,18 +484,40 @@ class NativePage:
         self.say(f'Imported {len(route.waypoints)} waypoints.')
         self.push()
 
-    def _set_route(self, route: Route) -> None:
-        self.route = route
-        self._changed()
+    def _set_route(self, route: Route, slot: str = 'ship') -> None:
+        if slot == 'carrier':
+            self.carrier_route = route
+        else:
+            self.route = route
+        self._notify_changed(slot)
+
+    def _notify_changed(self, slot: str) -> None:
+        if slot == 'carrier':
+            self._carrier_changed()
+        else:
+            self._changed()
 
     # -- the game ----------------------------------------------------------
 
     def arrived(self, system: str | None, address: int | None) -> None:
+        """The commander is now in a system: moves the ship route on."""
         if self.route.arrived(system, address):
             self._changed()
             if self._auto_copy() and self.route.next is not None:
                 self._copy({'quiet': True})
                 self.say(f'Next waypoint copied: {self.route.next.system}')
+        self.push()
+
+    def carrier_arrived(self, system: str | None, address: int | None) -> None:
+        """The commander's carrier is now in a system: moves the carrier route on."""
+        r = self.carrier_route
+        if r.arrived(system, address):
+            self._carrier_changed()
+            if self._auto_copy() and self._may_auto_copy('carrier') and r.next is not None:
+                self._copy({'quiet': True, 'slot': 'carrier'})
+                self.say(f'Carrier arrived. Next carrier jump copied: {r.next.system}', slot='carrier')
+            elif r.next is not None:
+                self.say(f'Carrier arrived. Next carrier jump: {r.next.system}', slot='carrier')
         self.push()
 
     def located(self) -> None:

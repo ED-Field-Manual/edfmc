@@ -506,6 +506,9 @@ export interface CompanionSnapshot {
   /** Hotkey that copies the next route waypoint (Router), or null when unset. */
   readonly routeCopyHotkey: string | null;
   readonly setRouteCopyHotkey: (binding: string | null) => Promise<string | null>;
+  /** Copies the fleet carrier route's next jump, alongside the ship route's hotkey. */
+  readonly carrierCopyHotkey: string | null;
+  readonly setCarrierCopyHotkey: (binding: string | null) => Promise<string | null>;
   readonly setScreenshotFolder: (path: string) => Promise<boolean>;
   readonly updateScreenshot: (id: string, patch: Partial<ScreenshotRecord>) => Promise<void>;
   readonly removeScreenshotFromCatalog: (id: string) => Promise<void>;
@@ -2667,6 +2670,8 @@ export class Companion {
    */
   private routeCopyHotkey: string | null = null;
   private routeHotkeyError: string | null = null;
+  private carrierCopyHotkey: string | null = null;
+  private carrierHotkeyError: string | null = null;
   /** Rebuilt on every catalog read; never persisted, because it is not a fact
       about the screenshot but about the disk at this moment. */
   private missingScreenshots: ReadonlySet<string> = new Set();
@@ -2717,6 +2722,7 @@ export class Companion {
 
     this.screenshotFolderOk = await this.checkScreenshotFolder();
     this.routeCopyHotkey = (await this.getSetting('route.copyHotkey')) || null;
+    this.carrierCopyHotkey = (await this.getSetting('route.carrierCopyHotkey')) || null;
     await this.registerScreenshotHotkey();
     this.notify();
   }
@@ -2793,8 +2799,12 @@ export class Companion {
       this.screenshotError = taken;
       this.notify();
     }
-    if (!(await bind(this.routeCopyHotkey, () => void this.pythonPlugins.copyRouteWaypoint()))) {
+    if (!(await bind(this.routeCopyHotkey, () => void this.pythonPlugins.copyRouteWaypoint('ship')))) {
       this.routeHotkeyError = taken;
+      this.notify();
+    }
+    if (!(await bind(this.carrierCopyHotkey, () => void this.pythonPlugins.copyRouteWaypoint('carrier')))) {
+      this.carrierHotkeyError = taken;
       this.notify();
     }
   }
@@ -2808,6 +2818,7 @@ export class Companion {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
       if (binding === this.screenshotHotkey) return 'That combination already captures screenshots.';
+      if (binding === this.carrierCopyHotkey) return 'That combination already copies the carrier’s next jump.';
     }
     const previous = this.routeCopyHotkey;
     this.routeCopyHotkey = binding;
@@ -2826,6 +2837,31 @@ export class Companion {
     return null;
   };
 
+  /** The same, for the fleet carrier route's next jump. */
+  readonly setCarrierCopyHotkey = async (binding: string | null): Promise<string | null> => {
+    if (binding !== null) {
+      const check = validateHotkey(binding);
+      if (!check.ok) return check.reason;
+      if (binding === this.screenshotHotkey) return 'That combination already captures screenshots.';
+      if (binding === this.routeCopyHotkey) return 'That combination already copies your next waypoint.';
+    }
+    const previous = this.carrierCopyHotkey;
+    this.carrierCopyHotkey = binding;
+    this.carrierHotkeyError = null;
+    await this.registerScreenshotHotkey();
+    if (this.carrierHotkeyError !== null) {
+      const reason = this.carrierHotkeyError;
+      this.carrierCopyHotkey = previous;
+      await this.registerScreenshotHotkey();
+      this.carrierHotkeyError = reason;
+      this.notify();
+      return reason;
+    }
+    await this.setSetting('route.carrierCopyHotkey', binding ?? '');
+    this.notify();
+    return null;
+  };
+
   /**
    * Choose or clear the capture hotkey.
    *
@@ -2837,6 +2873,7 @@ export class Companion {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
       if (binding === this.routeCopyHotkey) return 'That combination already copies the next waypoint.';
+      if (binding === this.carrierCopyHotkey) return 'That combination already copies the carrier’s next jump.';
     }
 
     const previous = this.screenshotHotkey;
@@ -3988,6 +4025,8 @@ export class Companion {
         setScreenshotHotkey: this.setScreenshotHotkey,
         routeCopyHotkey: this.routeCopyHotkey,
         setRouteCopyHotkey: this.setRouteCopyHotkey,
+        carrierCopyHotkey: this.carrierCopyHotkey,
+        setCarrierCopyHotkey: this.setCarrierCopyHotkey,
         setScreenshotFolder: this.setScreenshotFolder,
         updateScreenshot: this.updateScreenshot,
         removeScreenshotFromCatalog: this.removeScreenshotFromCatalog,

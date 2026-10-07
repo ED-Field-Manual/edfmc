@@ -72,6 +72,15 @@ export interface PluginRoute {
   readonly waypoint: number;
   readonly waypoints: number;
   readonly finished: boolean;
+  /** Set when only a carrier route is being followed. */
+  readonly noShipRoute: boolean;
+  /** The fleet carrier's route, followed alongside, when there is one. */
+  readonly carrier: {
+    readonly next: string | null;
+    readonly destination: string | null;
+    readonly jumpsLeft: number;
+    readonly finished: boolean;
+  } | null;
 }
 
 export function readPluginRoute(data: unknown): PluginRoute | null {
@@ -87,6 +96,19 @@ export function readPluginRoute(data: unknown): PluginRoute | null {
     waypoint: num(d['waypoint']),
     waypoints: num(d['waypoints']),
     finished: d['finished'] === true,
+    noShipRoute: d['noShipRoute'] === true,
+    carrier:
+      d['carrier'] !== null && typeof d['carrier'] === 'object'
+        ? (() => {
+            const c = d['carrier'] as Record<string, unknown>;
+            return {
+              next: str(c['next']),
+              destination: str(c['destination']),
+              jumpsLeft: num(c['jumpsLeft']),
+              finished: c['finished'] === true,
+            };
+          })()
+        : null,
   };
 }
 
@@ -241,12 +263,13 @@ export class PythonPlugins {
    * Asked of the plugin that owns the route, which already copies on arrival,
    * so the clipboard has one writer.
    */
-  async copyRouteWaypoint(): Promise<void> {
+  async copyRouteWaypoint(slot: 'ship' | 'carrier' = 'ship'): Promise<void> {
+    const key = slot === 'carrier' ? 'carrierRoute' : 'route';
     const folder = Object.keys(this.pages).find((f) => {
       const page = this.pages[f]!;
-      return page['kind'] === 'router-v1' && page['route'] !== null;
+      return page['kind'] === 'router-v1' && page[key] !== null && page[key] !== undefined;
     });
-    if (folder !== undefined) await this.action(folder, 'copy');
+    if (folder !== undefined) await this.action(folder, 'copy', { slot });
   }
 
   /** Send the commander's input on a native page to its plugin. */

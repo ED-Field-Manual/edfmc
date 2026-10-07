@@ -81,6 +81,8 @@ interface PluginRoute {
   waypoint: number;
   waypoints: number;
   finished: boolean;
+  noShipRoute?: boolean;
+  carrier?: { next: string | null; destination: string | null; jumpsLeft: number; finished: boolean } | null;
 }
 
 interface OverlayAppearance {
@@ -157,20 +159,33 @@ function exitEditMode(): void {
  * the system on the clipboard for the galaxy map.
  */
 function RouteWidget({ route }: { route: PluginRoute }) {
-  if (route.finished || route.next === null) {
-    return <div className="rt-done">Arrived{route.destination ? ` at ${route.destination}` : ''}</div>;
-  }
+  const carrier = route.carrier ?? null;
   return (
     <>
-      <div className="rt-next">
-        {route.next}
-        {route.nextIsNeutron && <span className="rt-neutron"> neutron</span>}
-      </div>
-      <div className="rt-line">
-        {route.jumpsLeft} {route.jumpsLeft === 1 ? 'jump' : 'jumps'} left · waypoint {route.waypoint} of{' '}
-        {route.waypoints}
-        {route.destination && <> · to {route.destination}</>}
-      </div>
+      {route.noShipRoute ? null : route.finished || route.next === null ? (
+        <div className="rt-done">Arrived{route.destination ? ` at ${route.destination}` : ''}</div>
+      ) : (
+        <>
+          <div className="rt-next">
+            {route.next}
+            {route.nextIsNeutron && <span className="rt-neutron"> neutron</span>}
+          </div>
+          <div className="rt-line">
+            {route.jumpsLeft} {route.jumpsLeft === 1 ? 'jump' : 'jumps'} left · waypoint {route.waypoint} of{' '}
+            {route.waypoints}
+            {route.destination && <> · to {route.destination}</>}
+          </div>
+        </>
+      )}
+      {carrier && (
+        // The fleet carrier's route, followed alongside the commander's own.
+        <div className="rt-line rt-carrier">
+          Carrier:{' '}
+          {carrier.finished || carrier.next === null
+            ? `arrived${carrier.destination ? ` at ${carrier.destination}` : ''}`
+            : `${carrier.next} next · ${carrier.jumpsLeft} ${carrier.jumpsLeft === 1 ? 'jump' : 'jumps'} left`}
+        </div>
+      )}
     </>
   );
 }

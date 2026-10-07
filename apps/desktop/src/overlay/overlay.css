@@ -530,3 +530,5 @@ body,
 .rt-next { font-size: 1.05em; font-weight: 700; }
 .rt-neutron { font-size: 0.75em; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
 .rt-line, .rt-done { font-size: 0.85em; opacity: 0.85; }
+
+.rt-carrier { margin-top: 0.25rem; }

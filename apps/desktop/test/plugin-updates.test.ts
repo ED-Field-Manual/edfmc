@@ -177,9 +177,25 @@ describe('a route a plugin publishes', () => {
       waypoint: 2,
       waypoints: 129,
       finished: false,
+      noShipRoute: false,
+      carrier: null,
     });
     expect(readPluginRoute(null)).toBeNull();
     expect(readPluginRoute({ next: 42, jumpsLeft: -3 })).toMatchObject({ next: null, jumpsLeft: 0 });
+  });
+
+  it('carries the fleet carrier route alongside, or on its own', async () => {
+    const { readPluginRoute } = await import('../src/lib/pythonPlugins');
+    // As Router 0.8.0 publishes with only a carrier route.
+    const r = readPluginRoute({
+      next: null,
+      finished: false,
+      noShipRoute: true,
+      carrier: { next: 'Alioth', destination: 'Achenar', jumpsLeft: 2, finished: false, extra: 'x' },
+    });
+    expect(r?.noShipRoute).toBe(true);
+    expect(r?.carrier).toEqual({ next: 'Alioth', destination: 'Achenar', jumpsLeft: 2, finished: false });
+    expect(readPluginRoute({ next: 'Sol', carrier: 'nonsense' })?.carrier).toBeNull();
   });
 });
 
@@ -187,9 +203,9 @@ describe('the route hotkey', () => {
   it('asks the plugin that owns the route to copy its next waypoint', async () => {
     const { PythonPlugins } = await import('../src/lib/pythonPlugins');
     const plugins = new PythonPlugins({ getSetting: async () => null, setSetting: async () => {}, changed: () => {} });
-    const sent: Array<[string, string]> = [];
-    plugins.action = async (folder: string, action: string) => {
-      sent.push([folder, action]);
+    const sent: Array<[string, string, unknown]> = [];
+    plugins.action = async (folder: string, action: string, args: Record<string, unknown> = {}) => {
+      sent.push([folder, action, args['slot']]);
     };
     // No route yet: nothing to copy, nothing asked.
     (plugins as unknown as { pages: Record<string, unknown> }).pages = {
@@ -202,6 +218,25 @@ describe('the route hotkey', () => {
       Router: { kind: 'router-v1', route: { next: 'Achenar' } },
     };
     await plugins.copyRouteWaypoint();
-    expect(sent).toEqual([['Router', 'copy']]);
+    expect(sent).toEqual([['Router', 'copy', 'ship']]);
+  });
+
+  it('the carrier hotkey copies the carrier route’s next jump, and only when there is one', async () => {
+    const { PythonPlugins } = await import('../src/lib/pythonPlugins');
+    const plugins = new PythonPlugins({ getSetting: async () => null, setSetting: async () => {}, changed: () => {} });
+    const sent: Array<[string, string, unknown]> = [];
+    plugins.action = async (folder: string, action: string, args: Record<string, unknown> = {}) => {
+      sent.push([folder, action, args['slot']]);
+    };
+    (plugins as unknown as { pages: Record<string, unknown> }).pages = {
+      Router: { kind: 'router-v1', route: { next: 'Sol' }, carrierRoute: null },
+    };
+    await plugins.copyRouteWaypoint('carrier');
+    expect(sent).toEqual([]);
+    (plugins as unknown as { pages: Record<string, unknown> }).pages = {
+      Router: { kind: 'router-v1', route: null, carrierRoute: { next: 'Alioth' } },
+    };
+    await plugins.copyRouteWaypoint('carrier');
+    expect(sent).toEqual([['Router', 'copy', 'carrier']]);
   });
 });

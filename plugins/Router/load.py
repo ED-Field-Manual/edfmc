@@ -28,7 +28,7 @@ from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.7.0'
+plugin_version = '0.8.0'
 
 try:
     from config import config  # provided by the host
@@ -48,6 +48,8 @@ except ImportError:
 _state: dict[str, Any] = {
     'dir': _HERE,
     'route': Route(),
+    #: The fleet carrier's route, followed alongside the commander's own.
+    'carrier_route': Route(),
     'panel': None,
     'system': None,
     'address': None,
@@ -58,6 +60,17 @@ _state: dict[str, Any] = {
 
 def _route_path() -> str:
     return os.path.join(_state['dir'], 'route.json')
+
+
+def _carrier_route_path() -> str:
+    return os.path.join(_state['dir'], 'carrier_route.json')
+
+
+def _save_carrier() -> None:
+    try:
+        _state['carrier_route'].save(_carrier_route_path())
+    except OSError:
+        pass
 
 
 def _save() -> None:
@@ -168,6 +181,11 @@ def _route_changed() -> None:
     _save()
 
 
+def _carrier_route_changed() -> None:
+    _state['carrier_route'] = _state['panel'].carrier_route
+    _save_carrier()
+
+
 def _hooks() -> dict[str, Any]:
     return dict(
         current_system=lambda: _state['system'],
@@ -189,6 +207,8 @@ def _native_hooks() -> dict[str, Any]:
         settings=lambda: _settings_get(),
         save_settings=_settings_set,
         journal_dir=lambda: getattr(monitor, 'currentdir', None) if monitor is not None else None,
+        carrier_route=_state['carrier_route'],
+        carrier_changed=_carrier_route_changed,
     )
 
 
@@ -200,9 +220,26 @@ def _arrived(system: str | None, address: int | None) -> None:
         _save()
 
 
+def _carrier_arrived(system: str | None, address: int | None) -> None:
+    panel = _state['panel']
+    if isinstance(panel, NativePage):
+        panel.carrier_arrived(system, address)
+    elif _state['carrier_route'].arrived(system, address):
+        _save_carrier()
+
+
 def plugin_start3(plugin_dir: str) -> str:
     _state['dir'] = plugin_dir
     _state['route'] = Route.load(_route_path())
+    _state['carrier_route'] = Route.load(_carrier_route_path())
+    if _state['route'].is_carrier:
+        # Router 0.7.0 kept a carrier route in the one route slot. It moves to
+        # its own, unless a carrier route is already there.
+        if _state['carrier_route'].empty:
+            _state['carrier_route'] = _state['route']
+            _save_carrier()
+        _state['route'] = Route()
+        _save()
     _where_am_i()
     # In EDFM Companion the app draws Router's tab natively from the state
     # published here, instead of hosting a tkinter panel. Elsewhere there is no
@@ -268,18 +305,17 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     if event in ('Location', 'FSDJump', 'CarrierJump'):
         _state['system'] = entry.get('StarSystem')
         _state['address'] = entry.get('SystemAddress')
-        # A carrier route moves with the carrier, not with the commander's own
-        # ship: only a jump made aboard the carrier counts here.
-        if not _state['route'].is_carrier or event == 'CarrierJump':
-            _arrived(_state['system'], _state['address'])
-        elif _state['panel'] is not None:
-            _state['panel'].located()
-    elif event == 'CarrierLocation' and _state['route'].is_carrier:
+        # The commander's own route follows the commander, aboard a carrier or not.
+        _arrived(_state['system'], _state['address'])
+        # The carrier route follows the carrier: a jump made aboard it counts.
+        if event == 'CarrierJump':
+            _carrier_arrived(_state['system'], _state['address'])
+    elif event == 'CarrierLocation' and not _state['carrier_route'].empty:
         # Written at login and after the carrier jumps, even when the commander
         # is elsewhere. Only the kind of carrier the route was plotted for counts.
         kind = {'FleetCarrier': 'fleet', 'SquadronCarrier': 'squadron'}.get(entry.get('CarrierType'))
         if kind is not None and kind == _settings_get().get('carrierType', 'fleet'):
-            _arrived(entry.get('StarSystem'), entry.get('SystemAddress'))
+            _carrier_arrived(entry.get('StarSystem'), entry.get('SystemAddress'))
     elif _state['system'] is None and system:
         # Started mid-session: the host knows the system even before a jump.
         _state['system'] = system

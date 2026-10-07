@@ -41,11 +41,26 @@ def summary(route: Route) -> dict[str, Any] | None:
     }
 
 
-def publish(route: Route) -> None:
+def overlay(route: Route, carrier: Route | None = None) -> dict[str, Any] | None:
+    """The ship route's summary, with the carrier route's under `carrier`.
+
+    Either may be absent. None when there is nothing to show at all.
+    """
+    ship = summary(route)
+    fc = summary(carrier) if carrier is not None else None
+    if ship is None and fc is None:
+        return None
+    out: dict[str, Any] = dict(ship) if ship is not None else {'next': None, 'finished': False, 'noShipRoute': True}
+    if fc is not None:
+        out['carrier'] = {k: fc[k] for k in ('next', 'destination', 'jumpsLeft', 'finished')}
+    return out
+
+
+def publish(route: Route, carrier: Route | None = None) -> None:
     if not available():
         return
     try:
-        edfmc.publish('route', summary(route))
+        edfmc.publish('route', overlay(route, carrier))
     except Exception:
         # The overlay is a convenience; the plugin must keep working without it.
         pass
