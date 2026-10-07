@@ -31,6 +31,8 @@ export interface PythonPluginStatus {
   readonly version: string | null;
   readonly hasPanel: boolean;
   readonly hasSettings: boolean;
+  /** Drawn by the app from state the plugin publishes, not by tkinter. */
+  readonly native?: boolean;
   /** The plugin's README, shown as plain text. */
   readonly readme: string | null;
   /** `origin` from the plugin's .git/config, when it was cloned. */
@@ -54,6 +56,8 @@ export interface PythonPluginView {
   readonly updates: Readonly<Record<string, UpdateResult>>;
   /** The route a plugin published for the overlay, or null. */
   readonly route: PluginRoute | null;
+  /** Native pages' latest state, by plugin folder. See `edfmc.register_page`. */
+  readonly pages: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /**
@@ -117,6 +121,8 @@ export class PythonPlugins {
   private checking = false;
   private updates: Record<string, UpdateResult> = {};
   private route: PluginRoute | null = null;
+  /** The latest page state each native plugin published, by folder. */
+  private pages: Record<string, Readonly<Record<string, unknown>>> = {};
   /** Repos the commander pasted, by plugin folder. */
   private repos: Record<string, string> = {};
 
@@ -134,6 +140,7 @@ export class PythonPlugins {
       checking: this.checking,
       updates: this.updates,
       route: this.route,
+      pages: this.pages,
     };
   }
 
@@ -229,6 +236,15 @@ export class PythonPlugins {
     }
   }
 
+  /** Send the commander's input on a native page to its plugin. */
+  async action(folder: string, action: string, args: Record<string, unknown> = {}): Promise<void> {
+    try {
+      await invoke('plugin_host_action', { folder, action, args });
+    } catch (err) {
+      logger.warn('plugins', 'Could not send a plugin action', { error: String(err) });
+    }
+  }
+
   /** Stop and start again, so newly added plugin folders are picked up. */
   async restart(): Promise<void> {
     await this.stop();
@@ -295,12 +311,20 @@ export class PythonPlugins {
       case 'error':
         this.problem = typeof message['message'] === 'string' ? message['message'] : 'Plugins stopped.';
         break;
+      case 'page': {
+        const folder = message['folder'];
+        const state = message['state'];
+        if (typeof folder !== 'string' || state === null || typeof state !== 'object') return;
+        this.pages = { ...this.pages, [folder]: state as Record<string, unknown> };
+        break;
+      }
       case 'publish':
         if (message['topic'] !== 'route') return;
         this.route = readPluginRoute(message['data']);
         break;
       case 'exited':
         this.route = null;
+        this.pages = {};
         this.running = false;
         this.pid = null;
         if (!this.stopping && this.enabled && this.problem === null) {

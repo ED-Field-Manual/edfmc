@@ -5211,6 +5211,10 @@ export class Companion {
     return this.pythonPlugins.setRepo(folder, link);
   }
 
+  pluginAction(folder: string, action: string, args: Record<string, unknown> = {}): Promise<void> {
+    return this.pythonPlugins.action(folder, action, args);
+  }
+
   restartPythonPlugins(): Promise<void> {
     return this.pythonPlugins.restart();
   }

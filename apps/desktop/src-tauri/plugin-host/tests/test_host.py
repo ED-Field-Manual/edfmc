@@ -203,6 +203,43 @@ class EdfmcModuleTest(unittest.TestCase):
             edfmc.publish('route', {'not json': object()})
 
 
+class NativePageTest(unittest.TestCase):
+    """A plugin can have its tab drawn by the app instead of by tkinter."""
+
+    def test_register_page_marks_the_plugin_native_and_routes_actions(self) -> None:
+        import host_bridge
+        path = os.path.join(config.plugin_dir_path, 'Native')
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, 'load.py'), 'w', encoding='utf-8') as f:
+            f.write(textwrap.dedent('''
+                import edfmc
+                seen = []
+                def plugin_start3(plugin_dir):
+                    global page
+                    page = edfmc.register_page(lambda name, args: seen.append((name, args)))
+                    return 'Native'
+                def plugin_app(parent):
+                    raise AssertionError('a native plugin gets no tkinter panel')
+            '''))
+        plugin = host.Plugin('Native', path)
+        host.load(plugin)
+        self.assertTrue(plugin.native)
+        self.assertTrue(plugin.describe()['native'])
+
+        updates = []
+        host_bridge.set_page_handler(lambda folder, state: updates.append((folder, state)))
+        plugin.module.page.update({'kind': 'test', 'n': 1})
+        self.assertEqual(updates, [('Native', {'kind': 'test', 'n': 1})])
+
+        host_bridge.pages['Native']('plot', {'to': 'Colonia'})
+        self.assertEqual(plugin.module.seen, [('plot', {'to': 'Colonia'})])
+
+    def test_register_page_outside_start_is_refused(self) -> None:
+        import edfmc
+        with self.assertRaises(RuntimeError):
+            edfmc.register_page(lambda n, a: None)
+
+
 class TailTest(unittest.TestCase):
     def test_primes_without_delivering_then_delivers_new_lines(self) -> None:
         jdir = os.path.join(_TMP, 'tail')

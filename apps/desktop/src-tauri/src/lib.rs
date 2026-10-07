@@ -910,6 +910,7 @@ pub fn run() {
             plugin_host::plugin_host_send,
             plugin_host::python_plugins_open_folder,
             plugin_host::plugin_panel_place,
+            plugin_host::plugin_host_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running EDFM Companion");

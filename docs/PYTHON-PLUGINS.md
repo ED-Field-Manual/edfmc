@@ -180,6 +180,43 @@ Unknown topics are ignored. Nothing published leaves the machine. The host sends
 it to the app as `{"type":"publish","topic":...,"data":...}`, and the app checks
 every field before using it.
 
+## Native pages: tabs the app draws
+
+A tkinter panel can only be a separate window pinned over its tab, so it lags
+when the app window moves and sits above anything the page shows. A plugin
+written for EDFM Companion can avoid that by asking the app to draw its tab:
+
+```python
+import edfmc                                  # in try/except ImportError
+
+def plugin_start3(plugin_dir):
+    global page
+    page = edfmc.register_page(on_action)     # only valid here
+    page.update({'kind': 'router-v1', ...})   # plain JSON, whenever state changes
+    return 'Router'
+
+def on_action(name, args):                    # the commander's input, main thread
+    ...
+```
+
+- A plugin that registers a page gets **no tkinter panel**, and its
+  `plugin_app` is not called. Its status reports `native: true`, and its tab
+  shows the app's page.
+- The host sends `{"type":"page","folder":...,"state":...}` to the app. The app
+  sends input back as `plugin_host_action`, which reaches the plugin as
+  `{"type":"action","folder":...,"action":...,"args":{...}}` →
+  `on_action(name, args)`.
+- The app draws only the page **kinds** it knows (`NativePluginPage.tsx`). An
+  unknown kind shows a short "needs a newer version" note. Every field is
+  checked before use.
+- In other hosts `edfmc` does not exist, so the same plugin draws its own panel
+  as usual. Router does exactly this: a native page in EDFM Companion, a
+  tkinter panel in EDMC.
+
+**Workers must not call tkinter, not even `after`.** Tk refuses calls from
+other threads ("main thread is not in main loop"). Router's workers only put
+results on a queue, and a poll scheduled from the main thread drains it.
+
 ## Update checks
 
 Each Python plugin's card shows whether GitHub has a newer version

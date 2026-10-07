@@ -242,6 +242,26 @@ pub fn plugin_host_send(state: State<'_, PluginHostState>, kind: String) -> Resu
     send_line(&state, &serde_json::json!({ "type": kind }))
 }
 
+/// Pass the commander's input on a plugin's native page back to that plugin.
+///
+/// Only the shape is checked here (a plugin folder, an action name, an object
+/// of arguments); the plugin decides what an action means.
+#[tauri::command]
+pub fn plugin_host_action(
+    state: State<'_, PluginHostState>,
+    folder: String,
+    action: String,
+    args: serde_json::Value,
+) -> Result<(), String> {
+    if folder.is_empty() || action.is_empty() || !args.is_object() {
+        return Err("Malformed plugin action".into());
+    }
+    send_line(
+        &state,
+        &serde_json::json!({ "type": "action", "folder": folder, "action": action, "args": args }),
+    )
+}
+
 /// Ask the host to stop, giving plugins the chance to save, then make sure.
 ///
 /// Returns at once; the wait happens on a thread, so the window does not

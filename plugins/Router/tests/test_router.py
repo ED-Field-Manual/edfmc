@@ -179,6 +179,54 @@ class WhereAmITest(unittest.TestCase):
             load.monitor, load.config = None, None
 
 
+class NativePageTest(unittest.TestCase):
+    """Inside EDFM Companion, Router publishes state for the app to draw."""
+
+    def make(self, route):
+        from router_core.native import NativePage
+        published = []
+
+        class Page:
+            def update(self, state):
+                json.dumps(state)  # must be plain JSON, as edfmc requires
+                published.append(state)
+
+        handlers = []
+
+        def register(on_action):
+            handlers.append(on_action)
+            return Page()
+
+        page = NativePage(register, route, current_system=lambda: 'Sol', current_address=lambda: 10477373803,
+                          jump_range=lambda: 27.65, efficiency=lambda: 60, set_efficiency=lambda v: None,
+                          auto_copy=lambda: False, changed=lambda: None)
+        return page, handlers[0], published
+
+    def test_publishes_the_form_state_with_no_route(self) -> None:
+        _, _, published = self.make(Route())
+        self.assertEqual(published[-1]['kind'], 'router-v1')
+        self.assertEqual(published[-1]['currentSystem'], 'Sol')
+        self.assertEqual(published[-1]['jumpRange'], 27.65)
+        self.assertIsNone(published[-1]['route'])
+
+    def test_actions_move_along_the_route_and_clear_it(self) -> None:
+        route = three_stops()
+        route.start_from('Sol', 10477373803)
+        page, act, published = self.make(route)
+        self.assertEqual(published[-1]['route']['next'], 'Middle')
+        act('step', {'delta': 1})
+        self.assertEqual(published[-1]['route']['next'], 'End')
+        self.assertEqual(published[-1]['route']['waypoint'], 3)
+        act('clear', {})
+        self.assertIsNone(published[-1]['route'])
+
+    def test_a_plot_with_missing_fields_says_why(self) -> None:
+        _, act, published = self.make(Route())
+        act('plot', {'source': 'Sol', 'destination': '', 'range': '50'})
+        self.assertTrue(published[-1]['status']['error'])
+        self.assertFalse(published[-1]['plotting'])
+
+
 class BridgeTest(unittest.TestCase):
     def test_summary_for_the_overlay(self) -> None:
         route = three_stops()

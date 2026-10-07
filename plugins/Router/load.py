@@ -22,11 +22,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+from router_core import bridge  # noqa: E402
+from router_core.native import NativePage  # noqa: E402
 from router_core.panel import Panel  # noqa: E402
 from router_core.route import Route  # noqa: E402
 
 plugin_name = 'Router'
-plugin_version = '0.2.1'
+plugin_version = '0.3.0'
 
 try:
     from config import config  # provided by the host
@@ -138,10 +140,32 @@ def _last_loadout_range(path: str) -> float | None:
 
 # --- entry points --------------------------------------------------------
 
+def _route_changed() -> None:
+    _state['route'] = _state['panel'].route
+    _save()
+
+
+def _hooks() -> dict[str, Any]:
+    return dict(
+        current_system=lambda: _state['system'],
+        current_address=lambda: _state['address'],
+        jump_range=_jump_range,
+        efficiency=lambda: max(1, min(100, _get('efficiency', 60))),
+        set_efficiency=lambda v: _set('efficiency', v),
+        auto_copy=lambda: _get('autocopy', True),
+        changed=_route_changed,
+    )
+
+
 def plugin_start3(plugin_dir: str) -> str:
     _state['dir'] = plugin_dir
     _state['route'] = Route.load(_route_path())
     _where_am_i()
+    # In EDFM Companion the app draws Router's tab natively from the state
+    # published here, instead of hosting a tkinter panel. Elsewhere there is no
+    # `edfmc`, and plugin_app draws the panel as usual.
+    if bridge.edfmc is not None and hasattr(bridge.edfmc, 'register_page'):
+        _state['panel'] = NativePage(bridge.edfmc.register_page, _state['route'], **_hooks())
     return plugin_name
 
 
@@ -149,21 +173,10 @@ def plugin_stop() -> None:
     _save()
 
 
-def plugin_app(parent: tk.Frame) -> tk.Frame:
-    def route_changed() -> None:
-        _state['route'] = panel.route
-        _save()
-
-    panel = Panel(
-        parent, _state['route'],
-        current_system=lambda: _state['system'],
-        current_address=lambda: _state['address'],
-        jump_range=_jump_range,
-        efficiency=lambda: max(1, min(100, _get('efficiency', 60))),
-        set_efficiency=lambda v: _set('efficiency', v),
-        auto_copy=lambda: _get('autocopy', True),
-        changed=route_changed,
-    )
+def plugin_app(parent: tk.Frame) -> tk.Frame | None:
+    if isinstance(_state['panel'], NativePage):
+        return None  # drawn by EDFM Companion itself
+    panel = Panel(parent, _state['route'], **_hooks())
     _state['panel'] = panel
     return panel.frame
 
@@ -199,8 +212,11 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
     # Jump range: the game states it on every Loadout (login, outfitting, ship swap).
     if event == 'Loadout' and isinstance(entry.get('MaxJumpRange'), (int, float)):
         _set('range', f"{entry['MaxJumpRange']:.2f}")
-        if _state['panel'] is not None and _state['route'].empty:
-            _state['panel'].range_var.set(f"{entry['MaxJumpRange']:.2f}")
+        panel = _state['panel']
+        if isinstance(panel, NativePage):
+            panel.push()
+        elif panel is not None and _state['route'].empty:
+            panel.range_var.set(f"{entry['MaxJumpRange']:.2f}")
 
     if event in ('Location', 'FSDJump', 'CarrierJump'):
         _state['system'] = entry.get('StarSystem')

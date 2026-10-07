@@ -48,8 +48,10 @@ In the host's settings, on the Router tab:
 
 ## Looks
 
-In EDFM Companion the panel uses the app's own colours and type. In EDMC,
-EDMC's theme (default, dark or transparent) colours it, as with any plugin.
+In EDFM Companion, Router's tab is drawn by the app itself (a native page),
+so it looks and behaves like every other page and moves with the window. In
+EDMC, Router draws its own panel, coloured by EDMC's theme (default, dark or
+transparent) as with any plugin.
 
 ## How it works
 

@@ -132,6 +132,11 @@ class Plugin:
             log.error('%s.%s failed:\n%s', self.folder, hook, traceback.format_exc())
             return None
 
+    @property
+    def native(self) -> bool:
+        """Registered a page for the app to draw (edfmc.register_page)."""
+        return self.folder in host_bridge.pages
+
     def has(self, hook: str) -> bool:
         return self.module is not None and callable(getattr(self.module, hook, None))
 
@@ -181,7 +186,9 @@ class Plugin:
             'disabled': self.disabled,
             'error': self.error,
             'version': self.version(),
-            'hasPanel': self.has('plugin_app'),
+            'hasPanel': self.has('plugin_app') or self.native,
+            # Drawn by the app from the state the plugin publishes, not by tkinter.
+            'native': self.native,
             'hasSettings': self.has('plugin_prefs'),
             'readme': self.readme(),
             'gitRemote': self.git_remote(),
@@ -228,13 +235,17 @@ def load(plugin: Plugin) -> None:
         plugin.error = 'No plugin_start3: written for an older, unsupported version of the interface.'
         return
     plugin.module = module
+    host_bridge.loading = plugin.folder  # for edfmc.register_page
     try:
         name = start(plugin.path)
     except Exception as exc:
+        host_bridge.loading = None
+        host_bridge.pages.pop(plugin.folder, None)
         plugin.module = None
         plugin.error = f'Failed to start: {type(exc).__name__}: {exc}'
         log.error('%s.plugin_start3 failed:\n%s', plugin.folder, traceback.format_exc())
         return
+    host_bridge.loading = None
     if isinstance(name, str) and name:
         plugin.name = name
 
@@ -506,6 +517,8 @@ class Host:
         host_bridge.set_status_handler(self._status_all)
         host_bridge.set_publish_handler(
             lambda topic, data: emit({'type': 'publish', 'topic': topic, 'data': data}))
+        host_bridge.set_page_handler(
+            lambda folder, state: emit({'type': 'page', 'folder': folder, 'state': state}))
 
     def _status_all(self, message: str) -> None:
         for panel in self.panels.values():
@@ -540,7 +553,8 @@ class Host:
             log.info('%s: %s', plugin.folder, 'loaded' if plugin.module else plugin.error)
 
         for plugin in self.plugins:
-            if plugin.has('plugin_app'):
+            # A plugin with a native page is drawn by the app; it gets no panel.
+            if plugin.has('plugin_app') and not plugin.native:
                 self.panels[plugin.folder] = Panel(self, plugin)
 
         self.report()
@@ -635,6 +649,15 @@ class Host:
         elif kind == 'show' and not self.embedded:
             for panel in self.panels.values():
                 panel.top.deiconify()
+        elif kind == 'action':
+            folder = str(command.get('folder'))
+            handler = host_bridge.pages.get(folder)
+            args = command.get('args') if isinstance(command.get('args'), dict) else {}
+            if handler is not None:
+                try:
+                    handler(str(command.get('action')), args)
+                except Exception:
+                    log.error('%s action %r failed:\n%s', folder, command.get('action'), traceback.format_exc())
         elif kind == 'settings':
             self.open_settings()
         elif kind == 'quit':

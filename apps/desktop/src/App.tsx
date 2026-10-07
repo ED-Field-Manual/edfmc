@@ -21,6 +21,7 @@ import { Research } from './Research';
 import { Contributions } from './Contributions';
 import { PluginCard, Plugins as PluginsScreen, PythonPluginCard } from './Plugins';
 import { PluginPanel } from './PluginPanels';
+import { NativePluginPage } from './NativePluginPage';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
@@ -1370,6 +1371,9 @@ function PluginTab({ snap, tab }: { snap: Snap; tab: string }) {
     const folder = tab.slice(3);
     const plugin = snap.pythonPlugins.plugins.find((p) => p.folder === folder);
     if (!plugin) return null;
+    if (plugin.loaded && plugin.native && snap.pythonPlugins.running) {
+      return <NativePluginPage snap={snap} plugin={plugin} />;
+    }
     if (plugin.loaded && plugin.hasPanel && snap.pythonPlugins.running) {
       return <PluginPanel snap={snap} folder={folder} />;
     }

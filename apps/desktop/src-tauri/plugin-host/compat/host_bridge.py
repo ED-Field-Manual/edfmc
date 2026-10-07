@@ -24,3 +24,22 @@ def set_publish_handler(handler: Callable[[str, Any], None]) -> None:
 
 def publish(topic: str, data: Any) -> None:
     _publish(topic, data)
+
+
+# --- native pages ------------------------------------------------------------
+
+#: The plugin whose plugin_start3 is running, so `register_page` knows whose
+#: page it is. Set and cleared by the host around that call.
+loading: str | None = None
+#: folder -> the plugin's action handler, for plugins drawn by the app.
+pages: dict[str, Callable[[str, dict], None]] = {}
+_page_update: Callable[[str, Any], None] = lambda folder, state: None
+
+
+def set_page_handler(handler: Callable[[str, Any], None]) -> None:
+    global _page_update
+    _page_update = handler
+
+
+def page_update(folder: str, state: Any) -> None:
+    _page_update(folder, state)
