@@ -104,7 +104,15 @@ class NativePage:
 
     def journal_event(self, entry: dict) -> None:
         """Keep the fleet current: a new Loadout, a shipyard visit, a purchase."""
+        before = self.fleet.current if self.fleet is not None else None
         changed = self.fleet is not None and self.fleet.fold(entry)
+        if self.fleet is not None and self.fleet.current != before and before is not None:
+            # A different ship is being flown now. A pick made for the old one
+            # would plan the next route for a ship that is not here, so the
+            # picker goes back to following the ship in use.
+            settings = dict(self._settings())
+            if settings.pop('shipId', None) is not None:
+                self._save_settings(settings)
         if self.carriers is not None and self.carriers.fold(entry):
             changed = True
         if changed:
@@ -175,6 +183,7 @@ class NativePage:
             'fleet': self.fleet.ships() if self.fleet is not None else None,
             'selectedShip': self._selected_id(),
             'carriers': self.carriers.to_json() if self.carriers is not None else None,
+            'flying': self._ship_facts(self.fleet.current if self.fleet is not None else None),
             'plotting': self.plotting['ship'],
             'carrierPlotting': self.plotting['carrier'],
             'status': self.status,
@@ -182,6 +191,14 @@ class NativePage:
             'carrierRoute': self._route_view(self.carrier_route),
             'suggestions': self.suggestions,
         }
+
+    def _ship_facts(self, sid: int | None) -> dict[str, Any] | None:
+        if sid is None or self.fleet is None:
+            return None
+        for s in self.fleet.ships():
+            if s['id'] == sid:
+                return {'id': sid, 'name': s['name'] or s['model'], 'model': s['model'], 'maxJump': s['maxJump']}
+        return None
 
     @staticmethod
     def _route_view(r: Route) -> dict[str, Any] | None:
@@ -197,6 +214,8 @@ class NativePage:
                 # Every waypoint, for the list of cards. A long route is a few
                 # hundred entries of short strings, which is fine as JSON.
                 'type': 'carrier' if r.is_carrier else ('exact' if r.source == 'spansh-exact' else 'neutron'),
+                'plannedFor': None if r.ship_id is None else {
+                    'id': r.ship_id, 'name': r.ship_name, 'maxJump': r.ship_range},
                 'waypoints_list': [
                     {
                         'system': w.system,
@@ -376,6 +395,11 @@ class NativePage:
                 self.say(f'Carrier route plotted: {route.total_jumps()} jumps, {tritium:,} t of tritium.', slot=slot)
             else:
                 route.start_from(self._current_system(), self._current_address())
+                facts = self._ship_facts(self._selected_id())
+                if facts is not None:
+                    route.ship_id = facts['id']
+                    route.ship_name = facts['name']
+                    route.ship_range = facts['maxJump']
                 self.say(f'Route plotted: {len(route.waypoints)} waypoints, {route.total_jumps()} jumps.')
             self._set_route(route, slot)
             if self._auto_copy() and self._may_auto_copy(slot):
@@ -506,6 +530,10 @@ class NativePage:
             if self._auto_copy() and self.route.next is not None:
                 self._copy({'quiet': True})
                 self.say(f'Next waypoint copied: {self.route.next.system}')
+        elif system and not self.route.empty and self.route.next is not None:
+            # A stop the game added on the way (a jump longer than this ship
+            # can make, say). Not a waypoint, so the route stays where it is.
+            self.say(f'{system} is not on your route, so the next waypoint is still {self.route.next.system}.')
         self.push()
 
     def carrier_arrived(self, system: str | None, address: int | None) -> None:

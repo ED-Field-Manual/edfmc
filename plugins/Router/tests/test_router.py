@@ -614,5 +614,65 @@ class NativeSlotsTest(unittest.TestCase):
         self.assertFalse(page.state['carrierPlotting'])
 
 
+class FollowingTest(unittest.TestCase):
+    """What the commander sees while following: the 2026-10-09 report.
+
+    A route planned for the Caspian (32 ly jumps) was flown in the Panther
+    Clipper (22.65 ly). The game added a stop between waypoints, nothing on the
+    page said why, and the route seemed stuck.
+    """
+
+    def _page(self, settings: dict):
+        from router_core.native import NativePage
+        from router_core.fleet import Fleet
+
+        class Page:
+            def update(self, state):
+                self.state = state
+        page = Page()
+        p = NativePage(lambda on_action: page, three_stops(), current_system=lambda: 'Sol',
+                       current_address=lambda: 10477373803, jump_range=lambda: 22.65, efficiency=lambda: 60,
+                       set_efficiency=lambda v: None, auto_copy=lambda: False, changed=lambda: None,
+                       settings=lambda: settings, save_settings=lambda v: (settings.clear(), settings.update(v)))
+        fleet = Fleet()
+        fleet.fold({'event': 'Loadout', 'Ship': 'explorer_nx', 'ShipID': 28, 'MaxJumpRange': 32.5, 'Modules': []})
+        fleet.fold({'event': 'Loadout', 'Ship': 'panthermkii', 'ShipID': 21, 'MaxJumpRange': 22.648148, 'Modules': []})
+        p.fleet = fleet
+        p.route.next_index = 1
+        return p, page
+
+    def test_an_arrival_off_the_route_says_so(self) -> None:
+        p, page = self._page({})
+        p.arrived('Wregoe HY-H c23-32', 8880616641226)
+        self.assertEqual(p.route.next_index, 1)
+        self.assertIn('not on your route', page.state['status']['text'])
+        self.assertIn('Middle', page.state['status']['text'])
+
+    def test_switching_ship_drops_a_pick_made_for_the_old_one(self) -> None:
+        settings = {'shipId': 28, 'type': 'exact'}
+        p, page = self._page(settings)
+        p.journal_event({'event': 'Loadout', 'Ship': 'explorer_nx', 'ShipID': 28, 'MaxJumpRange': 32.5, 'Modules': []})
+        self.assertNotIn('shipId', settings)
+        self.assertEqual(settings['type'], 'exact')
+        self.assertEqual(page.state['flying']['id'], 28)
+
+    def test_the_same_ship_again_keeps_the_pick(self) -> None:
+        settings = {'shipId': 28}
+        p, _ = self._page(settings)
+        p.journal_event({'event': 'Loadout', 'Ship': 'panthermkii', 'ShipID': 21, 'MaxJumpRange': 22.648148, 'Modules': []})
+        self.assertEqual(settings.get('shipId'), 28)
+
+    def test_a_route_remembers_the_ship_it_was_planned_for(self) -> None:
+        route = three_stops()
+        route.ship_id, route.ship_name, route.ship_range = 28, 'Caspian Explorer', 32.5
+        again = Route.from_json(route.to_json())
+        self.assertEqual((again.ship_id, again.ship_name, again.ship_range), (28, 'Caspian Explorer', 32.5))
+        p, page = self._page({})
+        p.route = again
+        p.push()
+        self.assertEqual(page.state['route']['plannedFor'], {'id': 28, 'name': 'Caspian Explorer', 'maxJump': 32.5})
+        self.assertEqual(page.state['flying']['id'], 21)
+
+
 if __name__ == '__main__':
     unittest.main()

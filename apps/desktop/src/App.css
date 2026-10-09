@@ -1149,5 +1149,5 @@ label.field select:focus-visible {
 }
 
 /* Router: the two routes, one tab each. */
-.router-slots { margin-bottom: 1rem; }
+.router-slots { margin-bottom: 1rem; max-width: 46rem; }
 .router-slots button { flex: 1 1 12rem; }

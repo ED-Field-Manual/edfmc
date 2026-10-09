@@ -52,6 +52,11 @@ class Route:
     #: Index of the waypoint to fly to next.
     next_index: int = 0
     source: str = ''
+    #: The ship the route was planned for (ShipID, a name to show, its jump
+    #: range), so a route planned for one ship and flown in another can say so.
+    ship_id: int | None = None
+    ship_name: str | None = None
+    ship_range: float | None = None
 
     # -- reading ---------------------------------------------------------
 
@@ -241,6 +246,9 @@ class Route:
                        for w in d.get('waypoints', [])],
             next_index=int(d.get('next_index', 0)),
             source=str(d.get('source', '')),
+            ship_id=d.get('ship_id') if isinstance(d.get('ship_id'), int) else None,
+            ship_name=d.get('ship_name') if isinstance(d.get('ship_name'), str) else None,
+            ship_range=float(d['ship_range']) if isinstance(d.get('ship_range'), (int, float)) else None,
         )
 
     def save(self, path: str) -> None:

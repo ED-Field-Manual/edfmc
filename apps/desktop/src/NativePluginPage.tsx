@@ -119,7 +119,7 @@ function RouterPage({ state, act }: { state: State; act: Act }) {
       </div>
       {route ? (
         <>
-          <RouterFollow route={route} act={slotAct} />
+          <RouterFollow route={route} act={slotAct} flying={slot === 'ship' ? obj(state['flying']) : null} />
           <WaypointList route={route} act={slotAct} />
         </>
       ) : (
@@ -1114,8 +1114,13 @@ function WaypointList({ route, act }: { route: State; act: Act }) {
   );
 }
 
-function RouterFollow({ route, act }: { route: State; act: Act }) {
+function RouterFollow({ route, act, flying }: { route: State; act: Act; flying: State | null }) {
   const next = str(route['next']);
+  const planned = obj(route['plannedFor']);
+  // Planned for one ship and flown in another: jumps longer than this ship
+  // can make need stops the game adds, and those are not waypoints.
+  const mismatch =
+    planned !== null && flying !== null && num(planned['id']) !== null && num(planned['id']) !== num(flying['id']);
   const finished = route['finished'] === true || next === null;
   const progress = Math.max(0, Math.min(1, num(route['progress']) ?? 0));
   const jumpsLeft = num(route['jumpsLeft']) ?? 0;
@@ -1124,6 +1129,16 @@ function RouterFollow({ route, act }: { route: State; act: Act }) {
   return (
     <section className="card router-card">
       <h2>{finished ? 'Route complete' : 'Next waypoint'}</h2>
+      {mismatch && !finished && (
+        <p className="note">
+          This route was planned for your {str(planned!['name']) ?? 'other ship'}
+          {num(planned!['maxJump']) !== null ? ` (${num(planned!['maxJump'])!.toFixed(2)} ly)` : ''}, but you are flying
+          your {str(flying!['name']) ?? 'current ship'}
+          {num(flying!['maxJump']) !== null ? ` (${num(flying!['maxJump'])!.toFixed(2)} ly)` : ''}. Where a jump is
+          longer than this ship can make, the game adds stops on the way, and the route moves on only when you reach
+          the next waypoint. Clear it and plot again to plan for this ship.
+        </p>
+      )}
       <div className="router-next">
         <button
           type="button"
