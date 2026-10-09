@@ -1569,7 +1569,12 @@ export class Companion {
       if (result.kind === 'verified') {
         this.inaraProfile = result.profile;
         await this.setSetting(this.inaraKey('profile'), JSON.stringify(result.profile));
-        await this.applyInaraCondition('ok', null);
+        // The key is good, so any earlier refusal is over. But checking a key
+        // sends no data, so it is not recorded as "Last accepted": that line
+        // means Inara took something from this commander's journal.
+        await this.setInaraCondition(null);
+        await this.recordIntegrationError('inara', null);
+        this.notify();
         this.scheduleInaraDrain(0);
         return null;
       }

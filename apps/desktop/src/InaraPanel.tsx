@@ -48,7 +48,8 @@ function explain(state: string, appName: string): string {
     case 'authentication-failed':
       return 'Inara did not accept your API key. Nothing is being sent. Replace the key, or press Verify if you have fixed it on Inara.';
     case 'disabled':
-      return 'Switched off. Nothing is being sent.';
+      // The line above the switch already says nothing is being sent.
+      return 'Tick Enable Inara to start sending.';
     case 'temporarily-unavailable':
       return 'Inara could not be reached last time. What is waiting will be retried automatically.';
     case 'connected':

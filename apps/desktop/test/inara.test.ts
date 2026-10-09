@@ -310,6 +310,11 @@ describe('once authorised', () => {
     const view = c.snapshot().inara;
     expect(view.state).toBe('connected');
     expect(view.profile).toMatchObject({ userName: 'Tester', profileUrl: 'https://inara.cz/cmdr/1/' });
+    // Checking a key sends no journal data, so it is not "Last accepted".
+    const row = (c.snapshot().sharing.rows as Array<{ id: string; lastSuccessAt: string | null }>).find(
+      (r) => r.id === 'inara',
+    );
+    expect(row?.lastSuccessAt ?? null).toBeNull();
     const sent = JSON.parse(
       (invoke.mock.calls[0]![1] as { submission: { events_json: string } }).submission.events_json,
     );
