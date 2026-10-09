@@ -53,7 +53,8 @@ function explain(state: string, appName: string): string {
     case 'temporarily-unavailable':
       return 'Inara could not be reached last time. What is waiting will be retried automatically.';
     case 'connected':
-      return 'Inara has confirmed your key and is receiving updates.';
+      // Not "is receiving updates": that is only true once a batch has gone.
+      return 'Inara has confirmed your key. Updates go out by themselves as you play.';
     default:
       return 'Ready. Your key has not been confirmed by Inara yet; press Verify to check it.';
   }
