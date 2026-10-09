@@ -120,10 +120,9 @@ export function Contributions({ snap }: { snap: CompanionSnapshot }) {
           </select>
         </label>
         <p className="muted">
-          Either way, your commander name and Frontier ID are sent as one-way hashes, never as
-          values &mdash; the server can tell two reporters apart without knowing who either is.
-          Choosing attribution adds your name for credit; it does not reveal anything the
-          anonymous mode conceals from the database.
+          Your Frontier ID is sent over HTTPS in both modes so the server can tell two reporters
+          apart. Your commander name is sent only when you ask to be credited. The server replaces
+          received identifiers with keyed hashes and stores only those hashes.
         </p>
         <p className="muted">
           EDFM-account linking is offered in the design but is not built. Your commander name is
@@ -134,16 +133,17 @@ export function Contributions({ snap }: { snap: CompanionSnapshot }) {
       <section className="card">
         <h2>What the Companion sends</h2>
         <p className="muted">
-          Only station observations, and only while contribution is on: the station&rsquo;s
-          MarketID, name, type, system, the service tokens your game reported, the timestamp, the
-          journal event and its byte offset, your game version and build.
+          While contribution is on, a MarketID reference lookup tells EDFM which station you are
+          visiting. The station observation then contains its MarketID, name, type, system, the
+          service tokens your game reported, the timestamp, the journal event and its byte offset,
+          your game version and build.
         </p>
         <p className="muted">
-          There is no telemetry and no analytics in any configuration. Besides contribution, the
-          Companion only reaches the network for the services you switch on under Connections
-          and, if you have Python plugins installed, a daily check of their GitHub pages for
-          updates. Your journals are never uploaded, and chat, friends, private groups and travel
-          history are never sent anywhere.
+          EDFM Companion has no telemetry or analytics. Its built-in network requests are limited
+          to enabled connections, explicit market searches and optional Python-plugin update
+          checks. It never uploads a raw journal file wholesale. Installed Python plugins are
+          separate programs and may read files or use the network, so install them only from
+          sources you trust.
         </p>
       </section>
     </>

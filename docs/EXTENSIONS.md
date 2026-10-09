@@ -3,7 +3,13 @@
 How EDFM Companion is extended, where the boundaries are, and why they are drawn
 where they are.
 
-This document is the plan. `docs/PLUGINS.md` is the guide for writing one today.
+This document covers the declarative and capability-limited extension model.
+`docs/PLUGINS.md` is the guide for writing a declarative pack today.
+
+EDFM Companion also has a separate Python compatibility host for trusted
+companion-tool plugins. Python plugins run with the commander's user permissions
+and are deliberately outside the capability model described here; see
+[PYTHON-PLUGINS.md](PYTHON-PLUGINS.md).
 
 ---
 
@@ -15,11 +21,12 @@ tests in the loader.
 
 ### What it gets right, and must not lose
 
-**Plugins are data, and there is no code path that would run code if one shipped
-it.** This is the load-bearing decision. `@edfm/context` conditions have a fixed
-operator set, no `eval`, and deliberately no regular expressions — built that way
-because rules arrive from an untrusted server, which is the same threat model as a
-stranger's plugin. The hardening already applied.
+**Declarative packs are data, and there is no code path in this loader that would
+run code if one shipped it.** This is the load-bearing decision. `@edfm/context`
+conditions have a fixed operator set, no `eval`, and deliberately no regular
+expressions — built that way because rules arrive from an untrusted server, which
+is the same threat model as a stranger's declarative pack. The hardening already
+applied.
 
 **A denylist on observation, not a guideline.** `FORBIDDEN_OBSERVATION_EVENTS`
 blocks `ReceiveText`, `Friends`, `Commander`, `LoadGame`, squadron and wing events.
@@ -54,11 +61,12 @@ naming its folder; the others load; the app starts.
 
 ## 2. Gap against typical EDMC plugins
 
-EDMC plugins are Python with unrestricted access. The useful question is not "can
-we run them" — we should not — but "what do they actually *do*", and can each be
-served safely.
+EDMC plugins are Python with unrestricted access. The compatibility host can run
+plugins that stay within its supported companion-tool interface, but that is a
+high-trust path rather than the capability model below. This table asks which
+needs can be served without granting ambient authority.
 
-| EDMC capability | EDFMC today | Planned tier |
+| EDMC capability | Capability model today | Planned tier |
 |---|---|---|
 | Observe journal events | Context rules only | Semantic events (T2) |
 | Current system / station / ship | No | Knowledge API (T2) |
@@ -68,9 +76,9 @@ served safely.
 | Main-window panel | No | Schema-driven panel (T2) |
 | Overlay drawing | No | Widget schema (T1 data, T2 dynamic) |
 | Desktop notifications | No | Capability (T2) |
-| Arbitrary Python | **No, and never** | — |
-| Read arbitrary files | **No, and never** | — |
-| Read chat / friends / identity | **No, and never** | — |
+| Arbitrary Python | Not in this model; the separate compatibility host runs trusted Python plugins | — |
+| Read arbitrary files | Not in this model; Python plugins may do so with user permissions | — |
+| Read chat / friends / identity | Never exposed by this model; Python plugins receive raw journal events | — |
 
 The last three are the point. Most genuinely useful EDMC plugins need the first
 eight; the unrestricted runtime is how they get them, not what they need.
@@ -209,8 +217,8 @@ arrive.
 ## 9. Migration
 
 `manifestVersion: 1` keeps loading, unchanged, indefinitely. It is treated as a
-Community Pack with no `requires` and no capabilities. No existing plugin breaks,
-and the example plugin in this repository stays valid.
+Community Pack with no `requires` and no capabilities, so existing v1 manifests
+remain valid.
 
 v2 adds fields; it removes nothing. An author upgrades to *declare* things, not to
 keep working.

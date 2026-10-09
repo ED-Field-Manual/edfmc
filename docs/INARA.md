@@ -16,10 +16,11 @@ Frontier Developments, and is grateful to Inara for providing the API.
 
 ## The state it ships in
 
-**Nothing is sent to Inara in this build.** Inara white-lists each
-application by its `appName` before it accepts requests from it ("Please, let
-me know your app name/identifier you will be using, as it needs to be
-white-listed first"). Until that approval exists, the integration sits in
+Inara white-lists each application by its `appName` before it accepts
+requests from it ("Please, let me know your app name/identifier you will be
+using, as it needs to be white-listed first"). **Inara approved
+`EDFM Companion` on 2026-10-09.** Builds still send nothing unless they are
+made with `VITE_INARA_APP_AUTHORIZED=true`; without it, the integration sits in
 **Awaiting application authorization**:
 
 - the commander can store a key, switch the integration on, and choose what to

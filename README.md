@@ -1,91 +1,135 @@
 # EDFM Companion
 
-The official desktop companion for the [Elite Dangerous Field Manual](https://edfieldmanual.com/).
+EDFM Companion is the official desktop companion for the [Elite Dangerous Field
+Manual](https://edfieldmanual.com/). It is a standalone Windows application that
+reads Frontier's journal files, keeps track of the commander's current context and
+shows relevant EDFM guidance in the application or through an in-game overlay.
 
-It watches your journal as you play, works out what you are doing, and puts the
-relevant EDFM material in front of you — in a window or in an overlay on top of
-the game. It also tracks your missions, your colonisation sites, and where to
-buy what those sites need.
+> [!IMPORTANT]
+> EDFM Companion is under active development and does not yet have a stable public
+> release.
 
-**Not an EDMC plugin.** It does not require EDMarketConnector, and it never
-touches the game: no memory reading, no injection, no input automation.
+## What is EDFM Companion?
 
-## What it does
+EDFM Companion follows the journal as Elite Dangerous writes it. It does not read
+game memory, inject code, automate input or write to the game. When Frontier has
+not reported a value, the application keeps it unknown rather than filling the gap
+with a guess.
 
-- **Knows where you are** — system, station, ship, missions — and keeps
-  "the game did not say" visibly different from "the game said none".
-- **Surfaces the right EDFM pages** for what is happening right now, in the app
-  or as an overlay over the game.
-- **Tracks missions** including delivery progress, so you can see what is left
-  rather than doing the arithmetic.
-- **Tracks colonisation sites** automatically and plans your buying: which
-  stations to visit, in what order, and why each one was chosen.
-- **Keeps a field journal** of what you actually did — organisms sampled, bodies
-  landed on, signals found — built from your journal and kept on your machine.
-- **Records field research** locally — what you find at settlements — with the
-  honesty to say when a sample is too small to mean anything.
-- **Takes plugins**, which are plain JSON and cannot run code. See
-  [docs/PLUGINS.md](docs/PLUGINS.md).
-- **Helps EDFM improve**, if you let it, by reporting where the game disagrees
-  with the wiki.
+It is not an EDMC plugin, does not depend on EDMarketConnector and is not presented
+as a replacement for it. The core application has its own plugin architecture,
+including declarative extensions and a Python host for compatible companion-tool
+plugins. Individual plugins are distributed separately from the core application.
 
-## Your data
+## Features
 
-Your journal contains your chat, friends, finances and travel history. It is
-read on your machine and **never uploaded**.
+Current core capabilities include:
 
-With contribution switched on, the app sends observations about stations you dock
-at, over HTTPS. Your Frontier ID travels with them so the server can tell two
-reporters apart, and your commander name travels only if you have asked to be
-credited. The server hashes both on arrival and stores only the hashes, so a
-database dump holds no commander identifiers — but it does see the values in
-transit, and this project will not claim otherwise. There is no telemetry and no
-analytics in any configuration.
+- **Real-time journal processing** for commander, ship, location, mission and
+  activity state, with replay-safe local persistence.
+- **Context-aware EDFM guidance** in the desktop application and configurable,
+  click-through in-game overlay.
+- **Mission tracking** for mission state, destinations and cargo delivery progress
+  where Frontier reports it.
+- **Colonisation and logistics tools** that track construction-site requirements
+  and deliveries, then build market sourcing plans when the commander asks for
+  one.
+- **Exobiology tracking** for detected biological genera, live sample progress,
+  completed specimens and EDFM reference links without claiming first discovery
+  or first footfall.
+- **Commander Field Journal** entries for durable activity such as completed
+  specimens, detected signals, exobiology data sales and completed missions. Live
+  sampling progress is stored separately as current activity state.
+- **Screenshot capture and cataloguing** with a commander-chosen hotkey,
+  game-window capture, context-assisted filenames, categories, tags, notes,
+  optional Field Journal links and a local screenshot library.
+- **Plugin infrastructure** for validated declarative extensions and compatible
+  Python companion-tool plugins, with management and diagnostics in the app.
+- **Optional community-service integrations** with explicit controls and visible
+  sharing status.
 
-Four other things can send, and **every one of them ships off**: EDDN (anonymous
-community observations), EDSM and Inara (under your own API keys), and EDFM
-Commander Journal, which sends your field journal to your own EDFM account.
-Nothing is sent by any of them until you connect it.
+Detailed behaviour and current limitations are documented in
+[missions](docs/MISSIONS.md), [logistics](docs/LOGISTICS.md),
+[activity tracking](docs/ACTIVITY-JOURNAL.md),
+[screenshots](docs/SCREENSHOTS.md) and the [overlay](docs/OVERLAY.md) documentation.
 
-With all of that off, the app makes no network requests on its own. It is not
-silent in every configuration, and the distinction is worth stating: asking it to
-plan a colonisation run sends a market query, because that is the feature. That
-request carries commodity names and nothing about you, and happens only when you
-ask for it.
+## Integrations
 
-[docs/PRIVACY.md](docs/PRIVACY.md) is the full account.
+All data-sharing integrations are disabled by default.
 
-## Design commitments
+| Service | Current status | Purpose |
+|---|---|---|
+| EDDN | Built and wired; schema-fixture tested | Sends a sanitised set of anonymous community observations |
+| EDSM | Built and tested against live API responses | Optionally submits journal entries under the commander's own API key |
+| Inara | Built; Inara has approved the application, first live test pending | Optionally keeps the commander's Inara profile up to date: flight log, ranks, ships and loadouts, inventory and statistics |
+| EDFM Commander Journal | Built; push-only | Optionally sends derived Field Journal entries to the commander's EDFM account |
 
-These are constraints, not aspirations:
+See [External integrations](docs/INTEGRATIONS.md) for the payloads, queue behaviour
+and current service-specific limits.
 
-- **Verify aggressively. Reveal conservatively.** The verification engine may
-  compare anything against EDFM's data; the app shows only what your own game has
-  reported. Nobody gets their exploration spoiled because EDFM already knows the
-  answer. See [docs/SPOILERS.md](docs/SPOILERS.md).
-- **Never guess.** A value the journal did not provide is rendered `Unknown`.
-  Field presence was measured across a 197,164-line corpus; anything below 100%
-  is typed optional. See [docs/JOURNAL.md](docs/JOURNAL.md).
-- **Raw is never discarded.** Normalization is additive, so a mapping mistake can
-  be corrected later without having lost the observation.
-- **Read-only with respect to the game.** No memory access, no DLL injection, no
-  input automation, no botting.
-- **Secrets stay server-side.** The desktop client is untrusted and never holds
-  Discord webhooks, database credentials or administrative keys.
+## Privacy and data
 
----
+The application reads journal files locally. It does not upload raw journal files
+wholesale, and it has no telemetry or analytics. Optional contribution and
+community-service features send only their documented payloads after the commander
+enables them. Market searches happen only when the commander requests a sourcing
+plan.
+
+Python plugin update checks can make read-only GitHub requests when Python plugins
+are installed; they can be disabled and do not include journal or game data.
+User-supplied integration credentials are stored locally through Windows Credential
+Manager and are never returned to the web interface. EDFM project, server and
+administrative secrets remain server-side.
+
+Those guarantees describe EDFM Companion's own code. Installed Python plugins run
+with the commander's user permissions and may read files or use the network, so
+they should be treated like any other program and installed only from trusted
+sources.
+
+The complete network and storage account is in [Privacy](docs/PRIVACY.md).
+
+## Plugins
+
+EDFM Companion supports two extension mechanisms:
+
+- [Declarative plugins](docs/PLUGINS.md) contribute validated data such as context
+  rules. They cannot execute code.
+- [Python plugins](docs/PYTHON-PLUGINS.md) run compatible companion-tool plugins in
+  a separate host process. Python plugins are programs and should be installed only
+  from trusted sources.
+
+The loader, host, APIs, compatibility layers and plugin-management interface belong
+to this repository. Individual plugins are separate projects and are not core EDFM
+Companion features.
 
 ## Development
 
-EDFM Companion is under active development.
+The repository requires Node.js 20 or later. Common workspace checks are:
+
+```sh
+npm ci
+npm test
+npm run typecheck
+npm run build
+```
+
+Architecture and subsystem details are kept in:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Journal processing](docs/JOURNAL.md)
+- [Overlay](docs/OVERLAY.md)
+- [External integrations](docs/INTEGRATIONS.md)
+- [Activity Journal](docs/ACTIVITY-JOURNAL.md)
+- [Screenshot system](docs/SCREENSHOTS.md)
+- [Declarative plugins](docs/PLUGINS.md)
+- [Python plugin host](docs/PYTHON-PLUGINS.md)
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 The overlay was written from scratch against the Win32 API rather than derived
-from EDMCOverlay, specifically so this project was free to choose a permissive
-licence.
+from EDMCOverlay, which keeps this project under a permissive licence.
 
 Elite Dangerous is a trademark of Frontier Developments plc. This project is
-unofficial and not affiliated with or endorsed by Frontier Developments.
+unofficial and is not affiliated with or endorsed by Frontier Developments.

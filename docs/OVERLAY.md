@@ -286,11 +286,11 @@ continuing to say "Departing" tells them nothing true.
 ### Route: from a plugin
 
 The Route widget shows what a Python plugin publishes on the `route` topic through
-`edfmc.publish` (see `docs/PYTHON-PLUGINS.md`). The first plugin to do this is
-**Router**. The widget shows the next system, in large type and marked if it is a
-neutron star, then the jumps left, the waypoint count and the destination. The
-plugin has already put the system on the clipboard, so a commander can paste it
-into the galaxy map without leaving the game.
+`edfmc.publish` (see `docs/PYTHON-PLUGINS.md`). The widget shows the next system,
+in large type and marked if it is a neutron star, then the jumps left, the
+waypoint count and the destination. The core application validates and displays
+that published state; route planning and clipboard behaviour belong to whichever
+separately distributed plugin supplied it.
 
 **Copying from the game.** The overlay ignores the mouse, so it has no Copy
 button. Router already copies the next system on every arrival. For the rest,

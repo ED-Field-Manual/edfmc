@@ -1,7 +1,13 @@
 # Plugins
 
-Plugins built alongside EDFM Companion. Each folder is a complete plugin that
-can be copied into a plugins folder as it is.
+This directory currently contains standalone plugins that are co-located with the
+core application source. They are distributable plugin projects, not EDFM
+Companion core features, and are intended to move to separate repositories under
+the `ED-Field-Manual` organization.
+
+Each folder is a complete plugin that can be copied into a plugins folder as it
+is. Keeping the implementation here for now does not make it part of the core
+application.
 
 | Plugin | Kind | Runs in |
 |---|---|---|
