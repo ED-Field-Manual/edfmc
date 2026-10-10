@@ -104,7 +104,7 @@ def page(state: dict[str, Any], ui: dict[str, Any]) -> dict[str, Any]:
         {'type': 'text', 'tone': 'muted', 'text': 'Automatic shows Delivery when you are docked at one of your '
          'sites, Filling the carrier at your fleet carrier, Shopping at any other station, and Hauling in flight. '
          'Every view lists what each material still needs, what is aboard, what is on the carrier and how much '
-         'more to get. Turn the panel on or off, and move it, on the Overlay page.'},
+         'remains to get. Turn the panel on or off, and move it, on the Overlay page.'},
     ]})
     blocks.append({'type': 'section', 'title': 'Data', 'blocks': _import_blocks(state, ui)})
     return {'kind': 'ui-v1', 'blocks': blocks}
@@ -425,12 +425,12 @@ def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
         {'label': 'Still needed', 'value': t(sum(r['remaining'] for r in rows))},
         {'label': 'Aboard', 'value': t(sum(r['ship'] for r in rows))},
         {'label': 'On carrier', 'value': t(carrier) if known else (f'≥ {carrier:,} t' if carrier else '?')},
-        {'label': 'To get', 'value': t(sum(r['toSource'] for r in rows))},
+        {'label': 'Remaining', 'value': t(sum(r['toSource'] for r in rows))},
     ]}
 
 
 def _material_table(rows: list[dict[str, Any]], columns: list[str]) -> dict[str, Any]:
-    labels = {'need': 'Needed', 'ship': 'Aboard', 'carrier': 'Carrier', 'short': 'To get', 'after': 'Left after'}
+    labels = {'need': 'Needed', 'ship': 'Aboard', 'carrier': 'Carrier', 'short': 'Remaining', 'after': 'Left after'}
     out = []
     for r in rows[:OVERLAY_ROWS]:
         carrier = r['carrierText'] if not r['carrierKnown'] else (f"{r['carrier']:,}" if r['carrier'] else '—')

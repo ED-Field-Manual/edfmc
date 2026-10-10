@@ -370,7 +370,7 @@ class Overlay(Base):
         rows, _ = self._table(self.overlays[-1])
         self.assertEqual((rows['steel']['ship'], rows['steel']['short']['text']), ('784', '3,216'))
         stats = next(b for b in self.overlays[-1]['blocks'] if b['type'] == 'stats')
-        self.assertEqual([i['label'] for i in stats['items']], ['Still needed', 'Aboard', 'On carrier', 'To get'])
+        self.assertEqual([i['label'] for i in stats['items']], ['Still needed', 'Aboard', 'On carrier', 'Remaining'])
 
     def test_filling_the_carrier_has_its_own_view(self):
         c = self.controller()
