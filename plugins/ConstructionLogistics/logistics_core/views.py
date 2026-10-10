@@ -30,6 +30,7 @@ OVERLAY_MODES = [
     ('hauling', 'Hauling'),
     ('delivery', 'Delivery'),
     ('shopping', 'Shopping / loading'),
+    ('carrier', 'Filling the carrier'),
 ]
 
 
@@ -101,8 +102,9 @@ def page(state: dict[str, Any], ui: dict[str, Any]) -> dict[str, Any]:
                                         'value': state['prefs']['overlayMode'],
                                         'options': [{'value': v, 'label': lbl} for v, lbl in OVERLAY_MODES]}]},
         {'type': 'text', 'tone': 'muted', 'text': 'Automatic shows Delivery when you are docked at one of your '
-         'sites, Shopping when docked anywhere else, and Hauling in flight. Turn the panel on or off, and move '
-         'it, on the Overlay page.'},
+         'sites, Filling the carrier at your fleet carrier, Shopping at any other station, and Hauling in flight. '
+         'Every view lists what each material still needs, what is aboard, what is on the carrier and how much '
+         'more to get. Turn the panel on or off, and move it, on the Overlay page.'},
     ]})
     blocks.append({'type': 'section', 'title': 'Data', 'blocks': _import_blocks(state, ui)})
     return {'kind': 'ui-v1', 'blocks': blocks}
@@ -380,6 +382,14 @@ def _import_blocks(state: dict[str, Any], ui: dict[str, Any]) -> list[dict[str, 
 # ------------------------------------------------------------------ overlay
 
 
+def _at_own_carrier(state: dict[str, Any], dock: dict[str, Any]) -> bool:
+    """Docked at the commander's carrier: by its Market ID once CarrierStats has named it."""
+    if dock.get('stationType') != 'FleetCarrier':
+        return False
+    own = state['carrier'].get('marketId')
+    return own is None or own == dock.get('marketId')
+
+
 def overlay_mode(state: dict[str, Any]) -> str:
     mode = state['prefs'].get('overlayMode', 'auto')
     if mode != 'auto':
@@ -389,77 +399,112 @@ def overlay_mode(state: dict[str, Any]) -> str:
         site = state['sites'].get(dock.get('marketId') or '')
         if site is not None and not site['complete'] and not site['archived']:
             return 'delivery'
+        if _at_own_carrier(state, dock):
+            return 'carrier'
         return 'shopping'
     return 'hauling'
 
 
+#: Overlay tables stop here (the app caps a panel table at 14 rows).
+OVERLAY_ROWS = 12
+
+
+def _short_cell(r: dict[str, Any]) -> dict[str, Any]:
+    """How much more to get. A covered row gets a tick and a word, not just a colour."""
+    if r['toSource'] <= 0:
+        return {'text': 'covered', 'mark': '✓', 'tone': 'ok'}
+    return {'text': f"{r['toSource']:,}", 'tone': 'warn'}
+
+
+def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # What is physically aboard and on the carrier (of these materials), not just
+    # the share this site would take: the commander compares it with their screens.
+    known = all(r['carrierKnown'] for r in rows)
+    carrier = sum(r['carrier'] for r in rows)
+    return {'type': 'stats', 'items': [
+        {'label': 'Still needed', 'value': t(sum(r['remaining'] for r in rows))},
+        {'label': 'Aboard', 'value': t(sum(r['ship'] for r in rows))},
+        {'label': 'On carrier', 'value': t(carrier) if known else (f'≥ {carrier:,} t' if carrier else '?')},
+        {'label': 'To get', 'value': t(sum(r['toSource'] for r in rows))},
+    ]}
+
+
+def _material_table(rows: list[dict[str, Any]], columns: list[str]) -> dict[str, Any]:
+    labels = {'need': 'Needed', 'ship': 'Aboard', 'carrier': 'Carrier', 'short': 'To get', 'after': 'Left after'}
+    out = []
+    for r in rows[:OVERLAY_ROWS]:
+        carrier = r['carrierText'] if not r['carrierKnown'] else (f"{r['carrier']:,}" if r['carrier'] else '—')
+        out.append({'id': r['commodity'], 'cells': {
+            'm': r['label'],
+            'need': f"{r['remaining']:,}",
+            'ship': f"{r['ship']:,}" if r['ship'] else '—',
+            'carrier': carrier,
+            'short': _short_cell(r),
+            'after': f"{max(0, r['remaining'] - r['allocatedShip']):,}",
+        }})
+    return {'type': 'table', 'columns': [{'key': 'm', 'label': 'Material'}] + [
+        {'key': k, 'label': labels[k], 'align': 'right'} for k in columns],
+        'rows': out, 'empty': 'Every material delivered.'}
+
+
 def overlay(state: dict[str, Any]) -> dict[str, Any] | None:
-    """The panel for the game overlay, or None when there is nothing to show."""
+    """
+    The panel for the game overlay, or None when there is nothing to show.
+
+    Every view answers the same question for each material still needed -- how
+    much more do I need? -- beside what is aboard and on the carrier, so the
+    numbers can be watched move while buying, loading the carrier or delivering.
+    Only what the game confirms changes them.
+    """
     mode = overlay_mode(state)
+    dock = state.get('dock') or {}
     if mode == 'delivery':
-        dock = state.get('dock') or {}
         site = state['sites'].get(dock.get('marketId') or '') or state['sites'].get(state.get('selectedSite') or '')
-        if site is None:
-            return None
-        rows = after_delivery(state, site)
-        blocks: list[dict[str, Any]] = [
-            {'type': 'heading', 'text': f'Delivery · {site_label(site)}'},
-        ]
-        if site.get('progress') is not None:
-            blocks.append({'type': 'progress', 'label': 'Progress', 'value': site['progress']})
-        blocks.append({'type': 'table', 'columns': [
-            {'key': 'm', 'label': 'Material'}, {'key': 'aboard', 'label': 'Aboard', 'align': 'right'},
-            {'key': 'after', 'label': 'Left after', 'align': 'right'}],
-            'rows': [{'id': r['commodity'], 'cells': {'m': r['label'], 'aboard': f"{r['delivering']:,}",
-                                                       'after': f"{r['after']:,}"}}
-                     for r in sorted(rows, key=lambda r: -r['delivering']) if r['delivering'] > 0][:10],
-            'empty': 'Nothing aboard that this site needs.'})
+    else:
+        targets = target_sites(state) or active_sites(state)[:1]
+        site = targets[0] if targets else None
+    if site is None or site['complete'] or site['failed'] or site['archived']:
+        return None
+
+    rows = [r for r in material_rows(state, site) if r['remaining'] > 0]
+    title = {'delivery': 'Delivering to', 'carrier': 'Filling carrier for', 'shopping': 'Buying for'}.get(
+        mode, 'Hauling for')
+    blocks: list[dict[str, Any]] = [{'type': 'heading', 'text': f'{title} {site_label(site)}'}]
+    if site.get('progress') is not None:
+        blocks.append({'type': 'progress', 'label': 'Construction', 'value': site['progress']})
+
+    if mode == 'delivery':
+        # Aboard first: that is what is being handed over.
+        rows.sort(key=lambda r: (-r['allocatedShip'], r['priority'], -r['remaining']))
+        blocks.append(_totals(rows))
+        blocks.append(_material_table(rows, ['ship', 'need', 'after']))
         last = site.get('lastContribution')
         if last and last.get('items'):
             total = sum(i['amount'] for i in last['items'])
-            blocks.append({'type': 'text', 'tone': 'ok', 'text': f"✓ Confirmed: {total:,} t delivered {when(last['at'])}"})
-        return {'blocks': blocks}
+            blocks.append({'type': 'text', 'tone': 'ok',
+                           'text': f"✓ Confirmed: {total:,} t delivered {when(last['at'])}"})
+    elif mode in ('shopping', 'carrier'):
+        # The biggest shortfall first: what to buy or load here.
+        rows.sort(key=lambda r: (r['toSource'] <= 0, r['priority'], -r['toSource']))
+        blocks.append(_totals(rows))
+        if mode == 'shopping':
+            plan = load_plan(state)
+            free = t(plan['freeBefore']) if plan['freeBefore'] is not None else 'unknown'
+            blocks.append({'type': 'text', 'tone': 'muted', 'text': f'Free hold: {free}'})
+            blocks.append(_material_table(rows, ['short', 'ship', 'carrier']))
+        else:
+            free = state['carrier'].get('freeSpace')
+            if free is not None:
+                blocks.append({'type': 'text', 'tone': 'muted', 'text': f'Carrier free space: {t(free)}'})
+            blocks.append(_material_table(rows, ['short', 'carrier', 'ship']))
+    else:
+        rows.sort(key=lambda r: (r['priority'], -r['remaining']))
+        blocks.append(_totals(rows))
+        blocks.append(_material_table(rows, ['need', 'ship', 'carrier', 'short']))
 
-    targets = target_sites(state) or active_sites(state)[:1]
-    if not targets:
-        return None
-    site = targets[0]
-
-    if mode == 'shopping':
-        plan = load_plan(state)
-        title = site_label(site) if len(targets) == 1 else f'{len(targets)} sites'
-        free = t(plan['freeBefore']) if plan['freeBefore'] is not None else 'unknown'
-        return {'blocks': [
-            {'type': 'heading', 'text': f'Shopping · {title}'},
-            {'type': 'stats', 'items': [{'label': 'Free hold', 'value': free},
-                                        {'label': 'Aboard', 'value': t(plan['aboard'])}]},
-            {'type': 'table', 'columns': [
-                {'key': 'm', 'label': 'Material'}, {'key': 'buy', 'label': 'Buy', 'align': 'right'},
-                {'key': 'fc', 'label': 'Carrier', 'align': 'right'}],
-                'rows': [{'id': line['commodity'], 'cells': {
-                    'm': line['label'], 'buy': f"{line['buy']:,}",
-                    'fc': f"{line['fromCarrier']:,}" if line['carrierKnown'] or line['fromCarrier'] else '?'}}
-                         for line in plan['lines']][:10],
-                'empty': 'Nothing more to load.'},
-        ]}
-
-    # Hauling
-    rows = [r for r in material_rows(state, site) if r['remaining'] > 0]
-    rows.sort(key=lambda r: (-(r['allocatedShip'] > 0), r['priority'], -r['remaining']))
-    aboard = sum(r['allocatedShip'] for r in rows)
-    capacity = hold_capacity(state)
-    blocks = [{'type': 'heading', 'text': f'Hauling · {site_label(site)}'}]
-    if site.get('progress') is not None:
-        blocks.append({'type': 'progress', 'label': 'Progress', 'value': site['progress']})
-    blocks.append({'type': 'stats', 'items': [
-        {'label': 'Aboard for this site', 'value': t(aboard)},
-        {'label': 'Hold', 'value': t(capacity) if capacity else 'unknown'},
-        {'label': 'Still needed', 'value': t(sum(r['remaining'] for r in rows))}]})
-    blocks.append({'type': 'table', 'columns': [
-        {'key': 'm', 'label': 'Material'}, {'key': 'need', 'label': 'Needed', 'align': 'right'},
-        {'key': 'aboard', 'label': 'Aboard', 'align': 'right'}],
-        'rows': [{'id': r['commodity'], 'cells': {
-            'm': {'text': r['label'], 'mark': '↑' if r['allocatedShip'] else None},
-            'need': f"{r['remaining']:,}", 'aboard': f"{r['allocatedShip']:,}"}} for r in rows][:10],
-        'empty': 'Every material delivered.'})
+    if len(rows) > OVERLAY_ROWS:
+        blocks.append({'type': 'text', 'tone': 'muted', 'text': f'{len(rows) - OVERLAY_ROWS} more in the app'})
+    if any(not r['carrierKnown'] for r in rows):
+        blocks.append({'type': 'text', 'tone': 'warn',
+                       'text': 'Carrier amounts marked ? are not known yet: enter them in the app once.'})
     return {'blocks': blocks}

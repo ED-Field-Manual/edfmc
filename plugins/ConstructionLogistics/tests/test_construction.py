@@ -340,11 +340,11 @@ class Overlay(Base):
         c.start(GAME_A)
         self.feed(c, depot('2026-10-09T18:00:00Z'), cargo('2026-10-09T18:01:00Z', {'steel': 300}))
         self.assertEqual(views.overlay_mode(c.state), 'hauling')
-        self.assertIn('Hauling', self.overlays[-1]['blocks'][0]['text'])
+        self.assertIn('Hauling for', self.overlays[-1]['blocks'][0]['text'])
         self.feed(c, docked('2026-10-09T18:10:00Z'))
         self.assertEqual(views.overlay_mode(c.state), 'delivery')
         delivery = self.overlays[-1]
-        self.assertIn('Delivery', delivery['blocks'][0]['text'])
+        self.assertIn('Delivering to', delivery['blocks'][0]['text'])
         self.feed(c, contribution('2026-10-09T18:11:00Z', 300, name='$steel_name;'))
         self.assertIn('Confirmed: 300 t', json.dumps(self.overlays[-1]))
         self.feed(c, {'timestamp': '2026-10-09T18:20:00Z', 'event': 'Undocked'},
@@ -352,6 +352,57 @@ class Overlay(Base):
         self.assertEqual(views.overlay_mode(c.state), 'shopping')
         c.on_action('setOverlayMode', {'value': 'hauling'})
         self.assertEqual(views.overlay_mode(c.state), 'hauling')
+
+    def _table(self, panel):
+        table = next(b for b in panel['blocks'] if b['type'] == 'table')
+        return {r['id']: r['cells'] for r in table['rows']}, [col['key'] for col in table['columns']]
+
+    def test_every_view_shows_how_much_more_is_needed_as_it_changes(self):
+        c = self.controller()
+        c.start(GAME_A)
+        self.feed(c, depot('2026-10-09T18:00:00Z'), docked('2026-10-09T18:01:00Z', market=999, name='Ray Gateway',
+                                                          kind='Coriolis'))
+        rows, cols = self._table(self.overlays[-1])
+        self.assertEqual(cols, ['m', 'short', 'ship', 'carrier'])
+        self.assertEqual(rows['steel']['short']['text'], '4,000')
+        # Buying steel: the hold changes and "To get" falls with it.
+        self.feed(c, cargo('2026-10-09T18:02:00Z', {'steel': 784}))
+        rows, _ = self._table(self.overlays[-1])
+        self.assertEqual((rows['steel']['ship'], rows['steel']['short']['text']), ('784', '3,216'))
+        stats = next(b for b in self.overlays[-1]['blocks'] if b['type'] == 'stats')
+        self.assertEqual([i['label'] for i in stats['items']], ['Still needed', 'Aboard', 'On carrier', 'To get'])
+
+    def test_filling_the_carrier_has_its_own_view(self):
+        c = self.controller()
+        c.start(GAME_A)
+        self.feed(c, {'timestamp': '2026-10-09T17:00:00Z', 'event': 'CarrierStats', 'CarrierID': CARRIER,
+                      'Callsign': 'HBN-TXN', 'SpaceUsage': {'TotalCapacity': 25000, 'Cargo': 1000, 'FreeSpace': 24000}},
+                  depot('2026-10-09T18:00:00Z'))
+        c.on_action('setCarrier', {'row': 'steel', 'value': 1000})
+        self.feed(c, docked('2026-10-09T18:05:00Z', market=CARRIER, name='HBN-TXN', kind='FleetCarrier'))
+        self.assertEqual(views.overlay_mode(c.state), 'carrier')
+        panel = self.overlays[-1]
+        self.assertIn('Filling carrier for', panel['blocks'][0]['text'])
+        self.assertIn('Carrier free space: 24,000 t', json.dumps(panel))
+        rows, cols = self._table(panel)
+        self.assertEqual(cols, ['m', 'short', 'carrier', 'ship'])
+        self.assertEqual((rows['steel']['carrier'], rows['steel']['short']['text']), ('1,000', '3,000'))
+        # Unknown aluminium on the carrier says so, never 0.
+        self.assertEqual(rows['aluminium']['carrier'], '?')
+        self.assertIn('not known yet', json.dumps(panel))
+        # Moving steel from the ship onto the carrier changes where it is, not how much more is needed.
+        self.feed(c, cargo('2026-10-09T18:06:00Z', {'steel': 500}))
+        self.feed(c, transfer('2026-10-09T18:07:00Z', 500, 'tocarrier'), cargo('2026-10-09T18:07:00Z', {}))
+        rows, _ = self._table(self.overlays[-1])
+        self.assertEqual((rows['steel']['carrier'], rows['steel']['ship'], rows['steel']['short']['text']),
+                         ('1,500', '—', '2,500'))
+
+    def test_a_covered_material_is_ticked_in_words(self):
+        c = self.controller()
+        c.start(GAME_A)
+        self.feed(c, depot('2026-10-09T18:00:00Z'), cargo('2026-10-09T18:01:00Z', {'steel': 4000}))
+        rows, _ = self._table(self.overlays[-1])
+        self.assertEqual(rows['steel']['short'], {'text': 'covered', 'mark': '✓', 'tone': 'ok'})
 
     def test_nothing_to_show_hides_the_panel(self):
         c = self.controller()
