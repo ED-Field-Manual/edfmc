@@ -149,9 +149,13 @@ def _materials(state: dict[str, Any], site: dict[str, Any]) -> dict[str, Any]:
         done = r['status'] == 'done'
         # Inputs only where a change matters: a delivered material needs neither
         # a carrier correction nor a hauling priority.
-        carrier_value: Any = f"{r['carrier']:,}" if done else {
-            'text': f"{r['carrier']:,}",
-            'edit': {'action': 'setCarrier', 'kind': 'number', 'value': r['carrier'], 'min': 0}}
+        # A count is shown as itself; an unknown amount stays empty with its
+        # lower bound as the hint, never as a 0 that would claim the carrier is empty.
+        carrier_value: Any = r['carrierText'] if done else {
+            'text': r['carrierText'],
+            'edit': {'action': 'setCarrier', 'kind': 'number', 'min': 0,
+                     'value': r['carrier'] if r['carrierKnown'] else None,
+                     'placeholder': r['carrierText']}}
         priority_value: Any = '' if done else {
             'text': str(r['priority']),
             'edit': {'action': 'setPriority', 'kind': 'number', 'value': r['priority'], 'min': 1, 'max': 5}}
@@ -170,17 +174,17 @@ def _materials(state: dict[str, Any], site: dict[str, Any]) -> dict[str, Any]:
                 'priority': priority_value,
             },
         })
-    estimated = sum(1 for r in rows if r['carrierSource'] == 'estimated')
-    entered = sum(1 for r in rows if r['carrierSource'] == 'user')
-    imported = sum(1 for r in rows if r['carrierSource'] == 'imported')
-    sources = []
-    if estimated:
-        sources.append(f'{estimated} estimated from transfers')
-    if entered:
-        sources.append(f'{entered} entered by you')
-    if imported:
-        sources.append(f'{imported} imported')
+    open_rows = [r for r in rows if r['status'] != 'done']
+    unknown = [r for r in open_rows if not r['carrierKnown']]
+    notice: list[dict[str, Any]] = []
+    if unknown:
+        notice.append({'type': 'text', 'tone': 'warn', 'text':
+                       f"Your carrier's cargo isn't known for {len(unknown)} of these materials, so they count as "
+                       "none there. The game never lists a carrier's hold in the journal: open the carrier's "
+                       'transfer screen in game and type each amount into the Carrier column once. Transfers keep '
+                       'it up to date after that.'})
     return {'type': 'section', 'title': 'Materials', 'blocks': [
+        *notice,
         {'type': 'controls', 'items': [
             {'type': 'toggle', 'label': 'Hide delivered materials', 'action': 'setHideCompleted', 'value': hide},
             {'type': 'copy', 'label': 'Copy what is still needed', 'text': export_text(site, rows)},
@@ -202,8 +206,8 @@ def _materials(state: dict[str, Any], site: dict[str, Any]) -> dict[str, Any]:
             "game. Remaining is what the site still needs; To source is what is not already on your ship or "
             'carrier. Priority 1 is hauled first.'},
         {'type': 'text', 'tone': 'muted', 'text':
-            'Carrier counts are an estimate: the game reports transfers to and from your carrier, never its whole '
-            'hold. Correct a count by typing over it' + (f" ({', '.join(sources)})." if sources else '.')},
+            'Carrier: a number is a count you gave, kept current by transfers; ≥ is at least what you moved there '
+            'since; ? is unknown. Correct a count by typing over it.'},
     ]}
 
 
@@ -237,7 +241,8 @@ def _trip(state: dict[str, Any]) -> dict[str, Any]:
                                {'key': 'buy', 'label': 'Buy', 'align': 'right'},
                                {'key': 'total', 'label': 'Total', 'align': 'right'}],
                    'rows': [{'id': line['commodity'], 'cells': {
-                       'material': line['label'], 'fromCarrier': f"{line['fromCarrier']:,}",
+                       'material': line['label'],
+                       'fromCarrier': f"{line['fromCarrier']:,}" if line['carrierKnown'] or line['fromCarrier'] else '?',
                        'buy': f"{line['buy']:,}", 'total': f"{line['total']:,}"}} for line in plan['lines']]})
     lines = '\n'.join(f"{line['label']}: {line['total']:,} t"
                       + (f" ({line['fromCarrier']:,} from carrier)" if line['fromCarrier'] else '')
@@ -431,8 +436,9 @@ def overlay(state: dict[str, Any]) -> dict[str, Any] | None:
             {'type': 'table', 'columns': [
                 {'key': 'm', 'label': 'Material'}, {'key': 'buy', 'label': 'Buy', 'align': 'right'},
                 {'key': 'fc', 'label': 'Carrier', 'align': 'right'}],
-                'rows': [{'id': line['commodity'], 'cells': {'m': line['label'], 'buy': f"{line['buy']:,}",
-                                                             'fc': f"{line['fromCarrier']:,}"}}
+                'rows': [{'id': line['commodity'], 'cells': {
+                    'm': line['label'], 'buy': f"{line['buy']:,}",
+                    'fc': f"{line['fromCarrier']:,}" if line['carrierKnown'] or line['fromCarrier'] else '?'}}
                          for line in plan['lines']][:10],
                 'empty': 'Nothing more to load.'},
         ]}

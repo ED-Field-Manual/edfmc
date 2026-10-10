@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import tracker
 from .projects import allocate
 
 #: 1 is most urgent. Materials without one are in the middle.
@@ -47,7 +48,20 @@ def _planner_site(site: dict[str, Any]) -> dict[str, Any]:
 
 
 def carrier_amount(state: dict[str, Any], commodity: str) -> int:
+    """What is certainly on the carrier: the count, or the lower bound when it is not known."""
     return int(state['carrier']['cargo'].get(commodity, {}).get('amount', 0))
+
+
+def carrier_known(state: dict[str, Any], commodity: str) -> bool:
+    return tracker.carrier_known(state['carrier']['cargo'].get(commodity))
+
+
+def carrier_text(state: dict[str, Any], commodity: str) -> str:
+    """'4,944', or '≥ 358' / '?' when the commander has not given a count."""
+    amount = carrier_amount(state, commodity)
+    if carrier_known(state, commodity):
+        return f'{amount:,}'
+    return f'≥ {amount:,}' if amount > 0 else '?'
 
 
 def ship_amount(state: dict[str, Any], commodity: str) -> int:
@@ -106,6 +120,8 @@ def material_rows(state: dict[str, Any], site: dict[str, Any]) -> list[dict[str,
             'remaining': remaining,
             'carrier': carrier_amount(state, r['commodity']),
             'carrierSource': state['carrier']['cargo'].get(r['commodity'], {}).get('source'),
+            'carrierKnown': carrier_known(state, r['commodity']),
+            'carrierText': carrier_text(state, r['commodity']),
             'ship': ship_amount(state, r['commodity']),
             'allocatedShip': mine['ship'],
             'allocatedCarrier': mine['carrier'],
@@ -180,7 +196,8 @@ def load_plan(state: dict[str, Any]) -> dict[str, Any]:
         buy = take - from_carrier
         left -= take
         lines.append({'commodity': n['commodity'], 'label': n['label'], 'fromCarrier': int(from_carrier),
-                      'buy': int(buy), 'total': int(take), 'priority': n['priority']})
+                      'buy': int(buy), 'total': int(take), 'priority': n['priority'],
+                      'carrierKnown': carrier_known(state, n['commodity'])})
 
     planned = sum(line['total'] for line in lines)
     return {

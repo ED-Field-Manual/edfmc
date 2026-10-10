@@ -14,7 +14,14 @@ What the journal confirms, measured across 324 journals:
   A finished site docks under its final name and type.
 - `CarrierStats` (542) gives the carrier's capacity, free space and total cargo.
 - `CargoTransfer` (533) gives changes to the carrier's hold, never the whole
-  hold, so per-commodity carrier cargo is an estimate built on those changes.
+  hold. A commodity's carrier amount is therefore *known* only from a starting
+  figure the commander gave; transfers then keep it current. Without one, a
+  transfer proves only a lower bound ("at least 358 t"), never "0 t". Rebuilding
+  the hold from every transfer in the journals was measured and rejected: across
+  this commander's journals it gave titanium 6,039 t against 4,944 t on the
+  carrier's own screen, liquid oxygen 2,631 t against 5,760 t (three carriers,
+  journals starting mid-history, and carrier market orders the journal does not
+  show).
 
 What it does not do: buying commodities is not delivering them, and a planned
 load is not a contribution. Only the two colonisation events above change what
@@ -194,10 +201,13 @@ def apply(state: dict[str, Any], entry: dict[str, Any]) -> bool:
             direction = t.get('Direction')
             if symbol is None or count <= 0 or direction not in ('tocarrier', 'toship'):
                 continue
-            current = cargo.get(symbol, {'amount': 0})
-            amount = current['amount'] + (count if direction == 'tocarrier' else -count)
-            # Never below zero: a negative hold would be a counting error, not cargo.
-            cargo[symbol] = {'amount': max(0, amount), 'source': 'estimated', 'updatedAt': at}
+            current = cargo.get(symbol)
+            known = carrier_known(current)
+            base = current['amount'] if current else 0
+            amount = base + (count if direction == 'tocarrier' else -count)
+            # Never below zero. For an unknown amount this is a lower bound: what
+            # was moved there is certainly there, what was taken says nothing.
+            cargo[symbol] = {'amount': max(0, amount), 'source': 'estimated', 'known': known, 'updatedAt': at}
         return True
 
     if event == 'Loadout':
@@ -217,6 +227,16 @@ def apply(state: dict[str, Any], entry: dict[str, Any]) -> bool:
         return True
 
     return False
+
+
+def carrier_known(entry: dict[str, Any] | None) -> bool:
+    """Whether a carrier amount is a count rather than a lower bound."""
+    if not entry:
+        return False
+    if 'known' in entry:
+        return bool(entry['known'])
+    # Saved before `known` existed: only a typed or imported figure was ever a count.
+    return entry.get('source') in ('user', 'imported')
 
 
 def set_ship_cargo(state: dict[str, Any], inventory: list[dict[str, Any]], at: str) -> None:

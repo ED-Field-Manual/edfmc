@@ -26,7 +26,15 @@ export interface UiCell {
   /** A symbol shown before the text, so status never relies on colour alone. */
   readonly mark: string | null;
   /** Editable in place: the new value goes back as `action` with `{row, value}`. */
-  readonly edit: { readonly action: string; readonly kind: 'number' | 'text'; readonly value: string | number; readonly min: number | null; readonly max: number | null } | null;
+  readonly edit: {
+    readonly action: string;
+    readonly kind: 'number' | 'text';
+    /** Null for "no value yet": the input starts empty, showing the placeholder. */
+    readonly value: string | number | null;
+    readonly min: number | null;
+    readonly max: number | null;
+    readonly placeholder: string | null;
+  } | null;
 }
 
 export interface UiColumn {
@@ -117,9 +125,10 @@ function cell(v: unknown): UiCell | null {
   if (e !== null) {
     const a = action(e['action']);
     const kind = e['kind'] === 'text' ? 'text' : e['kind'] === 'number' ? 'number' : null;
-    const value = kind === 'number' ? finite(e['value']) : text(e['value']);
-    if (a !== null && kind !== null && value !== null) {
-      edit = { action: a, kind, value, min: finite(e['min']), max: finite(e['max']) };
+    const empty = e['value'] === null || e['value'] === undefined;
+    const value = empty ? null : kind === 'number' ? finite(e['value']) : text(e['value']);
+    if (a !== null && kind !== null && (empty || value !== null)) {
+      edit = { action: a, kind, value, min: finite(e['min']), max: finite(e['max']), placeholder: text(e['placeholder'], 40) };
     }
   }
   return {

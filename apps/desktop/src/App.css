@@ -1328,3 +1328,4 @@ label.field select:focus-visible {
 .pui-toggle { padding-bottom: 0.375rem; }
 .pui-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
 .pui-danger { background: var(--bad); color: #1a0505; }
+.pui-cell-input::placeholder { color: var(--muted); }

@@ -149,7 +149,7 @@ class Controller:
         elif name == 'setCarrier' and isinstance(value, (int, float)):
             # The commander's own count overrides the estimate until the next transfer.
             s['carrier']['cargo'][str(args.get('row'))] = {'amount': max(0, int(value)), 'source': 'user',
-                                                            'updatedAt': _now_iso()}
+                                                            'known': True, 'updatedAt': _now_iso()}
         elif name == 'setPriority' and isinstance(value, (int, float)):
             s['materialPriority'][str(args.get('row'))] = max(1, min(5, int(value)))
         elif name == 'setTarget' and value in ('selected', 'all'):

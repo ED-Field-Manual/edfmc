@@ -178,8 +178,30 @@ class Carrier(Base):
         c.start(GAME_A)
         line = transfer('2026-10-03T03:12:29Z', 358, 'tocarrier')
         self.feed(c, line, line, transfer('2026-10-03T03:13:00Z', 1000, 'toship'))
-        self.assertEqual(c.state['carrier']['cargo']['steel'], {'amount': 0, 'source': 'estimated',
+        # Never below zero, and with no count given it stays a lower bound, not a count.
+        self.assertEqual(c.state['carrier']['cargo']['steel'], {'amount': 0, 'source': 'estimated', 'known': False,
                                                                 'updatedAt': '2026-10-03T03:13:00Z'})
+
+    def test_an_unknown_carrier_is_never_shown_as_empty(self):
+        # The case reported: 4,944 t of titanium on the carrier's transfer screen,
+        # 0 in the plugin, which then said to buy titanium.
+        c = self.controller()
+        c.start(GAME_A)
+        self.feed(c, depot('2026-10-09T18:00:00Z'))
+        site = c.state['sites'][str(SITE)]
+        steel = next(r for r in hauling.material_rows(c.state, site) if r['commodity'] == 'steel')
+        self.assertEqual((steel['carrierKnown'], steel['carrierText']), (False, '?'))
+        self.assertIn("isn't known", json.dumps(self.pages[-1]))
+        # Moving some there proves at least that much.
+        self.feed(c, transfer('2026-10-09T18:01:00Z', 358, 'tocarrier'))
+        steel = next(r for r in hauling.material_rows(c.state, site) if r['commodity'] == 'steel')
+        self.assertEqual(steel['carrierText'], '≥ 358')
+        # A count given once is kept current by transfers, and is a count from then on.
+        c.on_action('setCarrier', {'row': 'steel', 'value': 4944})
+        self.feed(c, transfer('2026-10-09T18:02:00Z', 1000, 'toship'))
+        steel = next(r for r in hauling.material_rows(c.state, site) if r['commodity'] == 'steel')
+        self.assertEqual((steel['carrierKnown'], steel['carrierText'], steel['carrier']), (True, '3,944', 3944))
+        self.assertNotIn("isn't known for 2", json.dumps(self.pages[-1]))
 
     def test_carrier_stats_are_journal_confirmed(self):
         c = self.controller()
@@ -256,7 +278,7 @@ class Planning(Base):
         self.c.on_action('setPriority', {'row': 'aluminium', 'value': 1})
         plan = hauling.load_plan(self.c.state)
         self.assertEqual(plan['lines'][0], {'commodity': 'aluminium', 'label': 'Aluminium', 'fromCarrier': 468,
-                                            'buy': 0, 'total': 468, 'priority': 1})
+                                            'buy': 0, 'total': 468, 'priority': 1, 'carrierKnown': False})
 
     def test_after_delivery_is_a_projection_not_a_change(self):
         site = self.c.state['sites'][str(SITE)]
@@ -382,7 +404,7 @@ class Page(Base):
         titles = [b['title'] for b in page['blocks'] if b['type'] == 'section']
         self.assertEqual(titles, ['Scholz Landing', 'Materials', 'Plan a trip', 'Where to buy', 'Sites', 'Overlay', 'Data'])
         text = json.dumps(page, ensure_ascii=False)
-        self.assertIn('estimate', text)            # carrier counts say what they are
+        self.assertIn("isn't known", text)          # an unknown carrier says so, never 0
         self.assertIn('✓', text)                   # status never relies on colour alone
 
     def test_cargo_json_is_used_only_when_it_matches_the_event(self):

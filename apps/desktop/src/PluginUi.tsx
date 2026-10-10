@@ -135,9 +135,10 @@ function Cell({ cell, row, label, act }: { cell: UiCell | undefined; row: string
     return (
       <CommitInput
         kind={edit.kind}
-        value={edit.value}
+        value={edit.value ?? ''}
         min={edit.min}
         max={edit.max}
+        placeholder={edit.placeholder}
         label={`${label} for ${row}`}
         className="pui-cell-input"
         onCommit={(value) => act(edit.action, { row, value })}
