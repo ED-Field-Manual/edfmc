@@ -10,7 +10,12 @@ import { isKnown, type CommanderState, type NormalizedEvent } from '@edfm/elite-
 import { RULE_LIMITS, type ComparisonOp, type Condition, type JsonPrimitive } from './types.js';
 
 export interface EvaluationInput {
-  readonly event: NormalizedEvent;
+  /**
+   * The journal line being evaluated, or null when only state is being checked:
+   * a state-scoped rule is evaluated against state alone, and a rule-set change
+   * re-checks state without inventing a journal line to do it.
+   */
+  readonly event: NormalizedEvent | null;
   readonly state: CommanderState;
 }
 
@@ -27,7 +32,9 @@ export interface EvaluationInput {
  *    commander had undocked and flown to an orbital station, cheerfully offering
  *    carrier links from a Coriolis.
  *
- * A rule with no `event` node anywhere in its condition is state-scoped.
+ * A rule with no `event` or `field` node anywhere in its condition is
+ * state-scoped. `field` counts because it reads the triggering line: a rule that
+ * looks at what an event said is about that moment, whatever else it checks.
  */
 export function usesEvent(condition: Condition, depth = 0): boolean {
   if (depth > RULE_LIMITS.maxConditionDepth) return false;
@@ -35,6 +42,7 @@ export function usesEvent(condition: Condition, depth = 0): boolean {
 
   switch (condition.kind) {
     case 'event':
+    case 'field':
       return true;
     case 'all':
     case 'any':
@@ -214,6 +222,7 @@ export function evaluate(condition: Condition, input: EvaluationInput, depth = 0
 
   switch (condition.kind) {
     case 'event': {
+      if (input.event === null) return false;
       const name = input.event.source.event;
       return Array.isArray(condition.name)
         ? condition.name.includes(name)
@@ -221,12 +230,16 @@ export function evaluate(condition: Condition, input: EvaluationInput, depth = 0
     }
 
     case 'field':
+      if (input.event === null || typeof condition.path !== 'string') return false;
       return compare(readPath(input.event.source.raw, condition.path), condition.op, condition.value);
 
     case 'state':
+      if (typeof condition.path !== 'string') return false;
       return compare(readPath(input.state, condition.path), condition.op, condition.value);
 
     case 'service': {
+      // Rule sets are untrusted: a non-string id must not throw on the ingest path.
+      if (typeof condition.id !== 'string') return false;
       const services = input.state.stationServices;
       if (!isKnown(services)) return false;
       // Case-folded comparison: the raw array genuinely mixes cases.

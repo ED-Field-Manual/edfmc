@@ -114,7 +114,11 @@ function resolve(path: string, input: EvaluationInput): string | null {
   if (rest.length === 0) return null;
 
   let base: unknown;
-  if (root === 'event') base = input.event.source.raw;
+  if (root === 'event') {
+    // A state-only check has no line to read from.
+    if (input.event === null) return null;
+    base = input.event.source.raw;
+  }
   else if (root === 'state') base = input.state;
   else return null;
 

@@ -218,10 +218,12 @@ untrustworthy. Completions are therefore seeded from the durable Journal before
 the roster is built. Older entries stored only the localised genus name, so the
 seed matches on either that or the raw token.
 
-**The stage count after an app restart.** The journal reader resumes from a byte
-offset rather than replaying history, so starting the app midway through a run
-means the first event it sees is a `Sample` that could be the second or the third.
-Both are consistent with what was observed.
+**The stage count after an app restart.** At startup the journal reader re-reads
+the journal it last stopped in from its first line (see ARCHITECTURE.md §4.1), so
+restarting the app within one game session sees the earlier samples again. A run
+that began in an earlier journal -- the game itself was restarted mid-run -- still
+reaches the app first as a `Sample` that could be the second or the third. Both are
+consistent with what was observed.
 
 So **no number is claimed**: `samplesTaken` is `null` and the overlay omits the
 stage line, showing "Sampling" and the organism instead. A wrong "1 / 3" would tell

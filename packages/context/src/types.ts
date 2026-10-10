@@ -1,8 +1,10 @@
 /**
  * Context rule schema.
  *
- * Rules are **server-driven and versioned** (§6), which means they arrive from the
- * network and must be treated as untrusted data. Two consequences shape this schema:
+ * Rules are **versioned and designed to be server-delivered** (§6). Today they come
+ * from the bundled set and from plugins; the backend delivery path does not exist
+ * yet. Either way they are treated as untrusted data, and two consequences shape
+ * this schema:
  *
  *  1. Conditions are declarative. There is no expression string, no `eval`, no
  *     function body — a rule can only combine a fixed set of comparisons. A
@@ -33,7 +35,12 @@ export type ComparisonOp =
 export type Condition =
   /** The triggering journal event's raw name, e.g. `ProspectedAsteroid`. */
   | { readonly kind: 'event'; readonly name: string | readonly string[] }
-  /** A dotted path into the raw journal payload of the triggering event. */
+  /**
+   * A dotted path into the raw journal payload of the triggering event.
+   *
+   * Reading the event makes a rule event-scoped, exactly as an `event` node does:
+   * a rule about what a journal line said is a rule about a moment.
+   */
   | { readonly kind: 'field'; readonly path: string; readonly op: ComparisonOp; readonly value?: JsonPrimitive }
   /** A dotted path into the current commander state. */
   | { readonly kind: 'state'; readonly path: string; readonly op: ComparisonOp; readonly value?: JsonPrimitive }
@@ -94,7 +101,20 @@ export type ResourceGate =
 export interface ContextRule {
   readonly id: string;
   readonly title: string;
+  /**
+   * One line saying why this is relevant, shown under the title. May carry
+   * placeholders (see template.ts).
+   */
   readonly subtitle?: string;
+  /**
+   * Used when `subtitle` has a placeholder the matching event cannot fill.
+   *
+   * One rule can match more than one event shape -- a planet's signals arrive in
+   * both `FSSBodySignals` and `SAASignalsFound`, and only the second lists the
+   * genera -- so the count it can state depends on which one matched. Without a
+   * fallback the line would vanish exactly when the less detailed event matched.
+   */
+  readonly subtitleFallback?: string;
   readonly when: Condition;
   /**
    * Higher wins. §6 requires a priority system so the commander is not shown ten
@@ -182,9 +202,20 @@ export interface ContextRuleSet {
   readonly rules: readonly ContextRule[];
 }
 
+/**
+ * How a rule ends.
+ *
+ * - `event`: about something that happened (a journal line matched). Runs down a
+ *   timer measured from the journal's own timestamp.
+ * - `state`: about where the commander is (docked at a carrier). True exactly
+ *   while that state holds, and never refreshed by unrelated journal lines.
+ */
+export type ContextScope = 'event' | 'state';
+
 /** A rule currently considered relevant. */
 export interface ActiveContext {
   readonly rule: ContextRule;
+  readonly scope: ContextScope;
   /**
    * Rule text with placeholders resolved against the event that matched.
    *
@@ -194,14 +225,33 @@ export interface ActiveContext {
    */
   readonly title: string;
   readonly subtitle: string | null;
-  /** When it last matched (epoch ms). */
+  /**
+   * When it became relevant (epoch ms), by the journal's clock.
+   *
+   * For an event-scoped rule, the timestamp of the newest matching line. For a
+   * state-scoped rule, the line at which the state started to hold; re-checking
+   * the same state on later lines does not move it.
+   */
   readonly matchedAt: number;
-  /** When it stops being relevant (epoch ms). */
+  /** When it stops being relevant (epoch ms). Infinite for state-scoped rules. */
   readonly expiresAt: number;
-  /** The event that triggered it, for provenance and diagnostics (§27). */
-  readonly triggerEvent: string;
-  readonly triggerEventId: string;
+  /**
+   * The journal event that started it, for diagnostics only (§27). Null when a
+   * rule-set change found the state already true, with no line to point at.
+   */
+  readonly triggerEvent: string | null;
+  readonly triggerEventId: string | null;
 }
+
+/**
+ * How a context relates to the game right now, for display.
+ *
+ * - `current`: a state-scoped context while the game is running.
+ * - `recent`: an event-scoped context still inside its time window.
+ * - `last-session`: a state-scoped context after the game has closed. True when
+ *   the commander last played, not now, and labelled as such.
+ */
+export type ContextTiming = 'current' | 'recent' | 'last-session';
 
 /* ------------------------------------------------------------------ limits */
 

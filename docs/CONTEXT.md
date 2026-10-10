@@ -1,7 +1,67 @@
 # Context Assistant
 
 Surfaces EDFM material relevant to what the commander is doing, matched from journal
-events by fixed rules.
+events by fixed rules. Players see it as **Relevant guides**: a page in the main
+window and the top entry in the overlay.
+
+## What the player sees
+
+Each guide is a compact card with:
+
+- a title, and one line saying why it is relevant;
+- the EDFM articles, opened in the browser through the app's existing opener;
+- when it applies, in words: **Now** (true of where you are), **4 min ago**
+  (something you did recently), or **Last session** (where you were when the game
+  closed). The game is "closed" when its window is gone or the journal says
+  `Shutdown`, the same judgement the Dashboard uses (`lib/session.ts`).
+
+With nothing relevant the page says so in one line and suggests nothing else.
+
+The page shows no rule ids, journal event names, rule-set version or source,
+counts, or matching terminology. All of that is on **Diagnostics → Context
+rules**, with every active context's rule id, kind, trigger event, start and
+expiry, plus where the journal reader resumed at startup and how many lines it
+re-read.
+
+The overlay reads the same projection as the page (`projectedContexts` in
+`companion.ts`), so the spoiler policy and the link policy apply to both. "Last
+session" guides are never sent to the overlay.
+
+## Lifecycle
+
+Two kinds of rule, told apart by their conditions (`usesEvent`):
+
+- **Event-scoped** — the rule reads the triggering line (`event` or `field`). It
+  is about a moment, and runs down its TTL **from the line's own timestamp**, not
+  from when the app read it. A line older than its TTL never starts a context, so
+  re-reading a session at startup cannot bring back an activity from hours ago,
+  while the last few minutes of a session still being played come back as they
+  were. A line stamped in the future is treated as now.
+- **State-scoped** — only `state`/`service` conditions. It describes where the
+  commander is, is checked against state alone (never against the line that
+  prompted the check), and lasts exactly while the state holds. Its "trigger" is
+  the line at which the state started to hold; later unrelated lines do not move
+  it. This is what used to report "Triggered by Shutdown".
+
+What ends a context:
+
+| Moment | Event-scoped | State-scoped |
+|---|---|---|
+| Its `endsOn` events | Ended | — |
+| TTL from the line's time | Ended (also on a 3-second timer, with no journal line needed) | — |
+| `Fileheader`, `LoadGame`, `Shutdown` | Ended: activity belongs to its session, even after a crash | Kept; re-checked against state |
+| State stops holding (undock, jump, undocked `Location`) | — | Ended |
+| Game closed (window gone, or `Shutdown`) | — | Shown as **Last session** |
+| Another commander's line | Everything cleared before it is evaluated | Everything cleared |
+
+Station rules also require `docking = docked`. `ApproachSettlement` carries a
+settlement's full service list (465 of 470 approaches; 91 list Vista Genomics and
+72 Pioneer Supplies), and approaching a place is not being able to use it.
+
+**Changing the rule set** (enabling or disabling a plugin) keeps every context
+whose rule survives, with its original time, drops those whose rule is gone, and
+re-checks state-scoped rules against the current state. No journal line is
+invented to do it.
 
 ## Determinism is a requirement, not a style choice
 
@@ -16,9 +76,11 @@ contexts.
 
 ## Rules are untrusted input
 
-Rules are server-driven and versioned so EDFM's recommendations can change without
-shipping a new desktop build. That means they arrive over the network, and the client
-cannot audit what it is sent. Two design consequences:
+Rules are versioned data so EDFM's recommendations can change without shipping a
+new desktop build. Today they come from the bundled set and from plugins; delivering
+them from the EDFM backend is **planned and not built** (no endpoint, download,
+cache or signature check exists). Either way they are treated as untrusted input.
+Two design consequences:
 
 - **Conditions are declarative.** There is no expression string, no `eval`, no
   function body — only a fixed set of comparisons combined with `all`/`any`/`not`. A
@@ -32,11 +94,16 @@ Further guards, all tested:
 
 - Dotted paths refuse `__proto__`, `constructor` and `prototype`.
 - Condition recursion is depth-bounded.
-- Rule count, resource count and string lengths are clamped on ingest.
+- Rule count, resource count and string lengths are clamped on ingest, and each
+  rule is rebuilt from known fields only.
 - Duplicate rule ids are rejected — they would make expiry ambiguous.
 - A missing or absurd TTL is clamped, so a context cannot pin itself on screen.
-- Resource URLs must be `http(s)`. A rule set must not be able to hand the shell a
-  `file:` or custom-scheme URL to open.
+- Resource URLs must parse as `https:` with no embedded credentials
+  (`safeExternalUrl`). A rule set must not be able to hand the shell a `file:`,
+  custom-scheme or plain `http:` URL, or disguise where a link goes. Links that
+  fail are dropped when the rule set loads, and checked again when opened.
+- A resource with a spoiler gate (`requires`) the client cannot read is dropped:
+  failing open would show what the gate was protecting.
 - An unrecognised condition kind (from a newer server) never matches and never throws.
 
 ## Condition kinds
@@ -59,7 +126,8 @@ among 38 otherwise-lowercase tokens across the corpus).
 §6 asks that the commander not be shown ten links at once.
 
 - Each rule carries a **priority**; the resolver ranks by it and surfaces only the top
-  few (3 in the main window, **1** in the overlay, where space over a game is scarce).
+  few (3). The overlay shows the first in full and the others as titles only, where
+  space over a game is scarce.
 - Each rule carries a **TTL**. Without decay, a context triggered once would linger
   for the whole session. Re-matching refreshes expiry but is not treated as a change,
   so it does not force a re-render.
@@ -375,17 +443,18 @@ activity that is simply over. `endsOn` handles that case, and decay handles the 
 
 ## Overlay integration
 
-The overlay receives only the single highest-ranked context, and its links are
-rendered as **labels, not clickable links**. That is deliberate: the overlay is
+The overlay receives the highest-ranked current or recent guide in full and the
+others as titles, from the same spoiler-filtered projection as the main window. Its
+links are rendered as **labels, not clickable links**. That is deliberate: the overlay is
 click-through during normal play, so a link there could never be followed — showing
-one would promise an interaction that cannot happen. The main window's Context page is
-where resources actually open, in the user's browser.
+one would promise an interaction that cannot happen. The main window's Relevant
+guides page is where resources actually open, in the user's browser.
 
 ## Provenance
 
-Each active context records the event that triggered it and that event's id, shown on
-the Context page (§27). When a context looks wrong, the first question — "what made
-this appear?" — is answerable without guessing.
+Each active context records the event that started it and that event's id (§27),
+shown on the Diagnostics page rather than to players. When a context looks wrong,
+the first question — "what made this appear?" — is answerable without guessing.
 
 ## Guidance levels
 
@@ -414,3 +483,48 @@ then.
 changes a value, and never alters which facts are shown -- a setting that quietly
 disabled things would make "am I seeing everything?" unanswerable. Bounded to 240
 characters by the sanitiser, because this can appear over the game.
+
+## Bundled rules (version 2, 2026-10-09)
+
+| Id | Shown as | Kind | Matches | Ends on | Guides |
+|---|---|---|---|---|---|
+| `interdicted` | Interdicted — "You were pulled out of supercruise" | Event, 3 min | `Interdicted` | EscapeInterdiction, SupercruiseEntry, Docked, FSDJump, Died | Frame Shift Drive Interdictor |
+| `colonisation-depot` | Colonisation construction | Event, 15 min | `ColonisationConstructionDepot` | Undocked, FSDJump, SupercruiseEntry | Colonisation, Trailblazers, Pioneer Supplies |
+| `station-pioneer-supplies` | Pioneer Supplies | State | docked + `pioneersupplies` | — | Pioneer Supplies, Colonisation |
+| `exobiology-scan` | Exobiology sampling — "Sampling {species}" | Event, 10 min | `ScanOrganic` | FSDJump, Docked, SellOrganicData | Exobiology |
+| `station-vista-genomics` | Selling exobiology data | State | docked + `vistagenomics` + unsold data | — | Exobiology |
+| `engineering-activity` | Engineering — "Working with {Engineer}" | Event, 5 min | EngineerCraft, EngineerContribution, single-change EngineerProgress | Undocked, Liftoff, FSDJump, SupercruiseEntry | Engineering, Engineering Blueprints, Engineers, Engineer Unlock Guide |
+| `station-material-trader-encoded` / `-raw` / `-manufactured` | {Kind} Material Trader | State | docked + `materialtrader` + known trader type | — | Engineering Materials#Material Traders |
+| `station-material-trader` | Material Trader — type shown once traded | State | docked + `materialtrader`, type unknown | — | same |
+| `mining-prospecting` | Asteroid mining | Event, 10 min | `ProspectedAsteroid` | Docked, FSDJump, SupercruiseEntry | Mining, Laser Mining, Core Mining, How to Use a Prospector Limpet |
+| `mining-ring-scan` | Mining hotspots — "Hotspots mapped in {ring}" | Event, 10 min | `SAASignalsFound` on a ring with signals | Docked, FSDJump, SupercruiseEntry | Mining Hotspot, How to Find a Mining Hotspot, Planetary Rings |
+| `planet-biological-signals` | Biological signals — count from the surface scan, none from the FSS | Event, 30 min | `SAASignalsFound` with genera, or `FSSBodySignals` with a Biological signal | FSDJump, Docked | Exobiology, Detailed Surface Scanner |
+| `planet-surface-mining` | Planetary mining locations | Event, 30 min | `SAASignalsFound` or `FSSBodySignals` with `$PlanetaryMiningLocation_Name;` | FSDJump, Docked | Surface Mining, Mining |
+| `mining-refining` | Refining — "Your refinery produced {material}" | Event, 10 min | `MiningRefined` | Docked, FSDJump, SupercruiseEntry | Refinery, How to Use a Refinery, How to Resolve a Full Refinery |
+| `fleet-carrier` | Fleet Carrier services — "Docked at a Fleet Carrier" | State | docked + carrier services or type | — | Fleet Carriers, Fleet Carrier Administration Systems |
+| `powerplay-activity` | Powerplay — "Working for {Power}" | Event, 10 min | PowerplayMerits/Collect/Deliver/Rank | FSDJump | Powerplay |
+
+Every placeholder above reads a field present on every matching line in the
+corpus; each has a plain fallback in case one is ever missing.
+
+What changed from version 1, and the evidence:
+
+- **Station rules need docking.** See Lifecycle.
+- **`interdicted`** lost its "follow the blue circle / zero your throttle"
+  steps. `Interdicted` is written after the interdiction is over (107 in the
+  corpus, followed by `SupercruiseExit`, 103 with `Submitted: true`); the steps
+  described a struggle that had already ended.
+- **`planet-surface-mining`** is now "Planetary mining locations". The signal
+  counts locations and names no material, so "mineable surface materials" was
+  more than it said. Sub-surface Mining was removed: EDFM's article is about
+  deposits inside asteroids, and the signal never appears on a ring (0 of 32).
+  It now also matches `FSSBodySignals` (456 carry the token), as one context per
+  rule, so a body seen in the FSS and then mapped is not shown twice.
+- **`planet-biological-signals`** also matches `FSSBodySignals` (114 carry a
+  Biological signal). Signals are presented as signals: no species is named
+  until the commander samples one.
+- **`fleet-carrier`** needs docking and says why ("Docked at a Fleet Carrier").
+  `carriermanagement` and `carrierfuel` occur only at FleetCarrier stations (744 of
+  744 docks each).
+- **`mining-ring-scan`** needs at least one signal before it says hotspots were
+  found (none of the 32 ring scans was empty, but the claim depends on it).

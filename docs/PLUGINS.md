@@ -135,7 +135,9 @@ be told, not have their plugin quietly altered into something else.
 
 ### Putting a number in your title or subtitle
 
-Rule text may carry placeholders, resolved against the event that matched:
+Rule text may carry placeholders, resolved against the event that matched. A
+`subtitleFallback` is used when the subtitle cannot be rendered — for example when
+one rule matches two events and only one of them carries the field:
 
 ```json
 {

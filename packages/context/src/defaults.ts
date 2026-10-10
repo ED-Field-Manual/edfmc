@@ -1,5 +1,5 @@
 /**
- * Bundled context rules — version 1.
+ * Bundled context rules — version 2.
  *
  * This is the "small verified set" §6 asks for. Two kinds of verification went into
  * it, and both matter:
@@ -15,41 +15,61 @@
  * Several contexts named in the original brief are deliberately ABSENT because EDFM
  * has no corresponding page yet: settlement guides, mission-type guides, a
  * crime/security guide, and an Odyssey materials guide. Those are content gaps, not
- * code gaps — see docs/CONTEXT.md. Rules for them should be added server-side once
- * the pages exist, which is exactly why the rule set is server-driven.
+ * code gaps — see docs/CONTEXT.md. Rules for them belong in a rule-set update once
+ * the pages exist, which is why rules are versioned data rather than code.
  *
- * This bundled copy is the offline fallback (§22). The server-supplied set
- * supersedes it when one is available.
+ * This bundled copy is what the app uses, and is designed to remain the offline
+ * fallback (§22) once a server-supplied set exists. That delivery path is not
+ * built yet.
+ *
+ * Version 2 (2026-10-09) reviewed every rule against the journal corpus again:
+ * station rules need the commander to be docked, the planetary-mining rule
+ * reports locations rather than materials and also reads FSS results, and the
+ * interdiction rule no longer gives instructions for a fight the journal only
+ * records once it is over. Each change is explained where it was made.
+ *
+ * "Docked" is the commander's state, not a station's advertised list: an
+ * `ApproachSettlement` line carries the settlement's services too (465 of 470
+ * approaches, 91 listing Vista Genomics and 72 Pioneer Supplies), and approaching
+ * a place is not being able to use it.
  */
 
 import type { ContextRuleSet } from './types.js';
 
+/** The commander is docked: the services in state are ones they can use. */
+const DOCKED = { kind: 'state', path: 'docking', op: 'eq', value: 'docked' } as const;
+
 export const BUNDLED_RULES: ContextRuleSet = {
-  version: 1,
-  updatedAt: '2026-09-01T00:00:00Z',
+  version: 2,
+  updatedAt: '2026-10-09T00:00:00Z',
   source: 'bundled',
   rules: [
     /* ------------------------------------------------------------- combat */
+    /*
+     * `Interdicted` is written when the interdiction is already over: it is the
+     * losing (or submitting) outcome, and `EscapeInterdiction` the winning one.
+     * Measured: 107 Interdicted lines, the next event almost always
+     * `SupercruiseExit`, and 103 of them `Submitted: true`. Version 1 told the
+     * commander to "follow the blue circle to fight" -- a struggle that had
+     * finished before the line existed. Now it says what is true: you are out of
+     * supercruise, and here is how interdictions work.
+     */
     {
       id: 'interdicted',
-      title: 'Being interdicted',
-      subtitle: 'Someone is pulling you out of supercruise',
+      title: 'Interdicted',
+      subtitle: 'You were pulled out of supercruise',
       when: { kind: 'event', name: 'Interdicted' },
-      // Highest priority in the set: it is the only entry that is time-critical.
+      // Highest priority in the set: the commander may be under attack.
       priority: 95,
       ttlSeconds: 180,
-      // Over the moment it resolves: escaped, back in supercruise, docked, jumped, or dead.
+      // Over once the commander is moving again: back in supercruise, docked, jumped, or dead.
       endsOn: ['EscapeInterdiction', 'SupercruiseEntry', 'Docked', 'FSDJump', 'Died'],
       guidance: {
         topic: 'navigation',
         beginner:
-          'An interdiction drags you out of supercruise. You can fight it or submit; submitting is often safer.',
+          'An interdiction pulls you out of supercruise. Next time you can fight it, or submit by cutting your throttle.',
       },
       resources: [{ label: 'Frame Shift Drive Interdictor', page: 'Frame Shift Drive Interdictor' }],
-      actions: [
-        'Follow the blue circle to fight the interdiction.',
-        'Or zero your throttle to submit deliberately.',
-      ],
       // Editorial guidance from the project owner (edfieldmanual.com), not derived
       // from journal data — that is exactly what `note` is for.
       note: 'Submitting voluntarily lets your FSD recharge faster, so you can potentially escape sooner.',
@@ -58,8 +78,8 @@ export const BUNDLED_RULES: ContextRuleSet = {
     /* ------------------------------------------------------- colonisation */
     {
       id: 'colonisation-depot',
-      title: 'Construction site',
-      subtitle: 'Delivering to a colonisation depot',
+      title: 'Colonisation construction',
+      subtitle: 'At a construction site that needs deliveries',
       when: { kind: 'event', name: 'ColonisationConstructionDepot' },
       priority: 85,
       ttlSeconds: 900,
@@ -73,8 +93,9 @@ export const BUNDLED_RULES: ContextRuleSet = {
     },
     {
       id: 'station-pioneer-supplies',
-      title: 'Pioneer Supplies available',
-      when: { kind: 'service', id: 'pioneersupplies' },
+      title: 'Pioneer Supplies',
+      subtitle: 'This station sells colonisation supplies',
+      when: { kind: 'all', of: [DOCKED, { kind: 'service', id: 'pioneersupplies' }] },
       priority: 45,
       ttlSeconds: 1800,
       resources: [
@@ -86,8 +107,11 @@ export const BUNDLED_RULES: ContextRuleSet = {
     /* --------------------------------------------------------- exobiology */
     {
       id: 'exobiology-scan',
-      title: 'Sampling biology',
-      subtitle: 'Scanning organic life on foot',
+      title: 'Exobiology sampling',
+      // The commander's own scan names the species (Species_Localised on all 487
+      // ScanOrganic lines), so naming it reveals nothing they have not seen.
+      subtitle: 'Sampling {event.Species_Localised}',
+      subtitleFallback: 'Sampling organisms on foot',
       when: { kind: 'event', name: 'ScanOrganic' },
       priority: 80,
       ttlSeconds: 600,
@@ -129,11 +153,12 @@ export const BUNDLED_RULES: ContextRuleSet = {
      */
     {
       id: 'station-vista-genomics',
-      title: 'Vista Genomics available',
-      subtitle: 'You have exobiology data to sell',
+      title: 'Selling exobiology data',
+      subtitle: 'This station has Vista Genomics, and you have unsold data',
       when: {
         kind: 'all',
         of: [
+          DOCKED,
           { kind: 'service', id: 'vistagenomics' },
           { kind: 'state', path: 'exobiologyToSell', op: 'gt', value: 0 },
         ],
@@ -169,7 +194,10 @@ export const BUNDLED_RULES: ContextRuleSet = {
     {
       id: 'engineering-activity',
       title: 'Engineering',
-      subtitle: 'Recent engineering activity',
+      // All three triggers name the Engineer (817/817 EngineerCraft, 5/5
+      // EngineerContribution, and every single-change EngineerProgress).
+      subtitle: 'Working with {event.Engineer}',
+      subtitleFallback: 'Recent engineering activity',
       when: {
         kind: 'any',
         of: [
@@ -228,10 +256,11 @@ export const BUNDLED_RULES: ContextRuleSet = {
     {
       id: 'station-material-trader-encoded',
       title: 'Encoded Material Trader',
-      subtitle: 'Trades encoded materials',
+      subtitle: 'This station trades encoded materials',
       when: {
         kind: 'all',
         of: [
+          DOCKED,
           { kind: 'service', id: 'materialtrader' },
           { kind: 'state', path: 'traderType', op: 'eq', value: 'encoded' },
         ],
@@ -256,10 +285,11 @@ export const BUNDLED_RULES: ContextRuleSet = {
     {
       id: 'station-material-trader-raw',
       title: 'Raw Material Trader',
-      subtitle: 'Trades raw materials',
+      subtitle: 'This station trades raw materials',
       when: {
         kind: 'all',
         of: [
+          DOCKED,
           { kind: 'service', id: 'materialtrader' },
           { kind: 'state', path: 'traderType', op: 'eq', value: 'raw' },
         ],
@@ -284,10 +314,11 @@ export const BUNDLED_RULES: ContextRuleSet = {
     {
       id: 'station-material-trader-manufactured',
       title: 'Manufactured Material Trader',
-      subtitle: 'Trades manufactured materials',
+      subtitle: 'This station trades manufactured materials',
       when: {
         kind: 'all',
         of: [
+          DOCKED,
           { kind: 'service', id: 'materialtrader' },
           { kind: 'state', path: 'traderType', op: 'eq', value: 'manufactured' },
         ],
@@ -311,13 +342,14 @@ export const BUNDLED_RULES: ContextRuleSet = {
     },
     {
       id: 'station-material-trader',
-      title: 'Material Trader available',
+      title: 'Material Trader',
       // Deliberately does not name a kind. Fires only while the kind is genuinely
       // unestablished, so it degrades to the honest statement rather than guessing.
-      subtitle: 'Kind unknown until you trade here once',
+      subtitle: 'Its type shows here once you have traded at this station',
       when: {
         kind: 'all',
         of: [
+          DOCKED,
           { kind: 'service', id: 'materialtrader' },
           { kind: 'not', of: { kind: 'state', path: 'traderType', op: 'exists' } },
         ],
@@ -335,8 +367,8 @@ export const BUNDLED_RULES: ContextRuleSet = {
     /* ------------------------------------------------------------- mining */
     {
       id: 'mining-prospecting',
-      title: 'Prospecting',
-      subtitle: 'Assessing an asteroid',
+      title: 'Asteroid mining',
+      subtitle: 'Prospecting asteroids',
       when: { kind: 'event', name: 'ProspectedAsteroid' },
       priority: 70,
       ttlSeconds: 600,
@@ -367,13 +399,17 @@ export const BUNDLED_RULES: ContextRuleSet = {
      */
     {
       id: 'mining-ring-scan',
-      title: 'Ring scanned',
-      subtitle: 'Hotspot signals found',
+      title: 'Mining hotspots',
+      subtitle: 'Hotspots mapped in {event.BodyName}',
+      subtitleFallback: 'Hotspots mapped in this ring',
       when: {
         kind: 'all',
         of: [
           { kind: 'event', name: 'SAASignalsFound' },
           { kind: 'field', path: 'BodyName', op: 'endsWith', value: 'Ring' },
+          // A ring mapped with nothing in it has no hotspot to talk about. None of
+          // the 32 ring scans in the corpus was empty, but the claim needs it.
+          { kind: 'field', path: 'Signals.0.Type', op: 'exists' },
         ],
       },
       priority: 60,
@@ -392,28 +428,52 @@ export const BUNDLED_RULES: ContextRuleSet = {
       ],
     },
     /*
-     * A detailed surface scan of a PLANET. Same event as a ring scan, different
-     * situation entirely -- 169 of the 198 SAASignalsFound in the corpus.
+     * Signals on a PLANET. A detailed surface scan (`SAASignalsFound`, the same
+     * event as a ring scan) or, earlier, the FSS (`FSSBodySignals`).
      *
      * Two things on a planet are worth surfacing, and they are independent: a body
-     * can have both, and 89 of these events carry two signals.
+     * can have both, and 89 of the surface scans carry two signals.
+     *
+     * Signals are not discoveries. These say organisms are present -- the guides
+     * explain how to find and sample them -- and never name a species: only
+     * sampling establishes which one it is (see `exobiology-scan`).
+     *
+     * Both events feed one rule, so a body seen in the FSS and then mapped is one
+     * context, not two. The newer line wins, so mapping replaces "signals
+     * detected" with the genus count. Scanning several bodies in a row leaves the
+     * last one named; leaving the system ends it.
      */
     {
       id: 'planet-biological-signals',
       title: 'Biological signals',
-      subtitle: '{event.Genuses.length} biological {event.Genuses.length|signal|signals} detected',
+      subtitle:
+        '{event.Genuses.length} biological {event.Genuses.length|signal|signals} on {event.BodyName}',
+      // FSSBodySignals carries a count only inside its Signals list, at no fixed
+      // index, so it is not stated rather than guessed.
+      subtitleFallback: 'Biological signals detected on {event.BodyName}',
       when: {
-        kind: 'all',
+        kind: 'any',
         of: [
-          { kind: 'event', name: 'SAASignalsFound' },
-          /*
-           * `Genuses` is exactly equivalent to "has a biological signal", measured:
-           * 103 events carry a Biological signal, all 103 list genera, and not one
-           * event lists genera without it. Keyed on Genuses rather than on the
-           * signal because it is the same fact stated more directly -- and it is
-           * the genus list that makes the body worth landing on.
-           */
-          { kind: 'field', path: 'Genuses.0.Genus', op: 'exists' },
+          {
+            kind: 'all',
+            of: [
+              { kind: 'event', name: 'SAASignalsFound' },
+              /*
+               * `Genuses` is exactly equivalent to "has a biological signal",
+               * measured: 103 events carry a Biological signal, all 103 list
+               * genera, and not one event lists genera without it.
+               */
+              { kind: 'field', path: 'Genuses.0.Genus', op: 'exists' },
+            ],
+          },
+          {
+            kind: 'all',
+            of: [
+              // 114 of 639 FSSBodySignals in the corpus, every one with BodyName.
+              { kind: 'event', name: 'FSSBodySignals' },
+              { kind: 'field', path: 'Signals.*.Type', op: 'eq', value: '$SAA_SignalType_Biological;' },
+            ],
+          },
         ],
       },
       priority: 65,
@@ -424,27 +484,41 @@ export const BUNDLED_RULES: ContextRuleSet = {
       guidance: {
         topic: 'exobiology',
         beginner:
-          'Biological signals mean this body has organisms you can sample on foot with an Artemis suit and a Genetic Sampler.',
+          'Biological signals mean organisms are present on this body. Map it with the Detailed Surface Scanner to see which genera, then sample them on foot.',
       },
       resources: [
         { label: 'Exobiology', page: 'Exobiology' },
         { label: 'Detailed Surface Scanner', page: 'Detailed Surface Scanner' },
       ],
     },
+    /*
+     * Planetary mining locations.
+     *
+     * The signal says how many locations a body has and nothing else: no
+     * material, and nothing about how they are mined. EDFM's Surface Mining page
+     * covers these (Rhino and mining rigs at "Planetary Mining Locations",
+     * 4.4.1.0); version 1 also linked Sub-surface Mining, which is about deposits
+     * inside asteroids, and said "Mineable surface materials detected", which the
+     * event never says.
+     *
+     * Matched on the raw token, which is the stable identifier; `Type_Localised`
+     * ("Planetary Mining Location") is present on 182 of 184 surface scans but is
+     * a display string. `*` rather than a fixed index: the signal was observed at
+     * index 0, 1 and 2, so `Signals.0.Type` would have matched 18% of them.
+     *
+     * Also read from `FSSBodySignals` (456 of 639 in the corpus), which reports
+     * the same token before a body is mapped. One rule, so the two lines for one
+     * body are one context. No ring ever carried this signal (0 of 32).
+     */
     {
       id: 'planet-surface-mining',
-      title: 'Surface mining available',
-      subtitle: 'Mineable surface materials detected',
+      title: 'Planetary mining locations',
+      subtitle: 'Planetary mining locations detected on {event.BodyName}',
+      subtitleFallback: 'Planetary mining locations have been detected on this body',
       when: {
         kind: 'all',
         of: [
-          { kind: 'event', name: 'SAASignalsFound' },
-          /*
-           * `*` rather than a fixed index deliberately: this signal was observed at
-           * index 0, 1 and 2 (19 / 69 / 16 times), so `Signals.0.Type` would have
-           * matched 18% of them. The raw token is used because this signal has no
-           * `Type_Localised` companion.
-           */
+          { kind: 'event', name: ['SAASignalsFound', 'FSSBodySignals'] },
           { kind: 'field', path: 'Signals.*.Type', op: 'eq', value: '$PlanetaryMiningLocation_Name;' },
         ],
       },
@@ -453,13 +527,15 @@ export const BUNDLED_RULES: ContextRuleSet = {
       endsOn: ['FSDJump', 'Docked'],
       resources: [
         { label: 'Surface Mining', page: 'Surface Mining' },
-        { label: 'Sub-surface Mining', page: 'Sub-surface Mining' },
         { label: 'Mining', page: 'Mining' },
       ],
     },
     {
       id: 'mining-refining',
       title: 'Refining',
+      // Type_Localised on all 1,743 MiningRefined lines.
+      subtitle: 'Your refinery produced {event.Type_Localised}',
+      subtitleFallback: 'Recent refinery activity',
       when: { kind: 'event', name: 'MiningRefined' },
       priority: 50,
       ttlSeconds: 600,
@@ -473,15 +549,34 @@ export const BUNDLED_RULES: ContextRuleSet = {
     },
 
     /* ----------------------------------------------------- fleet carriers */
+    /*
+     * Docked at a Fleet Carrier.
+     *
+     * Version 1 matched the services or the station type without asking whether
+     * the commander was docked, and its "trigger" was whatever line had last
+     * re-checked it -- `Shutdown`, after the game had closed. It now needs
+     * docking, and is checked against state alone (see resolver.ts).
+     *
+     * Measured: `carriermanagement` and `carrierfuel` appear only at stations of
+     * type FleetCarrier (744 of 744 docks each), so the three conditions agree;
+     * all three are kept so a dock that omits one still matches.
+     */
     {
       id: 'fleet-carrier',
       title: 'Fleet Carrier services',
+      subtitle: 'Docked at a Fleet Carrier',
       when: {
-        kind: 'any',
+        kind: 'all',
         of: [
-          { kind: 'service', id: 'carriermanagement' },
-          { kind: 'service', id: 'carrierfuel' },
-          { kind: 'state', path: 'stationType', op: 'eq', value: 'FleetCarrier' },
+          DOCKED,
+          {
+            kind: 'any',
+            of: [
+              { kind: 'service', id: 'carriermanagement' },
+              { kind: 'service', id: 'carrierfuel' },
+              { kind: 'state', path: 'stationType', op: 'eq', value: 'FleetCarrier' },
+            ],
+          },
         ],
       },
       priority: 60,
@@ -498,7 +593,10 @@ export const BUNDLED_RULES: ContextRuleSet = {
     /* --------------------------------------------------------- powerplay */
     {
       id: 'powerplay-activity',
-      title: 'Powerplay activity',
+      title: 'Powerplay',
+      // Power is on every line of all four events in the corpus (1,182 lines).
+      subtitle: 'Working for {event.Power}',
+      subtitleFallback: 'Recent Powerplay activity',
       when: {
         kind: 'event',
         name: ['PowerplayMerits', 'PowerplayCollect', 'PowerplayDeliver', 'PowerplayRank'],

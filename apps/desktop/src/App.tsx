@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { isKnown, type Known } from '@edfm/elite-journal';
 
-import { resourceUrl, type GuidanceMode } from '@edfm/context';
+import { type GuidanceMode } from '@edfm/context';
 import {
   explainMission,
   hasDeliveryProgress,
@@ -9,7 +9,6 @@ import {
   remainingCargo,
   type Mission,
 } from '@edfm/missions';
-import { openUrl } from '@tauri-apps/plugin-opener';
 
 import logo from './assets/logo.png';
 import { Logistics } from './Logistics';
@@ -24,6 +23,7 @@ import { PluginCard, Plugins as PluginsScreen, PythonPluginCard } from './Plugin
 import { PluginPanel } from './PluginPanels';
 import { NativePluginPage } from './NativePluginPage';
 import { Dashboard } from './Dashboard';
+import { Guides } from './Guides';
 import { SESSION_LABEL } from './lib/session';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
@@ -54,7 +54,7 @@ function show(value: Known<unknown>, fallback = 'Unknown'): string {
 
 const SECTIONS = [
   'Dashboard',
-  'Context',
+  'Guides',
   'Missions',
   'Logistics',
   'Overlay',
@@ -70,7 +70,7 @@ const SECTIONS = [
 type Section = (typeof SECTIONS)[number];
 
 const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
-  'Context',
+  'Guides',
   'Missions',
   'Dashboard',
   'Overlay',
@@ -183,7 +183,7 @@ export default function App() {
         ) : (
           <>
           {section === 'Dashboard' && <Dashboard snap={snap} go={go} />}
-          {section === 'Context' && <ContextPanel snap={snap} />}
+          {section === 'Guides' && <Guides contexts={snap.contexts} guidance={snap.guidance} />}
           {section === 'Missions' && <MissionsPanel snap={snap} />}
           {section === 'Overlay' && <OverlayPanel />}
           {section === 'Logistics' && <Logistics snap={snap} />}
@@ -241,90 +241,6 @@ function Field({ label, value, wide }: { label: string; value: string; wide?: bo
       <div className="field-label">{label}</div>
       <div className={`field-value${unknown ? ' unknown' : ''}`}>{value}</div>
     </div>
-  );
-}
-
-function ContextPanel({ snap }: { snap: Snap }) {
-  const contexts = snap.contexts;
-
-  return (
-    <>
-      <header className="page-head">
-        <h1>Context</h1>
-        <p className="muted">
-          EDFM material relevant to what you are doing right now, matched from journal
-          events by fixed rules. Nothing here is inferred by a model — a context appears
-          only when a rule's conditions are literally satisfied.
-        </p>
-      </header>
-
-      {contexts.length === 0 ? (
-        <section className="card">
-          <h2>Nothing active</h2>
-          <p className="muted">
-            No context rule currently matches. Contexts appear when you do something a
-            rule recognises — prospecting an asteroid, docking at an Engineer, sampling
-            biology, delivering to a construction site — and fade once they stop being
-            relevant.
-          </p>
-        </section>
-      ) : (
-        contexts.map((ctx) => (
-          <section className="card" key={ctx.rule.id}>
-            {/* The resolved text, not the rule's template: a rule may state a
-                count taken from the event that matched it. */}
-            <h2>{ctx.title}</h2>
-            {ctx.subtitle && <p className="muted">{ctx.subtitle}</p>}
-
-            {ctx.rule.actions && ctx.rule.actions.length > 0 && (
-              <ol className="context-actions">
-                {ctx.rule.actions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ol>
-            )}
-
-            <ul className="resources">
-              {ctx.rule.resources.map((resource) => {
-                const url = resourceUrl(resource);
-                if (!url) return null;
-                return (
-                  <li key={url}>
-                    <button type="button" className="resource" onClick={() => void openUrl(url)}>
-                      <span className="resource-label">{resource.label}</span>
-                      <span className="resource-go" aria-hidden="true">
-                        ↗
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {ctx.rule.note && <p className="muted">EDFM Note: {ctx.rule.note}</p>}
-
-            {/* Provenance: which event caused this, per §27. */}
-            <p className="provenance">
-              Triggered by <code>{ctx.triggerEvent}</code> · rule <code>{ctx.rule.id}</code>
-            </p>
-          </section>
-        ))
-      )}
-
-      <section className="card">
-        <h2>Rule set</h2>
-        <div className="grid">
-          <Field label="Version" value={String(snap.contextRuleVersion)} />
-          <Field label="Source" value={snap.contextRuleSource} />
-          <Field label="Active contexts" value={String(contexts.length)} />
-        </div>
-        <p className="muted">
-          Rules are versioned and will be served by the EDFM backend, so recommendations
-          can change without shipping a new build. This build uses the bundled set, which
-          is also the offline fallback.
-        </p>
-      </section>
-    </>
   );
 }
 
@@ -1081,6 +997,8 @@ function Diagnostics({ snap }: { snap: Snap }) {
       */}
       <JournalStateCard snap={snap} />
 
+      <ContextDiagnosticsCard snap={snap} />
+
       <section className="card">
         <h2>EDFM Commander Journal</h2>
         <div className="grid">
@@ -1236,6 +1154,64 @@ function JournalStateCard({ snap }: { snap: Snap }) {
         <Field label="Last event time" value={s.lastEventAt ?? 'Unknown'} />
         <Field label="Last event ID" value={s.lastEventId ?? 'Unknown'} wide />
       </div>
+    </section>
+  );
+}
+
+/**
+ * How the Relevant guides page arrived at what it shows. Rule ids, journal event
+ * names and the rule set's provenance: everything the player-facing page leaves
+ * out, for whoever is working out why a guide did or did not appear.
+ */
+function ContextDiagnosticsCard({ snap }: { snap: Snap }) {
+  const c = snap.diagnostics.context;
+  const r = snap.diagnostics.journalResume;
+  return (
+    <section className="card">
+      <h2>Context rules</h2>
+      <div className="grid">
+        <Field label="Rule set" value={`v${c.ruleSetVersion} (${c.ruleSetSource})`} />
+        <Field label="Rules loaded" value={String(c.rulesLoaded)} />
+        <Field label="From plugins" value={String(c.pluginRules)} />
+        <Field label="Active" value={String(c.active.length)} />
+        <Field
+          label="Resumed from"
+          value={r.checkpointFile ? `${r.checkpointFile} @ ${r.checkpointOffset ?? 0}` : 'Fresh start'}
+          wide
+        />
+        <Field label="Lines re-read at startup" value={String(r.eventsReplayed)} />
+      </div>
+      <p className="muted">
+        Rules are bundled with the app. Delivering rule updates from EDFM is planned but not built.
+      </p>
+      {c.active.length > 0 && (
+        <table className="rows">
+          <thead>
+            <tr>
+              <th>Rule</th>
+              <th>Kind</th>
+              <th>Shown as</th>
+              <th>Started by</th>
+              <th>Matched</th>
+              <th>Expires</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.active.map((a) => (
+              <tr key={a.ruleId}>
+                <td>
+                  <code>{a.ruleId}</code>
+                </td>
+                <td>{a.scope}</td>
+                <td>{a.timing}</td>
+                <td>{a.triggerEvent ?? 'Rule-set change'}</td>
+                <td>{a.matchedAt}</td>
+                <td>{a.expiresAt ?? 'While state holds'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

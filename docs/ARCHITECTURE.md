@@ -165,8 +165,15 @@ eventId = `${journalFileName}:${byteOffset}`
 ```
 
 Stable across restarts, unique within a commander's journal directory, and requiring
-no content hashing. The checkpoint stores `(fileName, byteOffset)`; on restart we
-resume from exactly that offset, so an event is emitted once. Replaying the same file
+no content hashing. The checkpoint stores `(fileName, byteOffset)`, one row per
+commander. At startup no commander is known yet, so the app resumes from the most
+recently saved row, whichever commander's it is (there is one journal folder and one
+reader). It re-reads that journal **from its first line** (`rereadCheckpointFile`) so
+the session's commander, ship, location and game build are rebuilt, and flags the
+lines below the checkpoint as `replayed`. Anything keyed on `eventId` sees the same
+ids again and does not duplicate. Earlier builds looked up a `default` row written
+once before any commander was seen, so every launch re-read the same months-old
+session as if it were new. Replaying the same file
 through the pipeline yields identical ids, which is what makes the replay harness a
 genuine regression test rather than an approximation.
 

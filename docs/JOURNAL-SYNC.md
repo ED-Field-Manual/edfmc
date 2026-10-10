@@ -212,8 +212,9 @@ nobody needs in order to use it.
 ### 1. Rebuild local history — on the Journal screen, sends nothing
 
 Activity from before you installed the Companion was never recorded, because
-reading the journal is what records it. Live ingest resumes from a single
-`(file, offset)` checkpoint and never looks back, so a backfill on its own would
+reading the journal is what records it. Live ingest resumes from its last
+`(file, offset)` checkpoint -- re-reading only that journal from its start, with
+the same event ids, to rebuild the session's state -- and never looks further back, so a backfill on its own would
 faithfully upload an empty history — **there was nothing locally to back-fill
 from.**
 

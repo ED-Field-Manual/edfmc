@@ -518,6 +518,8 @@ describe('bundled rule set', () => {
       'SAASignalsFound', 'MiningRefined', 'PowerplayMerits', 'PowerplayCollect',
       'EngineerCraft', 'EngineerProgress', 'EngineerContribution',
       'PowerplayDeliver', 'PowerplayRank',
+      // 639 in the corpus: 456 carry the planetary-mining token, 114 a biological signal.
+      'FSSBodySignals',
     ]);
 
     const names: string[] = [];
@@ -1054,17 +1056,17 @@ describe('rendered text reaches the active context', () => {
 
     const ctx = r.current().find((a) => a.rule.id === 'planet-biological-signals');
     expect(ctx).toBeDefined();
-    expect(ctx!.subtitle).toBe('1 biological signal detected');
+    expect(ctx!.subtitle).toBe('1 biological signal on Wregoe KO-G c24-7 16 a');
     // The rule itself still holds the template, untouched.
     expect(ctx!.rule.subtitle).toContain('{event.Genuses.length}');
   });
 
-  it('a rule without placeholders is carried through unchanged', () => {
+  it('a ring scan names the ring it mapped', () => {
     const r = new ContextResolver(BUNDLED_RULES, { now: () => 1000, maxActive: 5 });
     r.observe(ev(SAA_RING), initialState());
     const ctx = r.current().find((a) => a.rule.id === 'mining-ring-scan');
-    expect(ctx!.title).toBe('Ring scanned');
-    expect(ctx!.subtitle).toBe('Hotspot signals found');
+    expect(ctx!.title).toBe('Mining hotspots');
+    expect(ctx!.subtitle).toBe('Hotspots mapped in Wregoe KO-G c24-10 BCD 2 A Ring');
   });
 });
 

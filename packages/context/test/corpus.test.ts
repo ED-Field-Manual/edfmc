@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { applyEvent, initialState, listJournalFiles, replayFile } from '@edfm/elite-journal';
+import { applyEvent, initialState, listJournalFiles, replayFile, type NormalizedEvent } from '@edfm/elite-journal';
 // Registers the Node filesystem adapter. The engine is host-agnostic so the same
 // pipeline runs under Tauri; under Node the adapter has to be imported explicitly.
 import '@edfm/elite-journal/node';
@@ -182,7 +182,7 @@ suite('bundled rules against the real corpus', () => {
     const state = initialState();
 
     // Flatten the corpus once; every rule is then evaluated over the same list.
-    const events: Array<{ at: number; event: (typeof BUNDLED_RULES.rules)[number] extends never ? never : Parameters<typeof evaluate>[1]['event'] }> = [];
+    const events: Array<{ at: number; event: NormalizedEvent }> = [];
     for (const f of files.filter((x) => x.sizeBytes > 0).slice(-60)) {
       const result = await replayFile(f.fullPath);
       for (const event of result.events) {

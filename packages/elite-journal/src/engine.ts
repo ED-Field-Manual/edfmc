@@ -13,6 +13,7 @@ import { normalize } from './normalizer.js';
 import { FileTailer, type TailedLine } from './tailer.js';
 import {
   emptyStats,
+  type DeliveryInfo,
   type IngestFailure,
   type IngestStats,
   type JournalCheckpoint,
@@ -28,6 +29,18 @@ export interface JournalEngineOptions {
    * than replaying the whole session. Elite may already have been running for hours.
    */
   readonly startAtEndWhenFresh?: boolean;
+  /**
+   * Read the checkpoint's journal from its first line instead of resuming
+   * mid-file, flagging the lines before the checkpoint as `replayed`.
+   *
+   * Resuming mid-file skips the session's opening lines -- `Fileheader`,
+   * `Commander`, `LoadGame`, `Location` -- so the reader would know nothing about
+   * whose session it is, which game build wrote it, or where the commander is,
+   * until the game happened to say so again (often not until the next login).
+   * Re-reading rebuilds that. Consumers that must not act twice on the same line
+   * key on `eventId`, which is identical across re-reads, or check `replayed`.
+   */
+  readonly rereadCheckpointFile?: boolean;
   /** Low-frequency backstop behind fs.watch. Not the primary trigger (§30). */
   readonly safetyPollMs?: number;
   /**
@@ -43,7 +56,7 @@ export interface JournalEngineOptions {
   readonly watchDirectory?: (directory: string, onChange: () => void) => () => void;
   /** Filesystem port. Defaults to the Node adapter. */
   readonly fs?: JournalFs;
-  readonly onEvent: (event: NormalizedEvent) => void;
+  readonly onEvent: (event: NormalizedEvent, delivery: DeliveryInfo) => void;
   readonly onFailure?: (failure: IngestFailure) => void;
   readonly onCheckpoint?: (checkpoint: JournalCheckpoint) => void;
   readonly onRotate?: (from: string | null, to: string) => void;
@@ -100,6 +113,8 @@ export class JournalEngine {
   private pendingPump: Promise<void> | null = null;
   private running = false;
   private lastEventId: string | null = null;
+  /** Lines of this file below this offset were delivered by an earlier run. */
+  private replayUntil: { readonly file: string; readonly offset: number } | null = null;
 
   readonly stats: IngestStats = emptyStats();
 
@@ -164,6 +179,10 @@ export class JournalEngine {
         target = match;
         offset = checkpoint.byteOffset;
         this.lastEventId = checkpoint.lastEventId;
+        if (this.opts.rereadCheckpointFile && offset > 0) {
+          this.replayUntil = { file: match.fileName, offset };
+          offset = 0;
+        }
       }
     }
 
@@ -229,6 +248,7 @@ export class JournalEngine {
     const result = await this.tailer.read();
     if (result.lines.length === 0) return;
 
+    const replay = this.replayUntil?.file === fileName ? this.replayUntil.offset : -1;
     processLines(
       result.lines,
       fileName,
@@ -236,7 +256,9 @@ export class JournalEngine {
       this.stats,
       (e) => {
         this.lastEventId = e.source.provenance.eventId;
-        this.opts.onEvent(e);
+        const replayed = e.source.provenance.byteOffset < replay;
+        if (replayed) this.stats.eventsReplayed += 1;
+        this.opts.onEvent(e, { replayed });
       },
       this.opts.onFailure,
     );

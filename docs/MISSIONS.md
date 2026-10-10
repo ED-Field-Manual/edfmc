@@ -3,6 +3,12 @@
 Tracks active missions, groups them by destination, expiry and type, and persists
 them across restarts.
 
+At startup the app re-reads the journal it last stopped in from its first line, to
+rebuild the session's state. Mission handling is keyed on `MissionID`, so lines it
+has already seen change nothing. Earlier builds instead re-read one fixed, months-old
+journal on every launch (a checkpoint bug, fixed 2026-10-09); that journal's missions
+are long resolved, so it had no visible effect here.
+
 ## What the journal will not tell you
 
 Measured across the corpus (n=270 `MissionAccepted`):

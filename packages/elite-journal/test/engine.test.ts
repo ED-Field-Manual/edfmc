@@ -271,3 +271,108 @@ describe('replayFile', () => {
     expect(r.failures).toEqual([]);
   });
 });
+
+/*
+ * Re-reading the checkpoint's journal at startup.
+ *
+ * The app resumes from its checkpoint but needs the session's opening lines
+ * (Fileheader, Commander, LoadGame) to know whose session it is and which build
+ * wrote it. `rereadCheckpointFile` reads that journal from its start and flags
+ * the lines an earlier run already delivered.
+ */
+describe('rereadCheckpointFile', () => {
+  function rereading(checkpoint: JournalCheckpoint | null) {
+    const events: Array<{ name: string; replayed: boolean; commander: string | null; offset: number }> = [];
+    const engine = new JournalEngine({
+      directory: dir,
+      checkpoint,
+      rereadCheckpointFile: true,
+      safetyPollMs: 3_600_000,
+      useWatcher: false,
+      onEvent: (e, d) =>
+        events.push({
+          name: e.source.event,
+          replayed: d.replayed,
+          commander: e.source.provenance.commander,
+          offset: e.source.provenance.byteOffset,
+        }),
+    });
+    return { engine, events };
+  }
+
+  it('rebuilds the session from its first line, flagging only what was already read', async () => {
+    const f = 'Journal.2026-09-01T100000.01.log';
+    await writeFile(join(dir, f), HEADER() + CMDR);
+    const checkpoint: JournalCheckpoint = {
+      sourceFile: f,
+      byteOffset: Buffer.byteLength(HEADER() + CMDR),
+      lastEventId: null,
+      updatedAt: '2026-09-01T13:28:00Z',
+    };
+    // Written while the app was closed.
+    await appendFile(join(dir, f), JUMP('Sol'));
+
+    const h = rereading(checkpoint);
+    await h.engine.start();
+    h.engine.stop();
+
+    expect(h.events.map((e) => [e.name, e.replayed])).toEqual([
+      ['Fileheader', true],
+      ['Commander', true],
+      ['FSDJump', false],
+    ]);
+    // The new line knows whose session it is, which a mid-file resume could not.
+    expect(h.events[2]!.commander).toBe('Sythan');
+    expect(h.engine.stats.eventsReplayed).toBe(2);
+  });
+
+  it('reads the tail of an older checkpointed journal, then the newest one as new', async () => {
+    const older = 'Journal.2026-09-01T100000.01.log';
+    const newer = 'Journal.2026-09-01T110000.01.log';
+    await writeFile(join(dir, older), HEADER() + CMDR + JUMP('Sol'));
+    await writeFile(join(dir, newer), HEADER() + CMDR);
+    const h = rereading({
+      sourceFile: older,
+      byteOffset: Buffer.byteLength(HEADER() + CMDR),
+      lastEventId: null,
+      updatedAt: '2026-09-01T13:28:00Z',
+    });
+    await h.engine.start();
+    h.engine.stop();
+
+    expect(h.events.map((e) => [e.name, e.replayed])).toEqual([
+      ['Fileheader', true],
+      ['Commander', true],
+      ['FSDJump', false],
+      ['Fileheader', false],
+      ['Commander', false],
+    ]);
+  });
+
+  it('a fresh install or a vanished journal replays nothing', async () => {
+    await writeFile(join(dir, 'Journal.2026-09-01T110000.01.log'), HEADER() + CMDR);
+    for (const checkpoint of [
+      null,
+      { sourceFile: 'Journal.2020-01-01T000000.01.log', byteOffset: 50, lastEventId: null, updatedAt: '' },
+    ]) {
+      const h = rereading(checkpoint);
+      await h.engine.start();
+      h.engine.stop();
+      expect(h.events.map((e) => e.replayed)).toEqual([false, false]);
+    }
+  });
+
+  it('without the option, the engine still resumes mid-file as before', async () => {
+    const f = 'Journal.2026-09-01T100000.01.log';
+    await writeFile(join(dir, f), HEADER() + CMDR + JUMP('Sol'));
+    const h = makeEngine({
+      sourceFile: f,
+      byteOffset: Buffer.byteLength(HEADER() + CMDR),
+      lastEventId: null,
+      updatedAt: '',
+    });
+    await h.engine.start();
+    h.engine.stop();
+    expect(h.events.map((e) => e.source.event)).toEqual(['FSDJump']);
+  });
+});

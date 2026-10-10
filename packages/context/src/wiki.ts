@@ -49,15 +49,36 @@ function encodePart(part: string): string {
   return encodeURIComponent(normalised).replace(/%2F/g, '/').replace(/%3A/g, ':');
 }
 
+/**
+ * An absolute URL that is safe to hand to the system browser, or null.
+ *
+ * Rule sets are untrusted input (plugins today, a server later), and whatever
+ * this returns is opened by the shell. So: parsed rather than pattern-matched,
+ * `https:` only (no `file:`, custom schemes, or plain `http:` that could be
+ * rewritten in transit), and no embedded credentials, which exist mainly to
+ * disguise where a link really goes (`https://edfieldmanual.com@evil.example`).
+ * Returned in the parser's normalised form, so what is checked is what opens.
+ */
+export function safeExternalUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2048) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  if (parsed.username !== '' || parsed.password !== '') return null;
+  if (parsed.hostname === '') return null;
+  return parsed.href;
+}
+
 /** Resolve a resource to a URL, preferring an explicit absolute URL. */
 export function resourceUrl(
   resource: { readonly page?: string; readonly url?: string },
   config: WikiConfig = EDFM_WIKI,
 ): string | null {
-  if (resource.url) {
-    // Only http(s). A rule set is untrusted input and must not be able to hand the
-    // shell a `file:` or custom-scheme URL to open.
-    return /^https?:\/\//i.test(resource.url) ? resource.url : null;
-  }
-  return resource.page ? pageUrl(resource.page, config) : null;
+  if (resource.url !== undefined) return safeExternalUrl(resource.url);
+  if (typeof resource.page !== 'string' || resource.page.trim().length === 0) return null;
+  return pageUrl(resource.page, config);
 }

@@ -106,6 +106,25 @@ export interface IngestStats {
   filesOpened: number;
   rotations: number;
   emptyFilesSkipped: number;
+  /**
+   * Events re-read from before the checkpoint to rebuild session state. Already
+   * delivered in an earlier run; counted so diagnostics can say how much of the
+   * startup was catch-up rather than new.
+   */
+  eventsReplayed: number;
+}
+
+/**
+ * How an event reached the app.
+ *
+ * `replayed` is true for a line an earlier run of the app already read: it sits
+ * before the saved checkpoint and is read again only so the session's state
+ * (commander, ship, location, game version) is rebuilt. Everything else -- the
+ * live tail, a journal written while the app was closed, a first run -- is
+ * false. Neither says the event is recent; its own timestamp does that.
+ */
+export interface DeliveryInfo {
+  readonly replayed: boolean;
 }
 
 export function emptyStats(): IngestStats {
@@ -119,6 +138,7 @@ export function emptyStats(): IngestStats {
     filesOpened: 0,
     rotations: 0,
     emptyFilesSkipped: 0,
+    eventsReplayed: 0,
   };
 }
 

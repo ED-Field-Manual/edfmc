@@ -41,8 +41,10 @@ import {
 import {
   BUNDLED_RULES,
   ContextResolver,
+  contextTiming,
   resourceUrl,
   type ActiveContext,
+  type ContextTiming,
 } from '@edfm/context';
 
 import {
@@ -408,7 +410,12 @@ export interface CompanionSnapshot {
   readonly directoryDetail: string;
   readonly activeFile: string | null;
   readonly lastError: string | null;
-  readonly contexts: readonly ActiveContext[];
+  /**
+   * Relevant guides, most relevant first, with spoiler-gated links already
+   * removed. The only form in which contexts leave the companion: the page and
+   * the overlay both read this projection, never the resolver.
+   */
+  readonly contexts: readonly ProjectedContext[];
   /** Scheduled jumps for the commander's own carriers, soonest first. */
   readonly carrierJumps: readonly OverlayCarrierJump[];
   /** The commander's field journal, newest first. Local only, never transmitted. */
@@ -461,8 +468,6 @@ export interface CompanionSnapshot {
   readonly retrySharingNow: (id: IntegrationId) => Promise<void>;
   /** Discard permanently-rejected items, which will never be sent. */
   readonly clearSharingRejected: (id: IntegrationId) => Promise<void>;
-  readonly contextRuleVersion: number;
-  readonly contextRuleSource: string;
   readonly missions: MissionView;
   /** Whether the game is running, from the window check and the journal. See lib/session.ts. */
   readonly session: SessionStatus;
@@ -704,6 +709,45 @@ export interface DiagnosticsView {
   readonly fieldsTracked: number;
   /** Non-zero when a bound was reached, so the list is not implied complete. */
   readonly truncated: number;
+  readonly context: ContextDiagnostics;
+  /** Where the journal reader picked up at startup. */
+  readonly journalResume: JournalResumeView;
+}
+
+/** A context as the player sees it: projected for spoilers, and placed in time. */
+export interface ProjectedContext extends ActiveContext {
+  readonly timing: ContextTiming;
+}
+
+/**
+ * How the Context engine works, for the Diagnostics page only. The player-facing
+ * page shows none of this: rule ids, event names and rule-set provenance are
+ * for whoever is debugging a recommendation.
+ */
+export interface ContextDiagnostics {
+  readonly ruleSetVersion: number;
+  /** `bundled` today; `cached`/`remote` are reserved for a backend that does not exist yet. */
+  readonly ruleSetSource: string;
+  readonly rulesLoaded: number;
+  readonly pluginRules: number;
+  /** Every active context, ranked or not, with how it was matched. */
+  readonly active: readonly {
+    readonly ruleId: string;
+    readonly title: string;
+    readonly scope: 'event' | 'state';
+    readonly timing: ContextTiming;
+    readonly triggerEvent: string | null;
+    readonly matchedAt: string;
+    readonly expiresAt: string | null;
+  }[];
+}
+
+export interface JournalResumeView {
+  /** The checkpoint used, or null for a fresh start. */
+  readonly checkpointFile: string | null;
+  readonly checkpointOffset: number | null;
+  /** Lines re-read from before the checkpoint to rebuild the session's state. */
+  readonly eventsReplayed: number;
 }
 
 /**
@@ -836,6 +880,7 @@ const EMPTY_STATS: IngestStats = {
   filesOpened: 0,
   rotations: 0,
   emptyFilesSkipped: 0,
+  eventsReplayed: 0,
 };
 
 /**
@@ -1299,6 +1344,8 @@ export class Companion {
       if (next !== this.gameWindow) {
         this.gameWindow = next;
         this.notify();
+        // Whether contexts are current or "last session" follows the window.
+        if (this.overlayEnabled) this.pushOverlayState();
       }
     };
     void check();
@@ -4136,11 +4183,15 @@ export class Companion {
           eventsTracked: this.anomalyLedger.eventsTracked,
           fieldsTracked: this.anomalyLedger.fieldsTracked,
           truncated: this.anomalyLedger.truncatedCount,
+          context: this.contextDiagnostics(),
+          journalResume: {
+            checkpointFile: this.resumedFrom?.sourceFile ?? null,
+            checkpointOffset: this.resumedFrom?.byteOffset ?? null,
+            eventsReplayed: this.engine?.stats.eventsReplayed ?? 0,
+          },
         },
         retrySharingNow: this.retrySharingNow,
         clearSharingRejected: this.clearSharingRejected,
-        contextRuleVersion: this.resolver.version,
-        contextRuleSource: this.resolver.source,
         missions: this.missionView(),
         session: sessionStatus({
           reader: this.connection,
@@ -4207,15 +4258,64 @@ export class Companion {
    * the app is permitted to read `resolver.current()` directly — that is the
    * point of doing it here rather than in each component.
    */
-  private projectedContexts(): readonly ActiveContext[] {
+  private projectedContexts(): readonly ProjectedContext[] {
     const policy = policyFor(this.discovery);
+    const running = this.gameRunning();
     return this.resolver.current().map((ctx) => ({
       ...ctx,
+      timing: contextTiming(ctx, running),
       rule: {
         ...ctx.rule,
-        resources: projectResources(ctx.rule.resources, this.state, policy),
+        // Spoiler gates first, then the URL policy: a link is only offered if
+        // the commander may see it AND the app may open it.
+        resources: projectResources(ctx.rule.resources, this.state, policy).filter(
+          (r) => resourceUrl(r) !== null,
+        ),
       },
     }));
+  }
+
+  /**
+   * Whether what the journal last said is still happening.
+   *
+   * The same judgement the Dashboard makes (lib/session.ts): the game window,
+   * then the journal's own `Shutdown`. A closed game's station is "when you last
+   * played", not "now". `game-unknown` -- the window check unavailable and no
+   * Shutdown seen -- is treated as running, because nothing says otherwise; a
+   * crash is caught by the window disappearing.
+   *
+   * `state.shutdown` is checked as well as the status: Elite's window can be
+   * back before the new session's `LoadGame`, and until then the state is still
+   * the previous session's.
+   */
+  private gameRunning(): boolean {
+    if (this.state.shutdown) return false;
+    const status = sessionStatus({
+      reader: this.connection,
+      gameWindow: this.gameWindow,
+      shutdownSeen: this.state.shutdown,
+    });
+    return status === 'game-active' || status === 'game-unknown';
+  }
+
+  private contextDiagnostics(): ContextDiagnostics {
+    const running = this.gameRunning();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    return {
+      ruleSetVersion: this.resolver.version,
+      ruleSetSource: this.resolver.source,
+      rulesLoaded: this.resolver.ruleCount,
+      pluginRules: Math.max(0, this.resolver.ruleCount - BUNDLED_RULES.rules.length),
+      active: this.resolver.all().map((c) => ({
+        ruleId: c.rule.id,
+        title: c.title,
+        scope: c.scope,
+        timing: contextTiming(c, running),
+        triggerEvent: c.triggerEvent,
+        matchedAt: iso(c.matchedAt),
+        expiresAt: Number.isFinite(c.expiresAt) ? iso(c.expiresAt) : null,
+      })),
+    };
   }
 
   private notify(): void {
@@ -4391,9 +4491,12 @@ export class Companion {
     await this.loadMissions();
 
     const checkpoint = await this.loadCheckpoint();
+    this.resumedFrom = checkpoint;
     this.engine = new JournalEngine({
       directory: resolution.directory,
       checkpoint,
+      // Rebuild the session's state from its first line; see loadCheckpoint.
+      rereadCheckpointFile: true,
       fs: tauriFs,
       watchDirectory: watchJournalDirectory,
       safetyPollMs: 2000,
@@ -4434,6 +4537,12 @@ export class Companion {
     // session a write per event would be pointless disk churn.
     setInterval(() => {
       void this.flushCheckpoint();
+      // A timed context ends at its own time, not at the next journal line: a
+      // commander sitting still writes none.
+      if (this.resolver.prune()) {
+        this.notify();
+        if (this.overlayEnabled) this.pushOverlayState();
+      }
       if (this.missionsDirty) {
         this.missionsDirty = false;
         void this.saveMissions();
@@ -4762,7 +4871,14 @@ export class Companion {
     // that was true right now could be completely hidden by an activity that had
     // merely happened recently -- docked at a Material Trader while the overlay
     // read "Engineering", from another system.
-    const [top = null, ...alsoActive] = this.resolver.current();
+    //
+    // The same spoiler-filtered projection as the main window -- never the
+    // resolver directly -- so a gated link cannot reach the overlay by a side
+    // door. "Last session" contexts are left out: the overlay is drawn over a
+    // running game, where only what is true now belongs.
+    const [top = null, ...alsoActive] = this.projectedContexts().filter(
+      (c) => c.timing !== 'last-session',
+    );
 
     void overlayApi
       .pushState({
@@ -6365,19 +6481,37 @@ export class Companion {
    * A single global checkpoint would let one commander resume at another's byte
    * offset after a commander switch, which §35 calls out explicitly.
    */
+  /** The checkpoint this run resumed from, for Diagnostics. */
+  private resumedFrom: JournalCheckpoint | null = null;
+
   private checkpointScope(): string {
     const fid = this.state.fid;
     return typeof fid === 'string' ? `fid:${fid}` : 'default';
   }
 
+  /**
+   * Where the reader last was, whichever commander it was reading.
+   *
+   * Checkpoints are saved per commander, but at startup no journal line has been
+   * read, so the commander is not known yet. Looking up "this commander's" row
+   * then meant the `default` row -- written once, before any commander was ever
+   * seen, and never again -- so every launch resumed from the same months-old
+   * journal and re-read that session as if it were new.
+   *
+   * There is one journal folder and one reader, so the most recently saved row is
+   * the reader's last position, whichever commander's it is. The rows stay
+   * per-commander; only the choice of which to resume from changes. The engine
+   * re-reads that journal from its start (`rereadCheckpointFile`), so the
+   * session's commander is established before anything new is read.
+   */
   private async loadCheckpoint(): Promise<JournalCheckpoint | null> {
     if (!this.db) return null;
     try {
       const rows = await this.db.select<
         Array<{ source_file: string; byte_offset: number; last_event_id: string | null; updated_at: string }>
-      >('SELECT source_file, byte_offset, last_event_id, updated_at FROM journal_checkpoint WHERE scope = $1', [
-        this.checkpointScope(),
-      ]);
+      >(
+        'SELECT source_file, byte_offset, last_event_id, updated_at FROM journal_checkpoint ORDER BY updated_at DESC LIMIT 1',
+      );
       const row = rows[0];
       if (!row) return null;
       return {
