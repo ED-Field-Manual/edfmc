@@ -78,8 +78,8 @@ describe('cargo on the Dashboard', () => {
 });
 
 describe('recent journal', () => {
-  const e = (id: string, occurredAt: string): ActivityEntry =>
-    ({ id, occurredAt, title: id, commanderFid: 'F1', category: 'exobiology', subtype: 'x', systemName: 'S', systemAddress: 1, bodyName: null, bodyId: null, locationName: null, detail: null, data: {}, sources: [] }) as ActivityEntry;
+  const e = (id: string, occurredAt: string, subtype = 'mission-completed'): ActivityEntry =>
+    ({ id, occurredAt, title: id, commanderFid: 'F1', category: 'missions', subtype, systemName: 'S', systemAddress: 1, bodyName: null, bodyId: null, locationName: null, detail: null, data: {}, sources: [] }) as ActivityEntry;
   const groups: ActivityGroup[] = [
     { systemName: 'A', bodyName: null, startedAt: '', entries: [e('old', '2026-10-01T10:00:00Z'), e('mid', '2026-10-05T10:00:00Z')] },
     { systemName: 'B', bodyName: null, startedAt: '', entries: [e('new', '2026-10-09T10:00:00Z')] },
@@ -89,6 +89,26 @@ describe('recent journal', () => {
     expect(recentJournal(groups, 5).map((x) => x.id)).toEqual(['new', 'mid', 'old']);
     expect(recentJournal(groups, 2).map((x) => x.id)).toEqual(['new', 'mid']);
     expect(recentJournal([], 5)).toEqual([]);
+  });
+
+  it('only things finished: no signals found, landings or footfalls', () => {
+    const mixed: ActivityGroup[] = [
+      {
+        systemName: 'Wregoe FH-D d12-45',
+        bodyName: null,
+        startedAt: '',
+        entries: [
+          e('signals', '2026-10-09T18:19:03Z', 'signals-detected'),
+          e('landed', '2026-10-09T18:20:00Z', 'landed'),
+          e('footfall', '2026-10-09T18:21:00Z', 'footfall'),
+          e('poll-data', '2026-10-07T23:11:39Z', 'mission-completed'),
+          e('specimen', '2026-10-06T10:00:00Z', 'sample-completed'),
+          e('sold', '2026-10-05T10:00:00Z', 'data-sold'),
+        ],
+      },
+    ];
+    expect(recentJournal(mixed, 5).map((x) => x.id)).toEqual(['poll-data', 'specimen', 'sold']);
+    expect(recentJournal([{ ...mixed[0]!, entries: mixed[0]!.entries.slice(0, 3) }], 5)).toEqual([]);
   });
 
   it('times read as people say them, never as ISO strings', () => {

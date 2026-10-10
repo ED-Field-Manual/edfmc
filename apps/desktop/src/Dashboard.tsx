@@ -18,6 +18,7 @@ import {
   describeCargo,
   describeLocation,
   describeShip,
+  DONE_SUBTYPES,
   exobiologyActivity,
   friendlyTime,
   missionsActivity,
@@ -305,7 +306,7 @@ function RecentJournal({ snap, go }: { snap: Snap; go: Go }) {
       </div>
       {entries.length === 0 ? (
         <p className="dash-line muted-inline dash-empty">
-          Nothing recorded yet. Exobiology, missions and other milestones appear here as you play.
+          Nothing finished yet. Completed missions, specimens and exobiology sales appear here.
         </p>
       ) : (
         <ul className="dash-journal">
@@ -316,7 +317,9 @@ function RecentJournal({ snap, go }: { snap: Snap; go: Go }) {
                   {e.title}
                 </span>
                 <span className="dash-ellipsis dash-journal-where">
-                  {[e.bodyName ?? e.systemName, friendlyTime(e.occurredAt)].filter(Boolean).join(' · ')}
+                  {[DONE_SUBTYPES[e.subtype], e.locationName ?? e.bodyName ?? e.systemName, friendlyTime(e.occurredAt)]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </span>
               </button>
             </li>

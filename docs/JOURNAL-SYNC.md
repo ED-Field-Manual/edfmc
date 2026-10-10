@@ -248,6 +248,8 @@ The count and the span are shown **before** the upload is offered, so the choice
 is made against a real number rather than in the abstract.
 
 - Only `sample-completed`, `signals-detected` and `data-sold` are sent.
+  `signals-detected` is now recorded once per body rather than on every revisit
+  (see ACTIVITY-JOURNAL.md), so repeat visits no longer produce entries to send.
   (`footfall` was sent until footfall entries were removed; old rows are not.) The list is named explicitly rather than taking whatever is in the
   table, because the table outlives the rules: an entry per `landed` used to be
   recorded, it was dropped as noise, and those rows are still on disk. A

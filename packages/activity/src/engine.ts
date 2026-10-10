@@ -35,9 +35,29 @@ export interface ActivityEngineOptions {
   readonly commanderFid: string | null;
 }
 
+/**
+ * Which body a biological-signals entry is about.
+ *
+ * `SAASignalsFound` is written again every time the commander returns to a
+ * mapped body, not only when it is first mapped: one body in the corpus
+ * produced 42 identical "2 biological signals detected" entries over a
+ * fortnight of visits. Finding the signals is one event in a commander's
+ * history, so it is recorded once per body.
+ */
+export function signalBodyKey(e: {
+  readonly systemAddress: number | null;
+  readonly bodyId: number | null;
+  readonly bodyName: string | null;
+}): string | null {
+  if (e.systemAddress !== null && e.bodyId !== null) return `${e.systemAddress}:${e.bodyId}`;
+  return e.bodyName !== null ? `name:${e.bodyName.toLowerCase()}` : null;
+}
+
 export class ActivityEngine {
   private commanderFid: string | null;
   private bodyNames = new Map<number, string>();
+  /** Bodies whose signals this commander already has an entry for. */
+  private signalBodies = new Set<string>();
   private systemName: string | null = null;
   private systemAddress: number | null = null;
 
@@ -71,6 +91,15 @@ export class ActivityEngine {
 
   private reset(): void {
     this.bodyNames.clear();
+    this.signalBodies.clear();
+  }
+
+  /**
+   * Bodies already recorded for this commander, from stored entries, so a
+   * revisit after a restart is not recorded again either.
+   */
+  rememberSignalBodies(keys: Iterable<string>): void {
+    for (const k of keys) this.signalBodies.add(k);
   }
 
   /**
@@ -97,11 +126,15 @@ export class ActivityEngine {
       systemAddress: this.systemAddress,
     };
 
-    return [
-      ...exobiologyEntries(event, ctx),
-      ...biologicalSignalEntries(event, ctx),
-      ...missionEntries(event, ctx),
-    ];
+    const signals = biologicalSignalEntries(event, ctx).filter((e) => {
+      const key = signalBodyKey(e);
+      if (key === null) return true;
+      if (this.signalBodies.has(key)) return false;
+      this.signalBodies.add(key);
+      return true;
+    });
+
+    return [...exobiologyEntries(event, ctx), ...signals, ...missionEntries(event, ctx)];
   }
 
   private trackLocation(name: string, raw: Record<string, unknown>): void {

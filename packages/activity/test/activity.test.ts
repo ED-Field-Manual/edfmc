@@ -3,6 +3,7 @@ import { JournalSessionContext, normalize, parseLine } from '@edfm/elite-journal
 
 import {
   ActivityEngine,
+  signalBodyKey,
   groupActivity,
   linksFor,
   organismTitle,
@@ -259,5 +260,42 @@ describe('links', () => {
     const entry = e.observe(ev(scanOrganic('Analyse')))[0]!;
     const links = linksFor(entry, { name: 'Bad', systemUrl: 'javascript:alert(1)' });
     expect(links.some((l) => l.kind === 'external')).toBe(false);
+  });
+});
+
+describe('biological signals are recorded once per body', () => {
+  // Reported 2026-10-10: SAASignalsFound is written again on every return to a
+  // mapped body. One body in the commander's journal had 42 identical entries.
+  const revisit = (at: string) => SAA_BIO.replace('2026-09-28T12:02:00Z', at);
+  const signals = (e: ActivityEngine, line: string) =>
+    e.observe(ev(line)).filter((x) => x.subtype === 'signals-detected');
+
+  it('a second visit to the same body adds nothing', () => {
+    const e = engine();
+    e.observe(ev(FSD_JUMP));
+    expect(signals(e, SAA_BIO)).toHaveLength(1);
+    expect(signals(e, revisit('2026-10-01T09:00:00Z'))).toHaveLength(0);
+    expect(signals(e, revisit('2026-10-08T00:12:08Z'))).toHaveLength(0);
+  });
+
+  it('another body still gets its own entry', () => {
+    const e = engine();
+    e.observe(ev(FSD_JUMP));
+    signals(e, SAA_BIO);
+    const other = SAA_BIO.replace('"BodyID":25', '"BodyID":26').replace('A 5', 'A 6');
+    expect(signals(e, other)).toHaveLength(1);
+  });
+
+  it('bodies already stored for this commander count, after a restart', () => {
+    const e = engine();
+    e.rememberSignalBodies([signalBodyKey({ systemAddress: 2833504080594, bodyId: 25, bodyName: null })!]);
+    expect(signals(e, SAA_BIO)).toHaveLength(0);
+  });
+
+  it('another commander is not affected by the first one’s bodies', () => {
+    const e = engine('F1');
+    signals(e, SAA_BIO);
+    e.setCommander('F2');
+    expect(signals(e, SAA_BIO)).toHaveLength(1);
   });
 });

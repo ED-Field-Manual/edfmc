@@ -110,6 +110,7 @@ import {
   ActivityEngine,
   LiveActivityTracker,
   formatCredits,
+  signalBodyKey,
   rowStatus,
   speciesInfo,
   type BodyRef,
@@ -5657,6 +5658,23 @@ export class Companion {
       );
 
       this.activityEntries = rows.map(activityFromRow);
+
+      // Bodies this commander already has a signals entry for: a revisit is
+      // not a new finding (see signalBodyKey).
+      const known = await this.db.select<
+        Array<{ system_address: number | null; body_id: number | null; body_name: string | null }>
+      >(
+        `SELECT DISTINCT system_address, body_id, body_name FROM activity_entries
+          WHERE commander_fid = $1 AND subtype = 'signals-detected'`,
+        [fid],
+      );
+      this.activity.rememberSignalBodies(
+        known
+          .map((r) =>
+            signalBodyKey({ systemAddress: r.system_address, bodyId: r.body_id, bodyName: r.body_name }),
+          )
+          .filter((k): k is string => k !== null),
+      );
       this.notify();
     } catch (err) {
       logger.warn('db', 'Could not load activity', { error: String(err) });

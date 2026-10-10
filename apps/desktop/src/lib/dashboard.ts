@@ -237,7 +237,18 @@ export function describeCargo(s: CommanderState, limit = 5): CargoView | null {
 /* ------------------------------------------------------------------ journal */
 
 /**
- * The newest Field Journal entries, newest first.
+ * Things the commander finished: the Dashboard's "Recent journal" shows these
+ * and nothing else. Finding signals and landing are where things happen, not
+ * things done, and a body's signals used to be recorded on every visit.
+ */
+export const DONE_SUBTYPES: Readonly<Record<string, string>> = {
+  'mission-completed': 'Mission completed',
+  'sample-completed': 'Specimen completed',
+  'data-sold': 'Exobiology data sold',
+};
+
+/**
+ * The newest finished things in the Field Journal, newest first.
  *
  * Reads the same entries the Journal page shows (already this commander's
  * only), so nothing is re-derived. Each keeps its id so the Journal page can
@@ -246,6 +257,7 @@ export function describeCargo(s: CommanderState, limit = 5): CargoView | null {
 export function recentJournal(groups: readonly ActivityGroup[], limit = 5): ActivityEntry[] {
   return groups
     .flatMap((g) => g.entries)
+    .filter((e) => e.subtype in DONE_SUBTYPES)
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, limit);
 }

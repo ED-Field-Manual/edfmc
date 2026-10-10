@@ -57,6 +57,14 @@ The sequence measurements below were taken later, against 303 files and 323
 `ScanOrganic` events, so the two do not line up exactly; each states its own
 corpus rather than being quietly reconciled.
 
+**`signals-detected` is recorded once per body.** `SAASignalsFound` is written
+again every time the commander returns to a body they have mapped, not only the
+first time: one body in Wregoe FH-D d12-45 had 42 identical "2 biological
+signals detected" entries from repeat visits (found 2026-10-10). The engine now
+keeps the bodies a commander already has an entry for (`signalBodyKey`: system
+address and body id, loaded from stored entries at startup) and skips revisits.
+Entries recorded before this change are left as they are.
+
 `Log` and `Sample` scans produce nothing. They are progress toward one specimen,
 and an entry each would bury the completion in its own noise. Live progress is
 shown in the overlay instead — see **The measured sample sequence** below.
@@ -400,12 +408,13 @@ is open repeats Current Context and wastes the space.
 
 ## On the Dashboard
 
-The Dashboard's **Recent journal** card lists the five newest entries from the
-same data this page shows (`recentJournal` in `apps/desktop/src/lib/dashboard.ts`),
-so it is the active commander's only and adds no interpretation of its own. It
-holds what the journal records today, which is mostly exobiology and missions;
-arrivals and dockings are not Field Journal entries and do not appear. Clicking
-an entry opens this page scrolled to it, outlined.
+The Dashboard's **Recent journal** card lists the five newest **finished**
+things from the same data this page shows (`recentJournal` and `DONE_SUBTYPES`
+in `apps/desktop/src/lib/dashboard.ts`): completed missions, completed
+specimens and exobiology data sold. Signals found, landings and old footfall
+rows stay on this page only. It is the active commander's only and adds no
+interpretation of its own. Clicking an entry opens this page scrolled to it,
+outlined.
 
 ## Deferred, explicitly
 
