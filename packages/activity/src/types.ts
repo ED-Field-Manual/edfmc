@@ -40,7 +40,8 @@ export type ActivityCategory =
   | 'exploration'
   | 'mining'
   | 'colonisation'
-  | 'missions';
+  | 'missions'
+  | 'combat';
 
 /**
  * One thing the commander did.

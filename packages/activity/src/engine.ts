@@ -25,6 +25,7 @@ import {
   exobiologyEntries,
 } from './exobiology.js';
 import { missionEntries } from './missions.js';
+import { CombatFights, combatEntries } from './combat.js';
 import { MiningRuns } from './mining.js';
 import type { ActivityContext, ActivityEntry } from './types.js';
 
@@ -63,6 +64,8 @@ export class ActivityEngine {
   private systemAddress: number | null = null;
   /** Mining runs span many events, and survive a jump (the jump ends them). */
   private mining = new MiningRuns();
+  /** Fights too: kills added up until the commander moves on. */
+  private fights = new CombatFights();
 
   constructor(options: ActivityEngineOptions) {
     this.commanderFid = options.commanderFid;
@@ -91,6 +94,7 @@ export class ActivityEngine {
     this.commanderFid = fid;
     this.reset();
     this.mining.reset();
+    this.fights.reset();
   }
 
   private reset(): void {
@@ -116,16 +120,19 @@ export class ActivityEngine {
     const raw = event.source.raw as Record<string, unknown>;
     const name = event.source.event;
 
-    // Before the location moves on: a jump ends a run in the system it was mined in.
-    const mined =
+    // Before the location moves on: a jump ends a mining run or a fight in the
+    // system it happened in.
+    const here: ActivityContext | null =
       this.commanderFid === null
-        ? []
-        : this.mining.observe(event, {
+        ? null
+        : {
             commanderFid: this.commanderFid,
             bodyNames: this.bodyNames,
             systemName: this.systemName,
             systemAddress: this.systemAddress,
-          });
+          };
+    const mined = here === null ? [] : this.mining.observe(event, here);
+    const fought = here === null ? [] : this.fights.observe(event, here);
 
     this.trackLocation(name, raw);
     this.trackBodies(name, raw);
@@ -149,7 +156,7 @@ export class ActivityEngine {
       return true;
     });
 
-    return [...exobiologyEntries(event, ctx), ...signals, ...missionEntries(event, ctx), ...mined];
+    return [...exobiologyEntries(event, ctx), ...signals, ...missionEntries(event, ctx), ...mined, ...fought, ...combatEntries(event, ctx)];
   }
 
   private trackLocation(name: string, raw: Record<string, unknown>): void {

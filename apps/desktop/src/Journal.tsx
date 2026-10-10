@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-import { linksFor, miningTotals, type ActivityCategory, type ActivityGroup } from '@edfm/activity';
+import { combatTotals, linksFor, miningTotals, type ActivityCategory, type ActivityGroup } from '@edfm/activity';
 
 import type { CompanionSnapshot } from './lib/companion.js';
 
@@ -28,6 +28,7 @@ const FILTERS = [
   'Exobiology',
   'Exploration',
   'Mining',
+  'Combat',
   'Colonisation',
   'Missions',
 ] as const;
@@ -37,6 +38,7 @@ const CATEGORY_OF: Record<Exclude<Filter, 'All Activity'>, ActivityCategory> = {
   Exobiology: 'exobiology',
   Exploration: 'exploration',
   Mining: 'mining',
+  Combat: 'combat',
   Colonisation: 'colonisation',
   Missions: 'missions',
 };
@@ -93,6 +95,10 @@ export function Journal({ snap, focusId }: { snap: CompanionSnapshot; focusId?: 
   // Everything refined across the mining runs listed: the Mining filter's total.
   const mined = useMemo(
     () => (filter === 'Mining' ? miningTotals(groups.flatMap((g) => g.entries)) : null),
+    [groups, filter],
+  );
+  const fought = useMemo(
+    () => (filter === 'Combat' ? combatTotals(groups.flatMap((g) => g.entries)) : null),
     [groups, filter],
   );
 
@@ -177,6 +183,37 @@ export function Journal({ snap, focusId }: { snap: CompanionSnapshot; focusId?: 
           </ul>
           <p className="field-hint">
             Across the mining runs below. Each tonne is one refinery result the game recorded.
+          </p>
+        </section>
+      )}
+
+      {fought && (fought.kills > 0 || fought.deaths > 0 || fought.cashedIn > 0) && (
+        <section className="card">
+          <h2>Combat in total</h2>
+          <p className="mining-total">
+            {fought.kills.toLocaleString('en-GB')} {fought.kills === 1 ? 'kill' : 'kills'}
+          </p>
+          <ul className="mining-totals">
+            <li>
+              <span>Bounties earned</span>
+              <span>{fought.bounties.toLocaleString('en-GB')} Cr</span>
+            </li>
+            <li>
+              <span>Combat bonds earned</span>
+              <span>{fought.bonds.toLocaleString('en-GB')} Cr</span>
+            </li>
+            <li>
+              <span>Cashed in</span>
+              <span>{fought.cashedIn.toLocaleString('en-GB')} Cr</span>
+            </li>
+            <li>
+              <span>Deaths</span>
+              <span>{fought.deaths.toLocaleString('en-GB')}</span>
+            </li>
+          </ul>
+          <p className="field-hint">
+            Across the entries below. Earned is what the game awarded at each kill; cashed in is
+            what you redeemed at a station, which can include kills from before these entries.
           </p>
         </section>
       )}

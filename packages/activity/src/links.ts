@@ -126,6 +126,8 @@ const CATEGORY_PAGE: Record<ActivityEntry['category'], string | null> = {
   exploration: 'Exploration',
   mining: 'Mining',
   colonisation: 'Colonisation',
+  /** Null for the same reason as missions below: a Combat page was not verified. */
+  combat: null,
   /*
    * Null because it is UNVERIFIED, not because missions have no page.
    *

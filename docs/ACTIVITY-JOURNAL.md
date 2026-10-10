@@ -52,6 +52,12 @@ stage-by-stage list it exists not to be.
 | `data-sold` | 5 | `SellOrganicData` |
 | `mission-completed` | not yet measured | `MissionCompleted` |
 | `mining-run` | 18 (2026-10-10, 324 files) | `MiningRefined`, added up per run |
+| `fight` | 268 (2026-10-10, 325 files) | `Bounty` and `FactionKillBond`, added up per fight |
+| `died` | 19 | `Died` |
+| `interdicted` | 107 | `Interdicted` |
+| `interdiction-escaped` | 16 | `EscapeInterdiction` |
+| `interdiction` | 54 | `Interdiction` (the commander interdicting) |
+| `bonds-redeemed` / `bounties-redeemed` | 31 / 74 | `RedeemVoucher` with `Type` `CombatBond` / `bounty` |
 
 The counts above are from the 299-file snapshot named at the top of this document.
 The sequence measurements below were taken later, against 303 files and 323
@@ -79,6 +85,24 @@ it was mined in even when a jump ends it. Its id is the first refine's event id,
 so a re-read stores it once. The Journal's Mining filter adds every listed run up
 by material. Runs mined before this existed appear after **Rebuild from journal
 files**. `packages/activity/src/mining.ts`.
+
+**Combat is the `combat` category, and a `fight` is one entry per fight, not per
+kill.** Each `Bounty` or `FactionKillBond` is one kill (677 and 575 in the
+corpus, 1,252 between them). A fight starts at the first kill and ends
+exactly as a mining run does; measured: 268 fights, ended by SupercruiseEntry
+224 times, FSDJump 34, Died 5, LoadGame 3, Shutdown 2. The entry gives the kills,
+the bounties (`TotalReward`) and combat bonds (`Reward`) awarded, and what was
+destroyed ("4 kills" -- Bounties 76,000 Cr · Combat bonds 3,189 Cr · Python ×2,
+Sentry Skimmer). `Target_Localised` is on 461 of the 677 bounties and absent
+exactly when `Target` is a plain ship symbol, so those names come from the ship
+table (`shipDisplayName`). Deaths, interdictions (`Interdicted`,
+`EscapeInterdiction`, the commander's own `Interdiction`) and cashing in
+(`RedeemVoucher` of type `CombatBond` or `bounty`; trade, settlement, codex and
+scannable vouchers are not combat) are one entry each. Three of the 19 `Died`
+events name no killer and are recorded as "Died"; a suit `KillerShip` is shown as
+"On foot". `CapShipBond` and `PVPKill` do not occur in the corpus and are not
+read. The Journal's Combat filter totals kills, bounties and bonds earned, credits
+cashed in and deaths. Local only. `packages/activity/src/combat.ts`.
 
 `Log` and `Sample` scans produce nothing. They are progress toward one specimen,
 and an entry each would bury the completion in its own noise. Live progress is
@@ -440,8 +464,8 @@ outlined.
 - **Screenshots.** `Screenshot` occurs once in the corpus — too little to design
   against. It carries `Filename`, `System` and `Body`, so referencing rather than
   copying will work when there is evidence to build on.
-- **Mining and colonisation categories.** The model covers them; no processors
-  yet. Exobiology was completed properly instead of three categories half-done.
+- **Colonisation category.** The model covers it; no processor yet. (Mining and
+  combat have theirs, above.)
 - **Live states for other activities.** `LiveActivity` is a tagged union on `kind`
   with one member, and the overlay falls back to the recorded entry for a `kind` it
   does not recognise — so mining or delivery progress can be added without
