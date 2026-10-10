@@ -11,6 +11,7 @@ import {
 } from '@edfm/missions';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
+import logo from './assets/logo.png';
 import { Logistics } from './Logistics';
 import { FirstRunGuidance, GuidanceChoice } from './Guidance';
 import { Integrations } from './Integrations';
@@ -125,12 +126,7 @@ export default function App() {
     <div className="app">
       <nav className="nav" aria-label="Main">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            ◆
-          </span>
-          <span>
-            EDFM <strong>Companion</strong>
-          </span>
+          <img className="brand-logo" src={logo} alt="EDFM Companion" />
         </div>
         <ul>
           {SECTIONS.map((s) => (
