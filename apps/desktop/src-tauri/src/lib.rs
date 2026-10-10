@@ -838,9 +838,11 @@ pub fn run() {
             if let Some(win) = app.get_webview_window(overlay::OVERLAY_LABEL) {
                 let _ = win.set_ignore_cursor_events(true);
             }
-            // Big enough for the whole Dashboard, but never bigger than the screen.
+            // Where and how big it was last time; on a first launch, big enough
+            // for the whole Dashboard but never bigger than the screen.
+            app.manage(window_size::WindowMemory::default());
             if let Some(main) = app.get_webview_window("main") {
-                window_size::fit_to_screen(&main);
+                window_size::restore(&main);
             }
             Ok(())
         })
@@ -864,6 +866,7 @@ pub fn run() {
             if window.label() == "main"
                 && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_))
             {
+                window_size::track(window);
                 plugin_host::follow_main_window(window.app_handle());
                 return;
             }
@@ -877,6 +880,7 @@ pub fn run() {
             }
 
             let app = window.app_handle();
+            window_size::save(window);
             // Stop the tracker thread before exiting, rather than leaving it polling
             // for a game window while the process tears down around it.
             if let Some(state) = app.try_state::<overlay::OverlayState>() {
