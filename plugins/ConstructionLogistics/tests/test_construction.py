@@ -412,3 +412,31 @@ class Page(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OlderApp(unittest.TestCase):
+    """In an EDFM Companion from before plugin API 2 the plugin says so, and tracks nothing."""
+
+    def test_says_it_needs_a_newer_app(self):
+        import importlib
+        import types
+        old = types.ModuleType('edfmc')
+        old.register_page = lambda on_action: None  # API 1: pages, but no overlay panels
+        sys.modules['edfmc'] = old
+        try:
+            sys.modules.pop('load', None)
+            load = importlib.import_module('load')
+            self.assertEqual(load.plugin_start3(ROOT), 'Construction Logistics')
+            self.assertIsNone(load._state['controller'])
+            load.journal_entry('Alpha', False, None, None, {'event': 'Music'}, {})  # ignored, no error
+
+            class Label(dict):
+                pass
+            label = Label()
+            load._state['label'] = label
+            load._refresh_label()
+            self.assertIn('needs a newer EDFM Companion', label['text'])
+            self.assertFalse(os.path.exists(os.path.join(ROOT, 'data')))
+        finally:
+            sys.modules.pop('edfmc', None)
+            sys.modules.pop('load', None)

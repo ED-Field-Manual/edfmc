@@ -75,6 +75,9 @@ def plugin_start3(plugin_dir: str) -> str:
         # EDFMC's database, for the one-time import of its old Logistics page.
         app_dir = getattr(config, 'app_dir_path', None) if config else None
         edfmc_db = os.path.join(os.path.dirname(os.path.abspath(app_dir)), 'edfm-companion.db') if app_dir else None
+    elif edfmc is not None:
+        _state['controller'] = None  # an older EDFM Companion: see TOO_OLD
+        return NAME
     else:
         data_dir = os.path.join(plugin_dir, 'data')
         show_page = show_overlay = None
@@ -113,7 +116,7 @@ def journal_entry(cmdr: str, is_beta: bool, system: str | None, station: str | N
 
 
 def plugin_app(parent: tk.Frame) -> tk.Frame | None:
-    """EDMC only: EDFM Companion draws the page itself and never calls this."""
+    """EDMC, or an EDFM Companion too old to draw the page itself."""
     frame = tk.Frame(parent)
     label = tk.Label(frame, justify=tk.LEFT, anchor=tk.W)
     label.grid(row=0, column=0, sticky=tk.W)
@@ -122,8 +125,19 @@ def plugin_app(parent: tk.Frame) -> tk.Frame | None:
     return frame
 
 
+#: Shown by an EDFM Companion from before plugin API 2 (pages and overlay
+#: panels drawn by the app). Nothing is tracked there, so its data is never
+#: split from what the current app keeps.
+TOO_OLD = ('Construction Logistics needs a newer EDFM Companion.\n'
+           'Update the app to see your sites, plans and overlay.')
+
+
 def _refresh_label() -> None:
     label = _state.get('label')
     controller = _state.get('controller')
-    if label is not None and controller is not None:
-        label['text'] = '\n'.join(controller.summary_lines())
+    if label is None:
+        return
+    if controller is None:
+        label['text'] = TOO_OLD if edfmc is not None else ''
+        return
+    label['text'] = '\n'.join(controller.summary_lines())
