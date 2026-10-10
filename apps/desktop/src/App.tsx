@@ -95,6 +95,13 @@ export default function App() {
    * declarative plugin, `py:<folder>` for a Python one.
    */
   const [pluginTab, setPluginTab] = useState<string | null>(null);
+  /** An entry the Journal page should open at, from the Dashboard. */
+  const [journalFocus, setJournalFocus] = useState<string | null>(null);
+  const go = (to: 'Screenshots' | 'Journal' | 'Logistics', focus?: string) => {
+    setPluginTab(null);
+    setJournalFocus(to === 'Journal' ? (focus ?? null) : null);
+    setSection(to);
+  };
 
   const snap = useSyncExternalStore(
     (cb) => companion.subscribe(cb),
@@ -175,12 +182,12 @@ export default function App() {
           <PluginTab snap={snap} tab={openPlugin} />
         ) : (
           <>
-          {section === 'Dashboard' && <Dashboard snap={snap} />}
+          {section === 'Dashboard' && <Dashboard snap={snap} go={go} />}
           {section === 'Context' && <ContextPanel snap={snap} />}
           {section === 'Missions' && <MissionsPanel snap={snap} />}
           {section === 'Overlay' && <OverlayPanel />}
           {section === 'Logistics' && <Logistics snap={snap} />}
-          {section === 'Journal' && <Journal snap={snap} />}
+          {section === 'Journal' && <Journal snap={snap} focusId={journalFocus} />}
           {section === 'Research' && <Research snap={snap} />}
           {section === 'Contributions' && <Contributions snap={snap} />}
           {section === 'Connections' && <Integrations snap={snap} />}

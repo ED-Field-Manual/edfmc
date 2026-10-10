@@ -16,7 +16,7 @@
  * putting this behind an EDFM connection would deny them that.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { linksFor, type ActivityCategory, type ActivityGroup } from '@edfm/activity';
@@ -50,8 +50,18 @@ function when(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function Journal({ snap }: { snap: CompanionSnapshot }) {
+export function Journal({ snap, focusId }: { snap: CompanionSnapshot; focusId?: string | null }) {
   const [filter, setFilter] = useState<Filter>('All Activity');
+
+  // Opened from the Dashboard at one entry: bring it into view and mark it.
+  useEffect(() => {
+    if (!focusId) return;
+    setFilter('All Activity');
+    const t = setTimeout(() => {
+      document.getElementById(`activity-${focusId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [focusId]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<string | null>(null);
 
@@ -166,7 +176,11 @@ export function Journal({ snap }: { snap: CompanionSnapshot }) {
               {group.entries.map((entry) => {
                 const links = linksFor(entry);
                 return (
-                  <li key={entry.id} className="activity-entry">
+                  <li
+                    key={entry.id}
+                    id={`activity-${entry.id}`}
+                    className={`activity-entry${entry.id === focusId ? ' activity-focus' : ''}`}
+                  >
                     <div className="activity-head">
                       <span className="activity-title">{entry.title}</span>
                       <span className="activity-time">{when(entry.occurredAt)}</span>

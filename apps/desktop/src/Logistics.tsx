@@ -15,6 +15,8 @@
 import { useState } from 'react';
 import { confidenceLabel, type PlanOptions, type StationPreference } from '@edfm/logistics';
 import { companion, type CompanionSnapshot } from './lib/companion';
+import { describeCargo } from './lib/dashboard';
+import { isLive } from './lib/session';
 
 function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
@@ -38,6 +40,7 @@ export function Logistics({ snap }: { snap: CompanionSnapshot }) {
   };
 
   const active = l.sites.filter((s) => !s.complete && !s.failed);
+  const cargo = describeCargo(snap.state, Number.POSITIVE_INFINITY);
 
   return (
     <>
@@ -50,6 +53,30 @@ export function Logistics({ snap }: { snap: CompanionSnapshot }) {
               `${l.requirements.length} outstanding ${l.requirements.length === 1 ? 'commodity' : 'commodities'}`}
         </p>
       </header>
+
+      {/* Everything in the hold; the Dashboard lists the largest few. */}
+      {cargo && (
+        <section className="card" id="ship-cargo">
+          <h2>
+            Ship cargo · {cargo.total}
+            {!isLive(snap.session) && <span className="muted-inline"> · last known</span>}
+          </h2>
+          {cargo.lines === null ? (
+            <p className="muted">The game has not reported what is in the hold yet.</p>
+          ) : cargo.lines.length === 0 ? (
+            <p className="muted">The hold is empty.</p>
+          ) : (
+            <ul className="cargo-list">
+              {cargo.lines.map((c) => (
+                <li key={c.label}>
+                  <span>{c.label}</span>
+                  <span>{c.tonnes.toLocaleString()} t</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* ------------------------------------------------------------ sites */}
 

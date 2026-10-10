@@ -12,13 +12,17 @@
 import { isKnown } from '@edfm/elite-journal';
 import { useEffect, useState } from 'react';
 
+import { openScreenshot } from './Screenshots';
 import {
   constructionActivity,
+  describeCargo,
   describeLocation,
   describeShip,
   exobiologyActivity,
+  friendlyTime,
   missionsActivity,
   navigationActivity,
+  recentJournal,
   type ActivityItem,
 } from './lib/dashboard';
 import { relativeExpiry, type CompanionSnapshot } from './lib/companion';
@@ -43,13 +47,16 @@ export function SessionPill({ status }: { status: SessionStatus }) {
   );
 }
 
-export function Dashboard({ snap }: { snap: Snap }) {
+type Go = (to: 'Screenshots' | 'Journal' | 'Logistics', focus?: string) => void;
+
+export function Dashboard({ snap, go }: { snap: Snap; go: Go }) {
   const s = snap.state;
   const live = isLive(snap.session);
   const commander = isKnown(s.commander) ? s.commander : null;
   const mode = gameModeLabel(isKnown(s.gameMode) ? s.gameMode : null, isKnown(s.gameGroup) ? s.gameGroup : null);
   const location = describeLocation(s);
   const ship = describeShip(s);
+  const cargo = describeCargo(s);
 
   const activity = [
     navigationActivity(s, live),
@@ -114,15 +121,13 @@ export function Dashboard({ snap }: { snap: Snap }) {
               <>
                 <p className="dash-primary">{ship.name ?? ship.model}</p>
                 {ship.name && <p className="dash-line">{ship.model}</p>}
-                <p className="dash-meta">
-                  {ship.cargo && (
-                    <span className="dash-tag" title="Cargo carried / cargo capacity">
-                      Cargo {ship.cargo}
-                    </span>
-                  )}
-                  {ship.ident && <span className="dash-tag">{ship.ident}</span>}
-                  {ship.away && <span className="dash-tag">Not aboard</span>}
-                </p>
+                {(ship.ident || ship.away) && (
+                  <p className="dash-meta">
+                    {ship.ident && <span className="dash-tag">{ship.ident}</span>}
+                    {ship.away && <span className="dash-tag">Not aboard</span>}
+                  </p>
+                )}
+                {cargo && <CargoList cargo={cargo} go={go} />}
               </>
             ) : (
               <p className="dash-line muted-inline">Not reported yet. It appears once you board a ship.</p>
@@ -164,6 +169,13 @@ export function Dashboard({ snap }: { snap: Snap }) {
           </ul>
         </section>
       )}
+
+      {commander && (
+        <div className="dash-grid dash-pair">
+          <LastScreenshot snap={snap} go={go} />
+          <RecentJournal snap={snap} go={go} />
+        </div>
+      )}
     </div>
   );
 }
@@ -196,6 +208,121 @@ function CarrierJumps({ snap }: { snap: Snap }) {
           </p>
         );
       })}
+    </section>
+  );
+}
+
+/** The hold, largest first; textual only. The rest is on the Logistics page. */
+function CargoList({ cargo, go }: { cargo: NonNullable<ReturnType<typeof describeCargo>>; go: Go }) {
+  return (
+    <div className="dash-cargo">
+      <p className="dash-sublabel">Cargo · {cargo.total}</p>
+      {cargo.lines === null ? (
+        <p className="dash-line muted-inline">Contents not reported yet.</p>
+      ) : cargo.lines.length === 0 ? (
+        <p className="dash-line muted-inline">Empty hold.</p>
+      ) : (
+        <ul className="dash-cargo-list">
+          {cargo.lines.map((c) => (
+            <li key={c.label}>
+              <span className="dash-cargo-name">{c.label}</span>
+              <span className="dash-cargo-t">{c.tonnes.toLocaleString()} t</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {cargo.more > 0 && (
+        <button type="button" className="link dash-more" onClick={() => go('Logistics')}>
+          {cargo.more} more on the Logistics page
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The newest catalogued screenshot, from the existing catalog and a preview made once. */
+function LastScreenshot({ snap, go }: { snap: Snap; go: Go }) {
+  const latest = snap.screenshots.recent[0] ?? null;
+  const preview = snap.latestScreenshotPreview;
+  const ready = latest && preview && preview.id === latest.id ? preview : null;
+  const title = latest ? (latest.subject ?? latest.systemName ?? latest.category) : null;
+
+  return (
+    <section className="dash-card dash-tile" aria-labelledby="dash-shot">
+      <div className="dash-tile-head">
+        <h2 id="dash-shot" className="dash-label">
+          Last screenshot
+        </h2>
+        <button type="button" className="link dash-small" onClick={() => go('Screenshots')}>
+          Screenshots
+        </button>
+      </div>
+      {latest === null ? (
+        <p className="dash-line muted-inline dash-empty">No screenshots yet. Set a capture hotkey on the Screenshots page.</p>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="dash-shot"
+            onClick={() => void openScreenshot(latest.filePath)}
+            disabled={ready?.state !== 'ready'}
+            title={ready?.state === 'ready' ? 'Open the image' : undefined}
+          >
+            {ready?.state === 'ready' && ready.url ? (
+              <img src={ready.url} alt={title ?? 'Latest screenshot'} />
+            ) : (
+              <span className="dash-shot-note">
+                {ready?.state === 'missing'
+                  ? 'Image not found. It may have been moved or deleted.'
+                  : ready?.state === 'unavailable'
+                    ? 'No preview for this image.'
+                    : 'Loading preview…'}
+              </span>
+            )}
+          </button>
+          <p className="dash-line dash-ellipsis" title={title ?? undefined}>
+            {title}
+          </p>
+          <p className="dash-line muted-inline">{friendlyTime(latest.capturedAt)}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** The newest Field Journal entries, from the Journal's own data. */
+function RecentJournal({ snap, go }: { snap: Snap; go: Go }) {
+  const entries = recentJournal(snap.activity, 5);
+  return (
+    <section className="dash-card dash-tile" aria-labelledby="dash-journal">
+      <div className="dash-tile-head">
+        <h2 id="dash-journal" className="dash-label">
+          Recent journal
+        </h2>
+        <button type="button" className="link dash-small" onClick={() => go('Journal')}>
+          Journal
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="dash-line muted-inline dash-empty">
+          Nothing recorded yet. Exobiology, missions and other milestones appear here as you play.
+        </p>
+      ) : (
+        <ul className="dash-journal">
+          {entries.map((e) => (
+            <li key={e.id}>
+              <button type="button" className="dash-journal-entry" onClick={() => go('Journal', e.id)}>
+                <span className="dash-ellipsis dash-journal-title" title={e.title}>
+                  {e.title}
+                </span>
+                <span className="dash-ellipsis dash-journal-where">
+                  {[e.bodyName ?? e.systemName, friendlyTime(e.occurredAt)].filter(Boolean).join(' · ')}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

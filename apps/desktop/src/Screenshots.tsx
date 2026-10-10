@@ -383,6 +383,10 @@ export function Screenshots({ snap }: { snap: CompanionSnapshot }) {
  * missing path scope went unnoticed. A failure the commander can see is a
  * failure somebody can fix.
  */
+export async function openScreenshot(path: string): Promise<void> {
+  return open('open', path);
+}
+
 async function open(action: 'open' | 'reveal', path: string): Promise<void> {
   try {
     if (action === 'open') await openPath(path);

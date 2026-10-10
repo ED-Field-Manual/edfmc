@@ -11,6 +11,7 @@
 import type { NormalizedEvent, Known } from './types.js';
 import { UNKNOWN, isKnown } from './types.js';
 import { vehicleKind } from './ships.js';
+import type { CargoItem } from './cargo.js';
 import type {
   ApproachSettlementData,
   DockedData,
@@ -202,6 +203,14 @@ export interface CommanderState {
   shipName: Known<string>;
   shipIdent: Known<string>;
   cargoCount: Known<number>;
+  /** Timestamp of the latest ship `Cargo` event, so `Cargo.json` can be matched to it. */
+  cargoAt: string | null;
+  /**
+   * What is in the hold. UNKNOWN until a full list is seen for the latest
+   * `Cargo` event (from the event itself or the matching `Cargo.json`), so an
+   * older list is never shown as the current one. See cargo.ts.
+   */
+  cargoManifest: Known<readonly CargoItem[]>;
   /** Tonnes, from `Loadout.CargoCapacity` (present on all 843 in the corpus). */
   cargoCapacity: Known<number>;
 
@@ -254,6 +263,8 @@ export function initialState(): CommanderState {
     shipName: UNKNOWN,
     shipIdent: UNKNOWN,
     cargoCount: UNKNOWN,
+    cargoAt: null,
+    cargoManifest: UNKNOWN,
     cargoCapacity: UNKNOWN,
     lastSettlement: UNKNOWN,
     lastEventId: null,
@@ -742,9 +753,19 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
     }
 
     case 'cargo': {
-      const d = event.data as { vessel: Known<string>; count: Known<number> };
+      const d = event.data as {
+        vessel: Known<string>;
+        count: Known<number>;
+        inventory: Known<readonly CargoItem[]>;
+      };
       // Only ship cargo belongs on the dashboard's cargo figure.
-      if (!isKnown(d.vessel) || d.vessel === 'Ship') state.cargoCount = set(state.cargoCount, d.count);
+      if (!isKnown(d.vessel) || d.vessel === 'Ship') {
+        state.cargoCount = set(state.cargoCount, d.count);
+        state.cargoAt = event.source.provenance.timestamp || null;
+        // A full list in the event is current; without one, any list held is
+        // now out of date until the matching Cargo.json is read.
+        state.cargoManifest = d.inventory;
+      }
       break;
     }
 

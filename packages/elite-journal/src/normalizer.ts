@@ -10,6 +10,7 @@
  */
 
 import type { NormalizedEvent, RawJournalEvent, Known } from './types.js';
+import { parseInventory } from './cargo.js';
 import { UNKNOWN, optional } from './types.js';
 
 /* ------------------------------------------------------------------ helpers */
@@ -319,6 +320,7 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
       count: num(r, 'Count'),
       /** Absent when the game wrote the detail to Cargo.json instead. */
       hasInventory: Array.isArray(r['Inventory']),
+      inventory: parseInventory(r['Inventory']),
     }),
   },
   /*

@@ -448,6 +448,100 @@ fn commit_file(from: &str, to: &str) -> Result<String, String> {
     }
 }
 
+/// Longest edge a thumbnail may have. The Dashboard shows one at about 320 px
+/// wide; twice that stays sharp on a high-DPI screen and is a small PNG.
+const THUMB_MAX: u32 = 640;
+
+/**
+ * A small PNG of a catalogued screenshot, for the Dashboard.
+ *
+ * Made on request for one image, never by scanning the folder. PNG only:
+ * every capture this app makes is a PNG (see `write_png`); anything else, or a
+ * file that has gone, is an error the caller shows as "no preview". The
+ * aspect ratio is kept exactly; only the size changes, by averaging blocks of
+ * pixels, so nothing is stretched.
+ */
+#[tauri::command]
+pub async fn screenshot_thumbnail(path: String) -> Result<tauri::ipc::Response, String> {
+    // A full-size capture can be 15 MB; decoding it off the main thread keeps
+    // the window responsive while the preview is made.
+    tauri::async_runtime::spawn_blocking(move || make_thumbnail(&path))
+        .await
+        .map_err(|_| "unreadable".to_string())?
+        .map(tauri::ipc::Response::new)
+}
+
+fn make_thumbnail(path: &str) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(&path).map_err(|_| "not-found".to_string())?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let mut reader = decoder.read_info().map_err(|_| "not-png".to_string())?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|_| "unreadable".to_string())?;
+    if info.bit_depth != png::BitDepth::Eight {
+        return Err("unsupported".into());
+    }
+    let channels = match info.color_type {
+        png::ColorType::Rgb => 3usize,
+        png::ColorType::Rgba => 4usize,
+        _ => return Err("unsupported".into()),
+    };
+    let (w, h) = (info.width, info.height);
+    if w == 0 || h == 0 {
+        return Err("unreadable".into());
+    }
+    let (tw, th) = thumb_size(w, h, THUMB_MAX);
+    let rgb = downscale(&buf[..info.buffer_size()], w, h, channels, tw, th);
+
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, tw, th);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|_| "encode".to_string())?;
+        writer.write_image_data(&rgb).map_err(|_| "encode".to_string())?;
+    }
+    Ok(out)
+}
+
+/// The thumbnail size: the longest edge at most `max`, the ratio unchanged.
+fn thumb_size(w: u32, h: u32, max: u32) -> (u32, u32) {
+    if w <= max && h <= max {
+        return (w, h);
+    }
+    if w >= h {
+        (max, ((h as u64 * max as u64 + w as u64 / 2) / w as u64).max(1) as u32)
+    } else {
+        (((w as u64 * max as u64 + h as u64 / 2) / h as u64).max(1) as u32, max)
+    }
+}
+
+/// Box-filter downscale to RGB: each output pixel is the average of the source
+/// pixels it covers.
+fn downscale(src: &[u8], w: u32, h: u32, channels: usize, tw: u32, th: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity((tw * th * 3) as usize);
+    for ty in 0..th {
+        let y0 = (ty as u64 * h as u64 / th as u64) as u32;
+        let y1 = (((ty + 1) as u64 * h as u64 / th as u64) as u32).max(y0 + 1).min(h);
+        for tx in 0..tw {
+            let x0 = (tx as u64 * w as u64 / tw as u64) as u32;
+            let x1 = (((tx + 1) as u64 * w as u64 / tw as u64) as u32).max(x0 + 1).min(w);
+            let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
+            for y in y0..y1 {
+                let row = (y as usize) * (w as usize) * channels;
+                for x in x0..x1 {
+                    let i = row + (x as usize) * channels;
+                    r += src[i] as u64;
+                    g += src[i + 1] as u64;
+                    b += src[i + 2] as u64;
+                    n += 1;
+                }
+            }
+            out.extend_from_slice(&[(r / n) as u8, (g / n) as u8, (b / n) as u8]);
+        }
+    }
+    out
+}
+
 /// Whether a path exists, for collision resolution.
 #[tauri::command]
 pub fn path_exists(path: String) -> bool {
@@ -547,6 +641,32 @@ pub fn delete_screenshot_file(path: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn thumbnails_keep_the_aspect_ratio_and_never_grow() {
+        assert_eq!(super::thumb_size(2560, 1440, 640), (640, 360));
+        assert_eq!(super::thumb_size(1440, 2560, 640), (360, 640));
+        assert_eq!(super::thumb_size(3440, 1440, 640), (640, 268));
+        assert_eq!(super::thumb_size(400, 300, 640), (400, 300));
+        assert_eq!(super::thumb_size(5000, 3, 640), (640, 1));
+    }
+
+    #[test]
+    fn a_thumbnail_is_made_from_a_real_png_and_a_missing_file_says_so() {
+        let dir = std::env::temp_dir().join(format!("edfm-thumb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wide.png");
+        let (w, h) = (1280u32, 720u32);
+        let rgb: Vec<u8> = (0..w * h).flat_map(|i| [(i % 255) as u8, 64, 128]).collect();
+        super::write_png(&path, &rgb, w, h).unwrap();
+        let bytes = super::make_thumbnail(&path.to_string_lossy()).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height), (640, 360));
+        assert!(super::make_thumbnail(&dir.join("gone.png").to_string_lossy()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

@@ -11,6 +11,7 @@ import {
   AnomalyLedger,
   JournalEngine,
   applyEvent,
+  applyCargoFile,
   initialState,
   listJournalFiles,
   replayFile,
@@ -371,6 +372,13 @@ function cargoLabel(m: Mission): string | null {
 
 export type ConnectionState = 'starting' | 'watching' | 'no-directory' | 'stopped' | 'error';
 
+export interface LatestScreenshotPreview {
+  readonly id: string;
+  readonly state: 'loading' | 'ready' | 'missing' | 'unavailable';
+  /** A `data:` PNG, when ready. */
+  readonly url: string | null;
+}
+
 /** What the Inara card needs. Never the key, which JavaScript cannot read. */
 export interface InaraView {
   readonly state: InaraConnectionState;
@@ -459,6 +467,12 @@ export interface CompanionSnapshot {
   readonly session: SessionStatus;
   /** Exobiology on the current body, when there is any; the overlay shows the same. */
   readonly exobiology: LiveExobiology | null;
+  /**
+   * A small preview of the newest catalogued screenshot, made once when it
+   * changes (never while rendering). `missing`: the file has gone;
+   * `unavailable`: not a PNG, or it could not be read.
+   */
+  readonly latestScreenshotPreview: LatestScreenshotPreview | null;
   readonly verification: VerificationStats;
   /** Whether the commander has opted in to verification (§21). */
   readonly verificationEnabled: boolean;
@@ -1178,6 +1192,89 @@ export class Companion {
         [integration, id, attempts, next, now.toISOString()],
       );
     }
+  }
+
+  /* ------------------------------------------------------------- cargo */
+
+  private cargoReadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Read `Cargo.json` for the latest `Cargo` event that came without a list.
+   *
+   * Debounced, so a burst of events (a catch-up at startup, a run of limpet
+   * launches) costs one small read for the newest of them, not one each.
+   * `applyCargoFile` takes the file only if it belongs to that event; a file the
+   * game has not finished writing is read again shortly, three times at most.
+   */
+  private scheduleCargoFileRead(attempt = 0): void {
+    if (this.cargoReadTimer !== null) clearTimeout(this.cargoReadTimer);
+    this.cargoReadTimer = setTimeout(() => {
+      this.cargoReadTimer = null;
+      void this.readCargoFile(attempt);
+    }, attempt === 0 ? 150 : 400);
+  }
+
+  private async readCargoFile(attempt: number): Promise<void> {
+    if (!this.directory || isKnown(this.state.cargoManifest)) return;
+    const path = tauriFs.join(this.directory, 'Cargo.json');
+    let text: string;
+    try {
+      const size = await tauriFs.size(path);
+      if (size === null || size <= 0 || size > 512 * 1024) return;
+      text = new TextDecoder().decode(await tauriFs.readRange(path, 0, size));
+    } catch {
+      return;
+    }
+    const result = applyCargoFile(this.state, text);
+    if (result === 'applied') this.notify();
+    else if (result === 'older' && attempt < 3) this.scheduleCargoFileRead(attempt + 1);
+  }
+
+  /* ------------------------------------------------------- screenshots */
+
+  private latestPreview: LatestScreenshotPreview | null = null;
+
+  /**
+   * Make the Dashboard's preview of the newest screenshot.
+   *
+   * Runs after the catalog is read (startup, a capture, an edit), and only does
+   * work when the newest image is a different one: one file, decoded and
+   * shrunk in Rust, never a scan of the folder.
+   */
+  private async refreshLatestPreview(): Promise<void> {
+    const newest = this.screenshotList[0] ?? null;
+    if (newest === null) {
+      if (this.latestPreview !== null) {
+        this.latestPreview = null;
+        this.notify();
+      }
+      return;
+    }
+    const missing = this.missingScreenshots.has(newest.id);
+    const current = this.latestPreview;
+    if (current && current.id === newest.id && current.state !== 'missing' && !missing) return;
+    if (missing) {
+      this.latestPreview = { id: newest.id, state: 'missing', url: null };
+      this.notify();
+      return;
+    }
+    this.latestPreview = { id: newest.id, state: 'loading', url: null };
+    this.notify();
+    let next: LatestScreenshotPreview;
+    try {
+      const bytes = new Uint8Array(await invoke<ArrayBuffer>('screenshot_thumbnail', { path: newest.filePath }));
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      next = { id: newest.id, state: 'ready', url: `data:image/png;base64,${btoa(bin)}` };
+    } catch (err) {
+      next = { id: newest.id, state: String(err).includes('not-found') ? 'missing' : 'unavailable', url: null };
+    }
+    // A newer capture may have arrived while this one was being made.
+    if (this.screenshotList[0]?.id !== newest.id) return;
+    this.latestPreview = next;
+    this.notify();
   }
 
   /* ------------------------------------------------------ game window */
@@ -3350,6 +3447,7 @@ export class Companion {
       );
       this.screenshotList = rows.map((r) => screenshotFromRow(r));
       await this.checkScreenshotFiles();
+      void this.refreshLatestPreview();
     } catch (err) {
       logger.warn('screenshot', 'Could not read the catalog', { error: String(err) });
       this.screenshotList = [];
@@ -4049,6 +4147,7 @@ export class Companion {
           shutdownSeen: this.state.shutdown,
         }),
         exobiology: this.liveActivity.state?.exobiology ?? null,
+        latestScreenshotPreview: this.latestPreview,
         verification: this.verification.stats(),
         verificationEnabled: this.verificationEnabled,
         research: this.researchView(),
@@ -4469,6 +4568,10 @@ export class Companion {
     this.research.observe(event, this.state);
 
     if (event.kind === 'colonisation-depot') this.observeConstructionDepot(event);
+
+    if (event.kind === 'cargo' && this.state.cargoAt !== null && !isKnown(this.state.cargoManifest)) {
+      this.scheduleCargoFileRead();
+    }
 
     if (this.missions.observe(event)) {
       this.missionsDirty = true;

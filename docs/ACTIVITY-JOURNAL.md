@@ -398,6 +398,15 @@ is open repeats Current Context and wastes the space.
 
 `docs/OVERLAY.md` has the lifecycle and why that shape was chosen.
 
+## On the Dashboard
+
+The Dashboard's **Recent journal** card lists the five newest entries from the
+same data this page shows (`recentJournal` in `apps/desktop/src/lib/dashboard.ts`),
+so it is the active commander's only and adds no interpretation of its own. It
+holds what the journal records today, which is mostly exobiology and missions;
+arrivals and dockings are not Field Journal entries and do not appear. Clicking
+an entry opens this page scrolled to it, outlined.
+
 ## Deferred, explicitly
 
 - **Sessions.** Schema exists; no automatic grouping, because a boundary rule that

@@ -9,8 +9,8 @@
  * not report is left out, not filled in. Nothing returned is a placeholder.
  */
 
-import { isKnown, shipDisplayName, type CommanderState } from '@edfm/elite-journal';
-import type { LiveExobiology } from '@edfm/activity';
+import { cargoLines, isKnown, shipDisplayName, type CommanderState } from '@edfm/elite-journal';
+import type { ActivityEntry, ActivityGroup, LiveExobiology } from '@edfm/activity';
 import type { ConstructionSite } from '@edfm/logistics';
 import type { Mission } from '@edfm/missions';
 
@@ -202,4 +202,65 @@ export function constructionActivity(sites: readonly ConstructionSite[]): Activi
     lines,
     progress: site.progress !== null ? Math.max(0, Math.min(1, site.progress)) : undefined,
   };
+}
+
+/* -------------------------------------------------------------------- cargo */
+
+export interface CargoView {
+  /** "102 / 256 t", or "102 t" when the capacity is not known. */
+  readonly total: string;
+  /** Up to `limit` commodities, largest first. Null when the list is not known. */
+  readonly lines: ReadonlyArray<{ readonly label: string; readonly tonnes: number }> | null;
+  /** Commodities beyond the ones listed. */
+  readonly more: number;
+}
+
+/**
+ * The hold: total, and what is in it.
+ *
+ * The list comes only from a manifest that belongs to the latest `Cargo` event
+ * (see elite-journal cargo.ts); while that is not known the total is shown on
+ * its own rather than an older list beside a newer total.
+ */
+export function describeCargo(s: CommanderState, limit = 5): CargoView | null {
+  if (!isKnown(s.cargoCount)) return null;
+  const total = isKnown(s.cargoCapacity) ? `${s.cargoCount} / ${s.cargoCapacity} t` : `${s.cargoCount} t`;
+  if (!isKnown(s.cargoManifest)) return { total, lines: null, more: 0 };
+  const all = cargoLines(s.cargoManifest);
+  return {
+    total,
+    lines: all.slice(0, limit).map((l) => ({ label: l.label, tonnes: l.count })),
+    more: Math.max(0, all.length - limit),
+  };
+}
+
+/* ------------------------------------------------------------------ journal */
+
+/**
+ * The newest Field Journal entries, newest first.
+ *
+ * Reads the same entries the Journal page shows (already this commander's
+ * only), so nothing is re-derived. Each keeps its id so the Journal page can
+ * open at it.
+ */
+export function recentJournal(groups: readonly ActivityGroup[], limit = 5): ActivityEntry[] {
+  return groups
+    .flatMap((g) => g.entries)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .slice(0, limit);
+}
+
+/** "Today 14:05", "Yesterday 22:10", "3 Oct 09:41": local time, no ISO strings. */
+export function friendlyTime(iso: string, now: Date = new Date()): string {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hm = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((day(now) - day(t)) / 86_400_000);
+  if (diff === 0) return `Today ${hm}`;
+  if (diff === 1) return `Yesterday ${hm}`;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const date = `${t.getDate()} ${months[t.getMonth()]}${t.getFullYear() !== now.getFullYear() ? ` ${t.getFullYear()}` : ''}`;
+  return `${date} ${hm}`;
 }

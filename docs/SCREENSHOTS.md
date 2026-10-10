@@ -301,6 +301,20 @@ One is reversible by re-cataloguing. The other is not.
 
 ---
 
+## On the Dashboard
+
+The Dashboard's **Last screenshot** card shows the newest catalogued image for
+the current commander. The preview is made in Rust (`screenshot_thumbnail`)
+from that one file, at most 640 px on the long edge, with the aspect ratio
+kept, and only when the newest image changes: after startup, a capture or a
+catalog edit. Nothing scans the folder and nothing is decoded while the page
+draws. The card's frame is a fixed 16:9 and the image is fitted inside it, so a
+tall or ultrawide capture is letterboxed, never stretched.
+
+A file that has been moved or deleted shows "Image not found"; a catalogued
+image that is not a PNG (every capture this app makes is one) shows "No preview".
+Clicking the preview opens the image the same way the Screenshots page does.
+
 ## Limitations and what is deferred
 
 - **Exclusive fullscreen** — see above. Detected and reported, not supported.

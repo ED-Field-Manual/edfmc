@@ -920,6 +920,7 @@ pub fn run() {
             screenshot::pictures_dir,
             screenshot::path_exists,
             screenshot::paths_exist,
+            screenshot::screenshot_thumbnail,
             screenshot::folder_writable,
             screenshot::delete_screenshot_file,
             screenshot::screenshots_default_dir,
