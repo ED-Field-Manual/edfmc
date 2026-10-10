@@ -206,26 +206,47 @@ export interface ActivityGroup {
   readonly startedAt: string;
 }
 
-export function groupActivity(entries: readonly ActivityEntry[]): readonly ActivityGroup[] {
-  const groups = new Map<string, ActivityEntry[]>();
+/**
+ * A quiet spell this long starts a new group even in the same place: it is
+ * another session, and the commander reads it as another visit.
+ */
+const VISIT_GAP_MS = 6 * 60 * 60 * 1000;
 
-  for (const entry of entries) {
+/**
+ * One group per **visit**: consecutive entries in the same system and body.
+ *
+ * Grouping every entry a place ever had into one card buried new activity:
+ * a home system with a month of history (155 entries in one commander's
+ * Wregoe FH-D d12-45) was ordered by its oldest entry and listed today's death
+ * last of 155, far down the page. Going somewhere else, or a gap of more than
+ * six hours, starts a new group, and groups are ordered by their newest entry.
+ */
+export function groupActivity(entries: readonly ActivityEntry[]): readonly ActivityGroup[] {
+  const sorted = [...entries].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  const visits: ActivityEntry[][] = [];
+  let lastKey: string | null = null;
+  let lastAt = Number.NaN;
+
+  for (const entry of sorted) {
     const key = `${entry.systemName ?? ''}\u0000${entry.bodyName ?? ''}`;
-    const list = groups.get(key);
-    if (list) list.push(entry);
-    else groups.set(key, [entry]);
+    const at = Date.parse(entry.occurredAt);
+    const quiet = Number.isFinite(at) && Number.isFinite(lastAt) && at - lastAt > VISIT_GAP_MS;
+    if (key !== lastKey || quiet || visits.length === 0) visits.push([entry]);
+    else visits[visits.length - 1]!.push(entry);
+    lastKey = key;
+    lastAt = at;
   }
 
-  return [...groups.values()]
-    .map((list) => {
-      const sorted = [...list].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
-      return {
-        systemName: sorted[0]!.systemName,
-        bodyName: sorted[0]!.bodyName,
-        entries: sorted,
-        startedAt: sorted[0]!.occurredAt,
-      };
-    })
-    // Newest group first: the journal is read backwards from what just happened.
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return (
+    visits
+      .map((list) => ({
+        systemName: list[0]!.systemName,
+        bodyName: list[0]!.bodyName,
+        // Within a group, oldest first: it reads as a sequence of what happened.
+        entries: list,
+        startedAt: list[0]!.occurredAt,
+      }))
+      // Newest visit first: the journal is read backwards from what just happened.
+      .reverse()
+  );
 }

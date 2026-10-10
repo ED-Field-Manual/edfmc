@@ -216,6 +216,31 @@ describe('grouping', () => {
     // Within a group, oldest first: it reads as a sequence of what happened.
     expect(groups[0]!.entries[0]!.subtype).toBe('signals-detected');
   });
+
+  it('starts a new group per visit, so new activity in a familiar place comes first', () => {
+    const at = (occurredAt: string, systemName: string, subtype = 'x') =>
+      ({ id: occurredAt, occurredAt, systemName, bodyName: null, subtype }) as unknown as ActivityEntry;
+    const groups = groupActivity([
+      at('2026-09-11T04:00:00Z', 'Home'),
+      at('2026-09-11T05:00:00Z', 'Home'),
+      at('2026-09-12T10:00:00Z', 'Away'),
+      at('2026-10-10T17:00:00Z', 'Home'),
+      at('2026-10-10T19:01:32Z', 'Home', 'died'),
+    ]);
+    expect(groups.map((g) => [g.systemName, g.entries.length])).toEqual([
+      ['Home', 2],
+      ['Away', 1],
+      ['Home', 2],
+    ]);
+    expect(groups[0]!.entries[1]!.subtype).toBe('died');
+  });
+
+  it('splits a place after a long quiet spell', () => {
+    const at = (occurredAt: string) =>
+      ({ id: occurredAt, occurredAt, systemName: 'Home', bodyName: null }) as unknown as ActivityEntry;
+    expect(groupActivity([at('2026-10-09T10:00:00Z'), at('2026-10-10T10:00:00Z')])).toHaveLength(2);
+    expect(groupActivity([at('2026-10-10T10:00:00Z'), at('2026-10-10T12:00:00Z')])).toHaveLength(1);
+  });
 });
 
 describe('links', () => {

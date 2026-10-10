@@ -104,6 +104,13 @@ events name no killer and are recorded as "Died"; a suit `KillerShip` is shown a
 read. The Journal's Combat filter totals kills, bounties and bonds earned, credits
 cashed in and deaths. Local only. `packages/activity/src/combat.ts`.
 
+**The Journal page groups by visit.** Consecutive entries in the same system
+and body form one card; going somewhere else, or a quiet spell of more than six
+hours, starts a new one, and the newest card is first (`groupActivity`). It used
+to put every entry a place ever had on one card ordered by its oldest entry, so
+a death in a home system was listed last of 155 entries on a card from a month
+earlier (found 2026-10-10). Display only: nothing stored changes.
+
 `Log` and `Sample` scans produce nothing. They are progress toward one specimen,
 and an entry each would bury the completion in its own noise. Live progress is
 shown in the overlay instead — see **The measured sample sequence** below.
