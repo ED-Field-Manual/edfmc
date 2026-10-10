@@ -362,12 +362,6 @@ def _import_blocks(state: dict[str, Any], ui: dict[str, Any]) -> list[dict[str, 
     imports = state.get('imports', {})
     if imports.get('edfmc'):
         out.append({'type': 'text', 'tone': 'muted', 'text': imports['edfmc']})
-    if imports.get('edmcTracker'):
-        out.append({'type': 'text', 'tone': 'muted', 'text': imports['edmcTracker']})
-    if ui.get('trackerFile'):
-        out.append({'type': 'controls', 'items': [{
-            'type': 'button', 'label': 'Import from EDMC Construction Tracker', 'action': 'importTracker',
-            'confirm': 'Add sites and carrier capacity from the Construction Tracker? Nothing here is overwritten.'}]})
     c = state['carrier']
     if c.get('callsign') or c.get('capacity') is not None:
         who = ' '.join(x for x in (c.get('name'), f"({c['callsign']})" if c.get('callsign') else None) if x)

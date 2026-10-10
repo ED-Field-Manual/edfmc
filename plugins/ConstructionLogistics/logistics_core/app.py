@@ -46,7 +46,7 @@ class Controller:
         self.fetcher = fetcher
         self.threaded = threaded
         self.state = store.empty_state(None, None)
-        self.ui: dict[str, Any] = {'searching': False, 'message': None, 'showArchived': False, 'trackerFile': None}
+        self.ui: dict[str, Any] = {'searching': False, 'message': None, 'showArchived': False}
         self.origin: tuple[float, float, float] | None = None
         self._results: queue.Queue[Callable[[], None]] = queue.Queue()
         self._last_overlay: Any = object()
@@ -89,33 +89,13 @@ class Controller:
             self._first_imports(fid)
 
     def _first_imports(self, fid: str) -> None:
-        """Bring in existing data once per commander, without changing its source."""
+        """Bring in this commander's sites from EDFMC's old Logistics page, once, read-only."""
         imports = self.state['imports']
         now = _now_iso()
         if 'edfmc' not in imports and self.edfmc_db:
             added = migrate.from_edfmc_database(self.state, self.edfmc_db, fid, now)
             imports['edfmc'] = (f'Imported {added} site{"s" if added != 1 else ""} from EDFMC\'s old Logistics page, {now[:10]}.'
                                 if added else '')
-        files = migrate.tracker_files(self.plugin_dir)
-        self.ui['trackerFile'] = files[0] if files else None
-        if 'edmcTracker' not in imports and files:
-            self._import_tracker(files[0], automatic=True)
-
-    def _import_tracker(self, path: str, automatic: bool) -> None:
-        try:
-            result = migrate.from_edmc_tracker(self.state, path, _now_iso())
-        except (OSError, ValueError) as e:
-            self.ui['message'] = f'Could not read the Construction Tracker data: {e}'
-            self.ui['messageTone'] = 'bad'
-            return
-        note = (f"From the EDMC Construction Tracker: {result['sites']} site(s) added"
-                + (f", {result['carrier']} carrier count(s)" if result['carrier'] else '')
-                + (f"; {result['skipped']} carrier item(s) skipped as not construction materials" if result['skipped'] else '')
-                + f" ({_now_iso()[:10]}). Its own file was not changed.")
-        self.state['imports']['edmcTracker'] = note
-        if not automatic:
-            self.ui['message'] = note
-            self.ui['messageTone'] = 'ok'
 
     # -- journal -------------------------------------------------------------
 
@@ -221,8 +201,6 @@ class Controller:
                 s['sites'][market_id] = tracker._new_site(market_id, _now_iso())
                 s['selectedSite'] = market_id
                 self.ui['message'] = 'Site added. Its materials load the next time you dock there.'
-        elif name == 'importTracker' and self.ui.get('trackerFile'):
-            self._import_tracker(self.ui['trackerFile'], automatic=False)
         elif name == 'source':
             self._source()
             return

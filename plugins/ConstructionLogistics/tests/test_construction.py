@@ -370,41 +370,6 @@ class Migration(Base):
         again.start(GAME_A)
         self.assertEqual(again.state['sites'], {})
 
-    def test_imports_the_edmc_tracker_but_not_its_odyssey_goods(self):
-        folder = os.path.join(self.plugins, 'ConstructionTracker')
-        os.makedirs(folder)
-        data = {
-            'hide_completed_materials': True, 'selected_site_id': SITE,
-            'construction_sites': {str(SITE): {
-                'display_name': 'Scholz Landing', 'market_id': SITE, 'progress': 0.58997, 'complete': False,
-                'failed': False, 'station': 'Planetary Construction Site: Scholz Landing',
-                'system': 'Wregoe KO-G c24-7', 'site_type': 'Planetary Construction Site', 'site_name': 'Scholz Landing',
-                'materials': [{'name': 'Aluminium', 'name_key': 'aluminium', 'required': 7047, 'provided': 3708,
-                               'carrier': 0, 'ship': 0, 'completion': 3339}]}},
-            'carrier_cargo': {'weaponschematic': 120, 'atmosphericdata': 12, 'aluminium': 500},
-            'carrier_total_capacity': 25000, 'carrier_free_space': 4907,
-        }
-        path = os.path.join(folder, 'construction_tracker_data.json')
-        with open(path, 'w') as f:
-            json.dump(data, f)
-        original = open(path).read()
-
-        c = self.controller()
-        c.start(GAME_A)
-        site = c.state['sites'][str(SITE)]
-        self.assertEqual(site['name'], {'value': 'Scholz Landing', 'source': 'imported'})
-        self.assertEqual(c.state['selectedSite'], str(SITE))
-        self.assertEqual(c.state['carrier']['cargo'], {'aluminium': {'amount': 500, 'source': 'imported',
-                                                                     'updatedAt': c.state['carrier']['cargo']['aluminium']['updatedAt']}})
-        self.assertEqual((c.state['carrier']['capacity'], c.state['carrier']['freeSpace']), (25000, 4907))
-        self.assertIn('2 carrier item(s) skipped', c.state['imports']['edmcTracker'])
-        self.assertTrue(c.state['prefs']['hideCompleted'])
-        self.assertEqual(open(path).read(), original)
-        # A journal report replaces the imported materials.
-        self.feed(c, depot('2026-10-09T18:00:00Z'))
-        self.assertEqual(c.state['sites'][str(SITE)]['source'], 'journal')
-        self.assertEqual(c.state['sites'][str(SITE)]['name']['source'], 'imported')
-
 
 class Page(Base):
     def test_page_is_plain_ui_v1_json_with_every_section(self):

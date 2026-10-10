@@ -58,14 +58,8 @@ Saved per commander. In EDFM Companion it is in
 `Documents\EDFMC\plugin-data\ConstructionLogistics`, outside the plugin folder,
 so updating the plugin keeps it. In EDMC it is in the plugin's `data` folder.
 
-The first time it runs for a commander it imports, read-only and once:
-
-- the sites from EDFM Companion's old Logistics page, and
-- the sites and carrier capacity from the EDMC Construction Tracker plugin, if
-  you used it. Its carrier list also holds the carrier bar's Odyssey goods,
-  which are not construction materials; those are skipped.
-
-Neither source is changed. There is also a button to import again.
+The first time it runs for a commander it imports, read-only and once, the
+sites from EDFM Companion's old Logistics page. That table is not changed.
 
 ## Network
 

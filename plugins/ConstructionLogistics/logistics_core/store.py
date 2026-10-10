@@ -9,8 +9,8 @@ Every value says where it came from, because they are not equally certain:
 - **journal**: confirmed by the game (a depot snapshot, a contribution, a dock,
   CarrierStats). Only these change what a site has been given.
 - **user**: typed by the commander (a site name, a priority, a carrier count).
-- **imported**: brought in from EDFMC's old Logistics page or the EDMC
-  Construction Tracker, and shown as such until the journal says otherwise.
+- **imported**: brought in from EDFMC's old Logistics page, and shown as such
+  until the journal says otherwise.
 - **estimated**: carrier cargo kept up to date from CargoTransfer changes. The
   journal never lists a carrier's whole hold, so this is a running estimate.
 
