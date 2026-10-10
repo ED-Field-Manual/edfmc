@@ -5,3 +5,4 @@ export * from './missions.js';
 export * from './engine.js';
 export * from './live.js';
 export * from './species.js';
+export * from './mining.js';

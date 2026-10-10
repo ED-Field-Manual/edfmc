@@ -1262,3 +1262,12 @@ label.field select:focus-visible {
 .activity-focus { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .cargo-list { list-style: none; margin: 0; padding: 0; max-width: 28rem; }
 .cargo-list li { display: flex; justify-content: space-between; padding: 0.1875rem 0; border-bottom: 1px solid var(--line); }
+
+/* Journal: the Mining filter's total. */
+.mining-total { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mining-totals {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 0.125rem 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); font-size: 0.875rem;
+}
+.mining-totals li { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--surface-3); padding: 0.125rem 0; }
+.mining-totals li span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }

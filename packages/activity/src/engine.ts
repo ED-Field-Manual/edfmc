@@ -25,6 +25,7 @@ import {
   exobiologyEntries,
 } from './exobiology.js';
 import { missionEntries } from './missions.js';
+import { MiningRuns } from './mining.js';
 import type { ActivityContext, ActivityEntry } from './types.js';
 
 /** A system has a few dozen bodies; this is slack, not a target. */
@@ -60,6 +61,8 @@ export class ActivityEngine {
   private signalBodies = new Set<string>();
   private systemName: string | null = null;
   private systemAddress: number | null = null;
+  /** Mining runs span many events, and survive a jump (the jump ends them). */
+  private mining = new MiningRuns();
 
   constructor(options: ActivityEngineOptions) {
     this.commanderFid = options.commanderFid;
@@ -87,6 +90,7 @@ export class ActivityEngine {
     if (fid === this.commanderFid) return;
     this.commanderFid = fid;
     this.reset();
+    this.mining.reset();
   }
 
   private reset(): void {
@@ -112,6 +116,17 @@ export class ActivityEngine {
     const raw = event.source.raw as Record<string, unknown>;
     const name = event.source.event;
 
+    // Before the location moves on: a jump ends a run in the system it was mined in.
+    const mined =
+      this.commanderFid === null
+        ? []
+        : this.mining.observe(event, {
+            commanderFid: this.commanderFid,
+            bodyNames: this.bodyNames,
+            systemName: this.systemName,
+            systemAddress: this.systemAddress,
+          });
+
     this.trackLocation(name, raw);
     this.trackBodies(name, raw);
 
@@ -134,7 +149,7 @@ export class ActivityEngine {
       return true;
     });
 
-    return [...exobiologyEntries(event, ctx), ...signals, ...missionEntries(event, ctx)];
+    return [...exobiologyEntries(event, ctx), ...signals, ...missionEntries(event, ctx), ...mined];
   }
 
   private trackLocation(name: string, raw: Record<string, unknown>): void {

@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-import { linksFor, type ActivityCategory, type ActivityGroup } from '@edfm/activity';
+import { linksFor, miningTotals, type ActivityCategory, type ActivityGroup } from '@edfm/activity';
 
 import type { CompanionSnapshot } from './lib/companion.js';
 
@@ -90,6 +90,12 @@ export function Journal({ snap, focusId }: { snap: CompanionSnapshot; focusId?: 
 
   const total = groups.reduce((n, g) => n + g.entries.length, 0);
 
+  // Everything refined across the mining runs listed: the Mining filter's total.
+  const mined = useMemo(
+    () => (filter === 'Mining' ? miningTotals(groups.flatMap((g) => g.entries)) : null),
+    [groups, filter],
+  );
+
   return (
     <>
       <section className="card">
@@ -156,6 +162,24 @@ export function Journal({ snap, focusId }: { snap: CompanionSnapshot; focusId?: 
           rebuilding.
         </p>
       </section>
+
+      {mined && mined.total > 0 && (
+        <section className="card">
+          <h2>Refined in total</h2>
+          <p className="mining-total">{mined.total.toLocaleString('en-GB')} t</p>
+          <ul className="mining-totals">
+            {mined.refined.map((r) => (
+              <li key={r.label}>
+                <span>{r.label}</span>
+                <span>{r.tonnes.toLocaleString('en-GB')} t</span>
+              </li>
+            ))}
+          </ul>
+          <p className="field-hint">
+            Across the mining runs below. Each tonne is one refinery result the game recorded.
+          </p>
+        </section>
+      )}
 
       {total === 0 ? (
         <section className="card">

@@ -51,6 +51,7 @@ stage-by-stage list it exists not to be.
 | `sample-completed` | 68 | `ScanOrganic` with `ScanType: Analyse` |
 | `data-sold` | 5 | `SellOrganicData` |
 | `mission-completed` | not yet measured | `MissionCompleted` |
+| `mining-run` | 18 (2026-10-10, 324 files) | `MiningRefined`, added up per run |
 
 The counts above are from the 299-file snapshot named at the top of this document.
 The sequence measurements below were taken later, against 303 files and 323
@@ -64,6 +65,20 @@ signals detected" entries from repeat visits (found 2026-10-10). The engine now
 keeps the bodies a commander already has an entry for (`signalBodyKey`: system
 address and body id, loaded from stored entries at startup) and skips revisits.
 Entries recorded before this change are left as they are.
+
+**`mining-run` is one entry per run, not per tonne.** `MiningRefined` is written
+for every tonne the refinery produces and carries only `Type` and
+`Type_Localised` (1,974 in the corpus); one run there refined 248 t. A run starts
+at its first refine and is recorded when the commander moves on --
+`SupercruiseEntry`, `FSDJump`, `Docked`, `Died`, or the session ending
+(`Shutdown`, a new `LoadGame` or `Fileheader`). Measured: 18 runs, ended by
+SupercruiseEntry 12 times, FSDJump 5, Shutdown 1. The entry says what was
+refined and the total ("Refined 208 t" -- Bromellite 147 t · Tritium 42 t · …);
+its place is the ring (or planet) of the last `SupercruiseExit`, and the system
+it was mined in even when a jump ends it. Its id is the first refine's event id,
+so a re-read stores it once. The Journal's Mining filter adds every listed run up
+by material. Runs mined before this existed appear after **Rebuild from journal
+files**. `packages/activity/src/mining.ts`.
 
 `Log` and `Sample` scans produce nothing. They are progress toward one specimen,
 and an entry each would bury the completion in its own noise. Live progress is
