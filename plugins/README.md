@@ -12,6 +12,7 @@ application.
 | Plugin | Kind | Runs in |
 |---|---|---|
 | [Router](Router) | Python (`load.py`) | EDFM Companion and EDMC |
+| [Construction Logistics](ConstructionLogistics) | Python (`load.py`) | EDFM Companion and EDMC |
 
 ## Installing one
 

@@ -240,6 +240,96 @@ class NativePageTest(unittest.TestCase):
             edfmc.register_page(lambda n, a: None)
 
 
+class PluginApiV2Test(unittest.TestCase):
+    """Overlay panels and the data folder (edfmc API version 2)."""
+
+    def _load(self, name: str, source: str):
+        path = os.path.join(config.plugin_dir_path, name)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, 'load.py'), 'w', encoding='utf-8') as f:
+            f.write(textwrap.dedent(source))
+        plugin = host.Plugin(name, path)
+        host.load(plugin)
+        return plugin
+
+    def test_register_overlay_announces_itself_and_sends_updates(self) -> None:
+        import host_bridge
+        sent = []
+        host_bridge.set_overlay_handler(lambda folder, title, content: sent.append((folder, title, content)))
+        plugin = self._load('Panel', '''
+            import edfmc
+            def plugin_start3(plugin_dir):
+                global panel
+                panel = edfmc.register_overlay('My panel')
+                return 'Panel'
+        ''')
+        self.assertIsNone(plugin.error)
+        # Registered empty at once, so the app can list its switch.
+        self.assertEqual(sent, [('Panel', 'My panel', None)])
+        plugin.module.panel.update({'blocks': [{'type': 'text', 'text': 'hi'}]})
+        self.assertEqual(sent[-1], ('Panel', 'My panel', {'blocks': [{'type': 'text', 'text': 'hi'}]}))
+        with self.assertRaises(TypeError):
+            plugin.module.panel.update({'x': object()})
+
+    def test_data_dir_is_beside_the_plugins_folder_not_inside_it(self) -> None:
+        plugin = self._load('Keeper', '''
+            import edfmc
+            def plugin_start3(plugin_dir):
+                global where
+                where = edfmc.data_dir()
+                return 'Keeper'
+        ''')
+        expected = os.path.join(os.path.dirname(os.path.abspath(config.plugin_dir_path)), 'plugin-data', 'Keeper')
+        self.assertEqual(plugin.module.where, expected)
+        self.assertTrue(os.path.isdir(expected))
+        self.assertFalse(plugin.module.where.startswith(plugin.path))
+
+    def test_outside_start_both_are_refused(self) -> None:
+        import edfmc
+        with self.assertRaises(RuntimeError):
+            edfmc.register_overlay('x')
+        with self.assertRaises(RuntimeError):
+            edfmc.data_dir()
+
+
+class ConstructionLogisticsInHostTest(unittest.TestCase):
+    """The real Construction Logistics plugin, loaded and fed the way the host does it."""
+
+    def test_loads_native_and_shows_a_site_from_a_journal_line(self) -> None:
+        import shutil
+        import host_bridge
+        src = os.path.join(ROOT, '..', '..', '..', '..', 'plugins', 'ConstructionLogistics')
+        dest = os.path.join(config.plugin_dir_path, 'ConstructionLogistics')
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__', 'tests'), dirs_exist_ok=True)
+        pages, panels = [], []
+        host_bridge.set_page_handler(lambda folder, state: pages.append((folder, state)))
+        host_bridge.set_overlay_handler(lambda folder, title, content: panels.append((folder, title, content)))
+        old = os.environ.get('LOCALAPPDATA')
+        os.environ['LOCALAPPDATA'] = _TMP  # never this machine's EDMC folder
+        try:
+            plugin = host.Plugin('ConstructionLogistics', dest)
+            host.load(plugin)
+        finally:
+            if old is not None:
+                os.environ['LOCALAPPDATA'] = old
+        self.assertIsNone(plugin.error)
+        self.assertTrue(plugin.native)
+        self.assertEqual(pages[-1][1]['kind'], 'ui-v1')
+
+        depot = {'timestamp': '2026-10-09T18:00:05Z', 'event': 'ColonisationConstructionDepot', 'MarketID': 4387351555,
+                 'ConstructionProgress': 0.5, 'ConstructionComplete': False, 'ConstructionFailed': False,
+                 'ResourcesRequired': [{'Name': '$Steel_name;', 'Name_Localised': 'Steel', 'RequiredAmount': 100,
+                                        'ProvidedAmount': 40, 'Payment': 5000}]}
+        monitor.fold({'event': 'Commander', 'FID': 'F0000001', 'Name': 'Alpha'})
+        plugin.call('journal_entry', 'Alpha', False, 'Wregoe KO-G c24-7', None, depot, monitor.snapshot())
+        self.assertIn('Steel', json.dumps(pages[-1][1]))
+        self.assertEqual(panels[-1][1], 'Construction')
+        self.assertIn('Hauling', json.dumps(panels[-1][2]))
+        data = os.path.join(os.path.dirname(os.path.abspath(config.plugin_dir_path)), 'plugin-data',
+                            'ConstructionLogistics', 'cmdr-F0000001.json')
+        self.assertTrue(os.path.isfile(data))
+
+
 class TailTest(unittest.TestCase):
     def test_primes_without_delivering_then_delivers_new_lines(self) -> None:
         jdir = os.path.join(_TMP, 'tail')
