@@ -64,6 +64,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "resources": {
       "plugin-host/host.py": "plugin-host/host.py",
       "plugin-host/compat/": "plugin-host/compat/",
