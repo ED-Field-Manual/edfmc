@@ -55,12 +55,47 @@ All of it is in `apps/desktop/src-tauri/src/frontier.rs`.
 | Token request fields; no client secret with PKCE | EDMC `companion.py` |
 | Refresh tokens rotate and can expire | Frontier's OAuth guide |
 
+## How this compares with EDMarketConnector
+
+The login follows EDMC's current implementation (`companion.py` and `protocol.py`
+on EDCD/EDMarketConnector `main`, reviewed 2026-10-10), which is the proven
+approach for a desktop client.
+
+| | EDMC | EDFM Companion |
+|---|---|---|
+| Authorization URL | `/auth?response_type=code&audience=frontier,steam,epic&scope=auth%20capi&client_id=…&code_challenge=…&code_challenge_method=S256&state=…&redirect_uri=…` | Identical, character for character (a test asserts it) |
+| Verifier, state | 32 random bytes each, base64url without padding | Same |
+| Challenge | base64url of the binary SHA-256 | Same |
+| Code exchange | form POST to `/token`: `grant_type, client_id, code_verifier, code, redirect_uri`; no secret; 30 s timeout | Same |
+| Refresh | form POST `grant_type=refresh_token, client_id, refresh_token`; the new refresh token replaces the old | Same |
+| What is stored | Only the refresh token (EDMC's config file); access token in memory | Only the refresh token (Windows Credential Manager); access token in memory |
+| Redirect | `localhost` listener, OS-chosen port, `http://localhost:<port>/auth` (Linux, or when forced on Windows); Windows default is its own `edmc://` scheme | The localhost listener only, on IPv4 and IPv6. No custom scheme |
+| Callback check | path starts with `/auth`; `state` compared | Exact configured path; `state` compared in constant time; 5-minute timeout and Cancel |
+
+Deliberate differences, left for after the login works:
+
+- **EDMC keeps one refresh token per commander** and, after login, calls `/decode` to check that the Frontier account's `customer_id` matches the game's FID.
+- **EDFM Companion keeps one login** and doesn't call `/decode`.
+
+Both depend on CAPI use and per-commander handling, which are out of scope until Frontier authentication is operational.
+
+## The redirect URI: HTTPS at registration
+
+**Frontier's developer portal currently requires redirect URIs to be HTTPS when they are registered.**
+
+This login receives the redirect on a plain-HTTP localhost listener, as EDMC's localhost handler does. That EDMC's client works with `http://localhost` **does not mean ours is approved for it**: EDMC's registration is its own. Until Frontier confirms the redirect URI for our client, the localhost callback is untested and may not be accepted.
+
+What is not done, on purpose:
+
+- **No website callback.** There is no HTTPS page on edfieldmanual.com that forwards the code back to the app.
+- **No other workaround.** There is no custom scheme and no local HTTPS server with a self-signed certificate.
+
+An `https://` redirect URI in the build is refused with a clear message ("not an http://localhost address"), not half-supported. If Frontier will only accept an HTTPS redirect for our client, the way the app receives the login has to be decided then, with Frontier's answer in hand.
+
 ## What stays untested until approval
 
 - **The real login.** Every test uses mocked responses and a local stand-in for the token endpoint. No live authentication has been done.
-- **Redirect URI acceptance.** Frontier documents no redirect rules.
-  - EDMC uses `http://localhost:<any free port>/auth` on Linux, so loopback works for EDMC's registration. Whether it works for ours, and whether the port must be fixed, needs confirming.
-  - Custom schemes (EDMC's `edmc://` on Windows) are **not supported**: they would need OS protocol registration, which is not built.
+- **Redirect URI acceptance.** See the HTTPS section above. Frontier has to confirm that our client may use `http://localhost`, and whether the port may vary (EDMC's handler uses a free port each time) or must be fixed.
 - **`expires_in`.** It's standard OAuth but not in Frontier's guide. If Frontier doesn't send it, the access token is used until refused, and refresh-on-401 arrives with the first CAPI request.
 - **Token sizes.** The refresh token must fit in a Credential Manager entry. Its size is unconfirmed until a real one exists.
 - **The `epic` audience** is taken from EDMC, not from Frontier's documentation.
@@ -68,7 +103,10 @@ All of it is in `apps/desktop/src-tauri/src/frontier.rs`.
 ## What you need to provide once approved
 
 1. **Client ID:** the GUID Frontier issues for the EDFM Companion client. **Not** the Shared Key; that must never go into the app.
-2. **Redirect URI:** exactly as registered with Frontier. It must be an `http://localhost` or `http://127.0.0.1` address, for example `http://localhost:47731/auth`. A URI without a port means "any free port", EDMC-style, but only if Frontier accepts that.
+2. **Redirect URI:** exactly as Frontier confirms it for our client.
+   - It must be an `http://localhost` or `http://127.0.0.1` address, for example `http://localhost/auth` or `http://localhost:47731/auth`.
+   - A URI without a port means "any free port", as EDMC's handler does it. Use that only if Frontier confirms a varying port is accepted; otherwise use the fixed port Frontier registered.
+   - If Frontier only allows an `https://` URI, send it anyway: the app will refuse it, and that decision comes next (see the HTTPS section).
 
 Use the EDFM Companion client's values, not the EDFM website's Frontier credentials.
 

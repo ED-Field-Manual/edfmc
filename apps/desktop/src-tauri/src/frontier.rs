@@ -27,12 +27,17 @@
 //!
 //! ## Not verifiable before approval (isolated, see the docs)
 //!
-//! - **Redirect URI rules.** Frontier documents none. EDMC on Linux uses
-//!   `http://localhost:<ephemeral port>/auth`, which works for its registration;
-//!   whether a new registration accepts a loopback URI, and with which port
-//!   rules, is Frontier's to confirm. Only loopback `http://localhost` /
-//!   `http://127.0.0.1` URIs are supported here. A custom scheme (`edmc://`
-//!   style) would need OS protocol registration, which is not built.
+//! - **Redirect URI.** This follows EDMC's localhost handler (`protocol.py`,
+//!   `LinuxProtocolHandler`): a listener on `localhost`, port chosen by the OS,
+//!   redirect `http://localhost:<port>/auth`. EDMC uses it on Linux and when
+//!   forced on Windows; its default on Windows is its registered `edmc://`
+//!   scheme. That EDMC's client accepts a localhost redirect says nothing about
+//!   ours: **Frontier's developer portal currently requires HTTPS redirect URIs
+//!   at registration**, and this listener speaks plain HTTP. Whether Frontier
+//!   will register or accept `http://localhost` for our client is Frontier's to
+//!   confirm. Only loopback `http://localhost` / `http://127.0.0.1` URIs are
+//!   supported; an `https://` or custom-scheme URI is refused with a clear
+//!   message rather than worked around.
 //! - **`expires_in`.** Standard OAuth, but not in Frontier's guide. When it is
 //!   absent the access token is used until a CAPI call is refused.
 //!
@@ -130,6 +135,9 @@ pub fn parse_config(client_id: Option<&str>, redirect_uri: Option<&str>) -> Resu
     if url.query().is_some() || url.fragment().is_some() || !url.username().is_empty() {
         return Err(NotReady::UnsupportedRedirect);
     }
+    if !url.path().chars().all(|c| c.is_ascii_alphanumeric() || "/-_.".contains(c)) {
+        return Err(NotReady::UnsupportedRedirect);
+    }
     Ok(Config {
         client_id: client_id.to_string(),
         redirect: Redirect { host, port: url.port(), path: url.path().to_string() },
@@ -164,19 +172,21 @@ pub fn new_pkce() -> Result<Pkce, Failure> {
     Ok(Pkce { verifier, challenge })
 }
 
+/// The authorization URL, character for character as EDMarketConnector builds
+/// it (`companion.py`, `Auth.refresh`): `scope=auth%20capi`, the audience's
+/// commas and the redirect URI unencoded. Equivalent encodings should work,
+/// but this is the form Frontier is known to accept, and nothing here can be
+/// tried against Frontier before approval.
+///
+/// Safe to assemble by hand because every value is restricted to URL-safe
+/// characters before it gets here: the Client ID is a GUID and the redirect a
+/// validated loopback URI (`parse_config`), the challenge and state base64url.
 pub fn authorize_url(server: &str, client_id: &str, redirect_uri: &str, challenge: &str, state: &str) -> String {
-    let mut url = url::Url::parse(server).expect("constant server URL");
-    url.set_path(AUTH_PATH);
-    url.query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair("audience", AUDIENCE)
-        .append_pair("scope", SCOPE)
-        .append_pair("client_id", client_id)
-        .append_pair("code_challenge", challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("state", state)
-        .append_pair("redirect_uri", redirect_uri);
-    url.into()
+    format!(
+        "{server}{AUTH_PATH}?response_type=code&audience={AUDIENCE}&scope={}&client_id={client_id}\
+         &code_challenge={challenge}&code_challenge_method=S256&state={state}&redirect_uri={redirect_uri}",
+        SCOPE.replace(' ', "%20"),
+    )
 }
 
 // ---------------------------------------------------------------- outcomes
@@ -610,7 +620,7 @@ fn not_ready_reason(n: &NotReady) -> &'static str {
     match n {
         NotReady::AwaitingApproval => "Awaiting Frontier API Approval",
         NotReady::BadClientId => "The Frontier Client ID in this build is not valid.",
-        NotReady::UnsupportedRedirect => "The Frontier redirect URI in this build is not a supported http://localhost address.",
+        NotReady::UnsupportedRedirect => "The Frontier redirect URI in this build is not an http://localhost address, which is all this login can receive.",
     }
 }
 
@@ -677,7 +687,8 @@ mod tests {
         let ok = parse_config(id, Some("http://localhost:52341/auth")).unwrap();
         assert_eq!(ok.redirect, Redirect { host: "localhost".into(), port: Some(52341), path: "/auth".into() });
         assert_eq!(parse_config(id, Some("http://127.0.0.1/cb")).unwrap().redirect.port, None);
-        for bad in ["edfmc://auth", "https://localhost/auth", "http://example.com/auth", "http://localhost/auth?x=1", "nonsense"] {
+        for bad in ["edfmc://auth", "https://localhost/auth", "http://example.com/auth", "http://localhost/auth?x=1",
+                    "http://localhost/a&b=c", "http://localhost/a%20b", "nonsense"] {
             assert_eq!(parse_config(id, Some(bad)), Err(NotReady::UnsupportedRedirect), "{bad}");
         }
         assert_eq!(parse_config(Some("not a guid!"), Some("http://localhost/auth")), Err(NotReady::BadClientId));
@@ -700,6 +711,16 @@ mod tests {
         assert_eq!(a.verifier.len(), 43);
         assert!(a.verifier.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_ne!(random_token().unwrap(), random_token().unwrap());
+    }
+
+    #[test]
+    fn authorization_url_is_built_exactly_as_edmc_builds_it() {
+        assert_eq!(
+            authorize_url(AUTH_SERVER, "0a1b-2c", "http://localhost:5000/auth", "CHAL", "STATE"),
+            "https://auth.frontierstore.net/auth?response_type=code&audience=frontier,steam,epic&scope=auth%20capi\
+             &client_id=0a1b-2c&code_challenge=CHAL&code_challenge_method=S256&state=STATE\
+             &redirect_uri=http://localhost:5000/auth"
+        );
     }
 
     #[test]
