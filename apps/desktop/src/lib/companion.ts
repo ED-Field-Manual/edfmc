@@ -206,6 +206,7 @@ import {
   type OverlayCarrierJump,
   type OverlayMissionRow,
   type OverlayMissions,
+  type OverlayPluginPanel,
   type OverlayWidgets,
 } from './overlay.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
@@ -4804,6 +4805,7 @@ export class Companion {
         liveJournal: this.projectLiveJournal(),
         liveActivity: this.projectLiveActivity(),
         pluginRoute: this.pythonPlugins.view().route,
+        pluginPanels: this.overlayPluginPanels(),
         context: top
           ? {
               title: top.title,
@@ -4821,6 +4823,21 @@ export class Companion {
           : null,
       })
       .catch(() => undefined); // overlay may not be open; not an error
+  }
+
+  /**
+   * Plugin overlay panels for the overlay: only plugins that are running, not
+   * switched off, switched on here, and currently have something to show.
+   */
+  private overlayPluginPanels(): OverlayPluginPanel[] {
+    const view = this.pythonPlugins.view();
+    const off = new Set(this.widgets.pluginPanelsOff ?? []);
+    return Object.entries(view.overlays)
+      .filter(([folder, panel]) => {
+        const plugin = view.plugins.find((p) => p.folder === folder);
+        return plugin !== undefined && plugin.loaded && !plugin.disabled && !off.has(folder) && panel.blocks !== null;
+      })
+      .map(([folder, panel]) => ({ id: `plugin:${folder}`, title: panel.title, blocks: panel.blocks ?? [] }));
   }
 
   /** Widgets the overlay should draw. Persisted, and pushed on every update. */

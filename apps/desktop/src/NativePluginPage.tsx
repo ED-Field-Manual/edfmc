@@ -17,6 +17,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { HotkeyField } from './HotkeyField';
 import { companion, type CompanionSnapshot } from './lib/companion';
 import type { PythonPluginStatus } from './lib/pythonPlugins';
+import { readUiPage } from './lib/pluginUi';
+import { PluginBlocks } from './PluginUi';
 
 type State = Readonly<Record<string, unknown>>;
 
@@ -40,6 +42,9 @@ export function NativePluginPage({ snap, plugin }: { snap: CompanionSnapshot; pl
         <section className="card">
           <p className="muted">Waiting for the plugin…</p>
         </section>
+      ) : state['kind'] === 'ui-v1' ? (
+        // Any plugin's page, described as data. Nothing here knows what it is about.
+        <PluginBlocks blocks={readUiPage(state)?.blocks ?? []} act={act} />
       ) : state['kind'] === 'router-v1' ? (
         <>
           <section className="card router-card">

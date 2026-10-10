@@ -43,3 +43,17 @@ def set_page_handler(handler: Callable[[str, Any], None]) -> None:
 
 def page_update(folder: str, state: Any) -> None:
     _page_update(folder, state)
+
+
+# --- overlay panels ----------------------------------------------------------
+
+_overlay_update: Callable[[str, str, Any], None] = lambda folder, title, content: None
+
+
+def set_overlay_handler(handler: Callable[[str, str, Any], None]) -> None:
+    global _overlay_update
+    _overlay_update = handler
+
+
+def overlay_update(folder: str, title: str, content: Any) -> None:
+    _overlay_update(folder, title, content)

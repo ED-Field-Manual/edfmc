@@ -12,17 +12,28 @@ app understands:
   `totalJumps`, `waypoint`, `waypoints`, `finished`; or `None` to clear it.
 
 Anything else is ignored. Nothing published leaves the machine.
+
+API version 2 adds three things any plugin can use (docs/PYTHON-PLUGINS.md):
+
+- `data_dir()`: a folder for the plugin's own data, outside its plugin folder,
+  so updating the plugin does not wipe it.
+- page kind `ui-v1`: describe a page as headings, stats, tables and controls,
+  and the app draws it in its own theme. No page needs app code of its own.
+- `register_overlay(title)`: one panel in the game overlay, made of the same
+  blocks, display only, with its own on/off switch on the Overlay page.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
+import config as _config
 import host_bridge
 
-#: Bumped if the shape of a topic changes.
-API_VERSION = 1
+#: Bumped when something is added or a topic's shape changes.
+API_VERSION = 2
 
 
 def publish(topic: str, data: Any) -> None:
@@ -62,3 +73,56 @@ def register_page(on_action: Any) -> Page:
         raise TypeError('on_action must be callable')
     host_bridge.pages[folder] = on_action
     return Page(folder)
+
+
+# --- data folder ----------------------------------------------------------------
+
+
+def data_dir() -> str:
+    """
+    A folder for this plugin's own data, created if needed.
+
+    Beside the plugins folder rather than inside the plugin's: replacing a
+    plugin's folder to update it must not take its data with it. Call it from
+    `plugin_start3`, which is how the host knows whose folder it is.
+    """
+    folder = host_bridge.loading
+    if folder is None:
+        raise RuntimeError('data_dir must be called from plugin_start3')
+    root = os.path.join(os.path.dirname(os.path.abspath(_config.config.plugin_dir_path)), 'plugin-data')
+    path = os.path.join(root, folder)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# --- overlay panels ---------------------------------------------------------------
+#
+#     panel = edfmc.register_overlay('Construction')   # in plugin_start3
+#     panel.update({'blocks': [...]})                  # ui-v1 blocks, display only
+#     panel.update(None)                               # nothing to show right now
+#
+# The app draws the panel in the game overlay with its own frame, position,
+# transparency and on/off switch. A plugin that is switched off never runs, so
+# never has a panel.
+
+
+class OverlayPanel:
+    def __init__(self, folder: str, title: str) -> None:
+        self.folder = folder
+        self.title = title
+
+    def update(self, content: Any) -> None:
+        json.dumps(content)  # must be plain JSON; raises otherwise
+        host_bridge.overlay_update(self.folder, self.title, content)
+
+
+def register_overlay(title: str) -> OverlayPanel:
+    folder = host_bridge.loading
+    if folder is None:
+        raise RuntimeError('register_overlay must be called from plugin_start3')
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError('title must be a non-empty string')
+    panel = OverlayPanel(folder, title.strip()[:60])
+    # Registered at once, empty, so its switch appears on the Overlay page.
+    panel.update(None)
+    return panel

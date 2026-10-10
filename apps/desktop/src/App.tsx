@@ -924,6 +924,33 @@ function OverlayPanel() {
               </span>
             </span>
           </label>
+
+          {/* One switch per running plugin that offers an overlay panel. A
+              switched-off plugin registers none, so it is not listed. */}
+          {Object.entries(snap.pythonPlugins.overlays)
+            .filter(([folder]) => snap.pythonPlugins.plugins.some((p) => p.folder === folder && p.loaded && !p.disabled))
+            .map(([folder, panel]) => {
+            const off = widgets.pluginPanelsOff ?? [];
+            return (
+              <label className="check" key={folder}>
+                <input
+                  type="checkbox"
+                  checked={!off.includes(folder)}
+                  onChange={(e) =>
+                    void companion.setOverlayWidgets({
+                      ...widgets,
+                      pluginPanelsOff: e.target.checked
+                        ? off.filter((f) => f !== folder)
+                        : [...off.filter((f) => f !== folder), folder],
+                    })
+                  }
+                />
+                <span>
+                  {panel.title} <span className="muted-inline">— from the {folder} plugin</span>
+                </span>
+              </label>
+            );
+          })}
         </div>
         <p className="muted">
           The Missions widget shows the five soonest to expire. The full list, with

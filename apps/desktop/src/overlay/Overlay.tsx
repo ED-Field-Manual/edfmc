@@ -11,6 +11,8 @@ import {
   type OverlayLiveExobiology,
 } from '../lib/overlay';
 
+import type { UiBlock } from '../lib/pluginUi';
+import { PluginBlocks } from '../PluginUi';
 import './overlay.css';
 
 /**
@@ -72,6 +74,13 @@ interface OverlayWidgets {
   route?: boolean;
 }
 
+/** A plugin's panel, already checked by the main window (lib/pluginUi.ts). */
+interface PluginPanel {
+  id: string;
+  title: string;
+  blocks: readonly UiBlock[];
+}
+
 /** A route published by a plugin (Router). */
 interface PluginRoute {
   next: string | null;
@@ -118,6 +127,7 @@ interface OverlayState {
   liveJournal: LiveJournalState | null;
   liveActivity: OverlayLiveActivity | null;
   pluginRoute?: PluginRoute | null;
+  pluginPanels?: PluginPanel[];
   missions: OverlayMissions;
   widgets: OverlayWidgets;
 }
@@ -127,12 +137,15 @@ interface Point {
   y: number;
 }
 
-type WidgetId = 'context' | 'missions' | 'carrierJump' | 'liveJournal' | 'route';
+type BuiltInWidget = 'context' | 'missions' | 'carrierJump' | 'liveJournal' | 'route';
+/** Built-in widgets, plus `plugin:<folder>` for each plugin's panel. */
+type WidgetId = BuiltInWidget | `plugin:${string}`;
+type Layout = Record<BuiltInWidget, Point> & Record<string, Point>;
 
 const STORAGE_KEY = 'edfm.overlay.layout.v2';
 
 /** Sensible starting corners, so two widgets never open stacked on each other. */
-const DEFAULT_LAYOUT: Record<WidgetId, Point> = {
+const DEFAULT_LAYOUT: Record<BuiltInWidget, Point> = {
   context: { x: 32, y: 32 },
   missions: { x: 32, y: 260 },
   carrierJump: { x: 32, y: 520 },
@@ -346,12 +359,23 @@ function LiveJournalWidget({ journal }: { journal: LiveJournalState }) {
   );
 }
 
-function loadLayout(): Record<WidgetId, Point> {
+/** Where a plugin panel opens before it has been moved: a column to the right. */
+function pluginDefault(index: number): Point {
+  return { x: 690, y: 32 + index * 240 };
+}
+
+function loadLayout(): Layout {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Record<WidgetId, Point>>;
+      const parsed = JSON.parse(raw) as Partial<Record<string, Point>>;
+      const plugins: Record<string, Point> = {};
+      for (const [id, p] of Object.entries(parsed)) {
+        const point = valid(p);
+        if (id.startsWith('plugin:') && point) plugins[id] = point;
+      }
       return {
+        ...plugins,
         context: valid(parsed.context) ?? DEFAULT_LAYOUT.context,
         missions: valid(parsed.missions) ?? DEFAULT_LAYOUT.missions,
         carrierJump: valid(parsed.carrierJump) ?? DEFAULT_LAYOUT.carrierJump,
@@ -372,7 +396,7 @@ function valid(p: Point | undefined): Point | null {
 export default function Overlay() {
   const [state, setState] = useState<OverlayState | null>(null);
   const [editing, setEditing] = useState(false);
-  const [layout, setLayout] = useState<Record<WidgetId, Point>>(loadLayout);
+  const [layout, setLayout] = useState<Layout>(loadLayout);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -605,6 +629,22 @@ export default function Overlay() {
           <RouteWidget route={state.pluginRoute} />
         </Widget>
       )}
+
+      {/* Plugins' own panels. Display only: the overlay is click-through in play. */}
+      {(state?.pluginPanels ?? []).map((panel, i) => (
+        <Widget
+          key={panel.id}
+          id={panel.id as WidgetId}
+          title={panel.title}
+          pos={layout[panel.id] ?? pluginDefault(i)}
+          editing={editing}
+          onMove={move}
+        >
+          <div className="plugin-panel">
+            <PluginBlocks blocks={panel.blocks} compact />
+          </div>
+        </Widget>
+      ))}
     </div>
   );
 }

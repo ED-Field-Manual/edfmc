@@ -1262,3 +1262,69 @@ label.field select:focus-visible {
 .activity-focus { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .cargo-list { list-style: none; margin: 0; padding: 0; max-width: 28rem; }
 .cargo-list li { display: flex; justify-content: space-between; padding: 0.1875rem 0; border-bottom: 1px solid var(--line); }
+
+/* ------------------------------------------------------- plugin pages (ui-v1) */
+
+/*
+ * Plugin pages described as data (lib/pluginUi.ts). Compact by design: these
+ * are working pages -- tables of numbers -- not reading pages. Every status
+ * carries a mark or a word as well as a colour.
+ */
+.pui-section { padding: 0.75rem 0.875rem 0.875rem; }
+.pui-section > h2 { margin-bottom: 0.625rem; }
+.pui-heading { margin: 0.75rem 0 0.375rem; font-size: 0.875rem; font-weight: 600; }
+.pui-text { margin: 0.25rem 0; font-size: 0.875rem; max-width: 72ch; }
+.pui-text.tone-muted, .pui-note { color: var(--muted); }
+.tone-ok { color: var(--ok); }
+.tone-warn { color: var(--warn); }
+.tone-bad { color: var(--bad); }
+.tone-muted { color: var(--muted); }
+
+.pui-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem 1rem; margin: 0.25rem 0 0.5rem;
+}
+.pui-stat dt { font-size: 0.6875rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.pui-stat dd { margin: 0; font-size: 0.9375rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.pui-progress { margin: 0.375rem 0 0.625rem; }
+.pui-progress-head { display: flex; justify-content: space-between; font-size: 0.8125rem; margin-bottom: 0.25rem; }
+.pui-progress-head span:last-child { font-variant-numeric: tabular-nums; }
+.pui-bar { height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
+.pui-bar > div { height: 100%; background: var(--accent); }
+
+.pui-table-wrap { overflow-x: auto; margin: 0.25rem 0 0.5rem; }
+.pui-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.pui-table caption { text-align: left; color: var(--muted); font-size: 0.75rem; padding-bottom: 0.25rem; }
+.pui-table th {
+  text-align: left; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted); padding: 0 0.625rem 0.375rem 0; white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.pui-table td { padding: 0.3125rem 0.625rem 0.3125rem 0; border-bottom: 1px solid var(--surface-3); vertical-align: middle; }
+.pui-table tr:last-child td { border-bottom: none; }
+.pui-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pui-table th:last-child, .pui-table td:last-child { padding-right: 0; }
+.pui-table tr.tone-muted td { color: var(--muted); }
+.pui-mark { font-weight: 700; }
+.pui-cell-input {
+  width: 6.5rem; background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px;
+  color: var(--text); font: inherit; padding: 0.125rem 0.375rem; text-align: right;
+}
+.pui-cell-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.pui-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; margin: 0.5rem 0; }
+.pui-controls .primary, .pui-controls .secondary { padding: 0.375rem 0.75rem; }
+.pui-field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 9rem; }
+.pui-field > span:first-child { font-size: 0.6875rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.pui-field input, .pui-field select {
+  background: var(--surface-0); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text); padding: 0.375rem 0.5rem; font: inherit;
+}
+.pui-field input:focus-visible, .pui-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pui-number { display: flex; align-items: center; gap: 0.375rem; }
+.pui-number input { width: 7rem; }
+.pui-suffix { color: var(--muted); font-size: 0.8125rem; }
+.pui-toggle { padding-bottom: 0.375rem; }
+.pui-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
+.pui-danger { background: var(--bad); color: #1a0505; }

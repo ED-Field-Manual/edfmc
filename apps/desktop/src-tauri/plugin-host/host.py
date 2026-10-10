@@ -519,6 +519,9 @@ class Host:
             lambda topic, data: emit({'type': 'publish', 'topic': topic, 'data': data}))
         host_bridge.set_page_handler(
             lambda folder, state: emit({'type': 'page', 'folder': folder, 'state': state}))
+        host_bridge.set_overlay_handler(
+            lambda folder, title, content: emit({'type': 'overlay', 'folder': folder, 'title': title,
+                                                 'content': content}))
 
     def _status_all(self, message: str) -> None:
         for panel in self.panels.values():

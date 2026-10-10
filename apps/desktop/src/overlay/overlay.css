@@ -532,3 +532,32 @@ body,
 .rt-line, .rt-done { font-size: 0.85em; opacity: 0.85; }
 
 .rt-carrier { margin-top: 0.25rem; }
+
+/* ------------------------------------------- plugin panels (ui-v1, display only) */
+
+/* A plugin's overlay panel: same blocks as its page, sized for a HUD. */
+.plugin-panel { max-width: 26rem; }
+.plugin-panel .pui-heading { margin: 0.375rem 0 0.125rem; font-size: 0.8125rem; font-weight: 600; color: var(--accent); }
+.plugin-panel .pui-text { margin: 0.125rem 0; font-size: 0.8125rem; }
+.plugin-panel .tone-muted, .plugin-panel .pui-note { color: var(--text-dim); }
+.plugin-panel .tone-ok { color: #6fd38a; }
+.plugin-panel .tone-warn { color: #e8c44a; }
+.plugin-panel .tone-bad { color: #f0564c; }
+.plugin-panel .pui-stats { display: flex; flex-wrap: wrap; gap: 0.125rem 1rem; margin: 0.25rem 0; }
+.plugin-panel .pui-stat dt { font-size: 0.625rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.plugin-panel .pui-stat dd { margin: 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.plugin-panel .pui-progress { margin: 0.25rem 0 0.375rem; }
+.plugin-panel .pui-progress-head { display: flex; justify-content: space-between; font-size: 0.75rem; }
+.plugin-panel .pui-bar { height: 4px; background: var(--rule-line); border-radius: 2px; overflow: hidden; margin-top: 0.125rem; }
+.plugin-panel .pui-bar > div { height: 100%; background: var(--accent); }
+.plugin-panel .pui-table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
+.plugin-panel .pui-table th {
+  text-align: left; font-size: 0.625rem; font-weight: 600; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 0 0.5rem 0.125rem 0;
+}
+.plugin-panel .pui-table td { padding: 0.0625rem 0.5rem 0.0625rem 0; border-top: 1px solid var(--rule-line); }
+.plugin-panel .pui-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.plugin-panel .pui-table th:last-child, .plugin-panel .pui-table td:last-child { padding-right: 0; }
+.plugin-panel .pui-table caption { display: none; }
+.plugin-panel .pui-mark { font-weight: 700; }
+.plugin-panel .pui-section-title { font-size: 0.6875rem; color: var(--accent-soft); margin-top: 0.375rem; text-transform: uppercase; letter-spacing: 0.06em; }

@@ -19,6 +19,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { httpFetch } from './http.js';
 import { logger } from './logger.js';
 import { checkForUpdates, type UpdateResult } from './pluginUpdates.js';
+import { readUiOverlay, type UiBlock } from './pluginUi.js';
+
+/** A plugin's overlay panel (`edfmc.register_overlay`), already checked. */
+export interface PluginOverlayPanel {
+  readonly folder: string;
+  readonly title: string;
+  readonly blocks: readonly UiBlock[];
+}
 
 export interface PythonPluginStatus {
   readonly folder: string;
@@ -58,6 +66,12 @@ export interface PythonPluginView {
   readonly route: PluginRoute | null;
   /** Native pages' latest state, by plugin folder. See `edfmc.register_page`. */
   readonly pages: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * Overlay panels plugins registered, by folder: `title` always, `blocks`
+   * null while the plugin has nothing to show. Only plugins that are running
+   * have one; switching a plugin off or stopping the host removes it.
+   */
+  readonly overlays: Readonly<Record<string, { readonly title: string; readonly blocks: readonly UiBlock[] | null }>>;
 }
 
 /**
@@ -145,6 +159,7 @@ export class PythonPlugins {
   private route: PluginRoute | null = null;
   /** The latest page state each native plugin published, by folder. */
   private pages: Record<string, Readonly<Record<string, unknown>>> = {};
+  private overlays: Record<string, { title: string; blocks: readonly UiBlock[] | null }> = {};
   /** Repos the commander pasted, by plugin folder. */
   private repos: Record<string, string> = {};
 
@@ -163,6 +178,7 @@ export class PythonPlugins {
       updates: this.updates,
       route: this.route,
       pages: this.pages,
+      overlays: this.overlays,
     };
   }
 
@@ -358,9 +374,19 @@ export class PythonPlugins {
         if (message['topic'] !== 'route') return;
         this.route = readPluginRoute(message['data']);
         break;
+      case 'overlay': {
+        const folder = message['folder'];
+        if (typeof folder !== 'string' || folder.length > 200) return;
+        const title = typeof message['title'] === 'string' ? message['title'].slice(0, 60) : folder;
+        // `content: null` is the plugin saying it has nothing to show right now.
+        const blocks = message['content'] === null ? null : readUiOverlay(message['content']);
+        this.overlays = { ...this.overlays, [folder]: { title, blocks } };
+        break;
+      }
       case 'exited':
         this.route = null;
         this.pages = {};
+        this.overlays = {};
         this.running = false;
         this.pid = null;
         if (!this.stopping && this.enabled && this.problem === null) {
@@ -406,6 +432,12 @@ export class PythonPlugins {
     this.pid = null;
     this.plugins = [];
     this.problem = null;
+    // What the stopped host published goes with it. Its own exit message is
+    // ignored (the pid no longer matches), so it is cleared here: otherwise a
+    // plugin just switched off would keep its page, route and overlay panel.
+    this.route = null;
+    this.pages = {};
+    this.overlays = {};
   }
 }
 

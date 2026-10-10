@@ -69,6 +69,21 @@ export interface OverlayWidgets {
   liveJournal: boolean;
   /** The route a plugin is following (Router), next waypoint first. */
   route: boolean;
+  /**
+   * Plugin overlay panels switched off, by plugin folder.
+   *
+   * A list of what is OFF rather than what is on, so a newly installed plugin's
+   * panel shows without a trip to settings -- but only while that plugin is
+   * running: a switched-off plugin registers nothing, so it has no panel.
+   */
+  pluginPanelsOff?: readonly string[];
+}
+
+/** A plugin's overlay panel as the overlay receives it: checked and display-only. */
+export interface OverlayPluginPanel {
+  readonly id: string;
+  readonly title: string;
+  readonly blocks: readonly import('./pluginUi.js').UiBlock[];
 }
 
 export const DEFAULT_WIDGETS: OverlayWidgets = {
@@ -377,6 +392,8 @@ export interface OverlayPushState {
   liveJournal: LiveJournalState | null;
   /** A route published by a plugin, or null. */
   pluginRoute: import('./pythonPlugins.js').PluginRoute | null;
+  /** Panels from running plugins that have something to show and are switched on. */
+  pluginPanels: readonly OverlayPluginPanel[];
   /**
    * Operational progress right now, which takes precedence over `liveJournal`.
    *
