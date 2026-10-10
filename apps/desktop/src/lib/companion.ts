@@ -4535,6 +4535,7 @@ export class Companion {
 
   private onEvent(event: NormalizedEvent): void {
     applyEvent(this.state, event);
+    this.swapArrivals?.push(event);
 
     // Before anything interprets the event: record whether its shape is what it
     // has been. Types only, never values -- see packages/elite-journal/src/anomalies.ts.
@@ -5021,11 +5022,39 @@ export class Companion {
    */
   private async swapDiscoveryCommander(fid: string): Promise<void> {
     const previous = this.discoveryFid;
+    /*
+     * The journal keeps arriving while this awaits the database. At startup the
+     * catch-up replays the session's missed lines in exactly that window, so a
+     * mission handed in while the app was closed was applied and then thrown
+     * away when the stored (stale) rows loaded over it. Everything that arrives
+     * during the swap is kept here and applied again once each store is loaded.
+     */
+    const arrived: NormalizedEvent[] = [];
+    this.swapArrivals = arrived;
+    try {
+      await this.swapCommanderStores(fid, previous, arrived);
+    } finally {
+      if (this.swapArrivals === arrived) this.swapArrivals = null;
+    }
+  }
+
+  /** Events seen while a commander swap is loading; see swapDiscoveryCommander. */
+  private swapArrivals: NormalizedEvent[] | null = null;
+
+  private async swapCommanderStores(
+    fid: string,
+    previous: string | null,
+    arrived: readonly NormalizedEvent[],
+  ): Promise<void> {
     if (previous !== null && this.discoveryDirty) await this.saveDiscovery();
 
     this.discoveryFid = fid;
-    this.discovery = await this.loadDiscovery(fid);
-    this.discoveryDirty = false;
+    const discovery = await this.loadDiscovery(fid);
+    // Synchronously from here to the assignment: nothing can arrive in between.
+    let discoveryChanged = false;
+    for (const e of arrived) discoveryChanged = discovery.observe(e) || discoveryChanged;
+    this.discovery = discovery;
+    this.discoveryDirty = discoveryChanged;
 
     // The field journal is scoped the same way and for the same reason: two
     // commanders on one machine must not inherit each other's history. The
@@ -5047,8 +5076,12 @@ export class Companion {
     this.missions.load([]);
     this.sites.clear();
     await this.loadMissions();
+    // Missed hand-ins, deliveries and acceptances, replayed in journal order onto
+    // what was stored; synchronously, so nothing new interleaves.
+    let missionsChanged = false;
+    for (const e of arrived) missionsChanged = this.missions.observe(e) || missionsChanged;
+    this.missionsDirty = missionsChanged;
     await this.loadSites();
-    this.missionsDirty = false;
     this.sitesDirty = false;
 
     // Integrations belong to the commander whose account they are linked to.

@@ -738,6 +738,22 @@ describe('the connection survives a restart', () => {
     expect(swap).toContain('loadScreenshotSettings()');
   });
 
+  it('re-applies what the catch-up delivered while the swap was loading', () => {
+    /*
+     * The bug this covers (2026-10-10): a mission handed in while the app was
+     * closed was applied during the startup catch-up, then overwritten when the
+     * stored rows (still active) finished loading. The journal keeps arriving
+     * while the swap awaits the database, so those events are kept and replayed.
+     */
+    expect(companionSrc).toMatch(/applyEvent\(this\.state, event\);\s*this\.swapArrivals\?\.push\(event\);/);
+    const swap = companionSrc.slice(
+      companionSrc.indexOf('private async swapCommanderStores'),
+      companionSrc.indexOf('Commander changed; discovery state swapped'),
+    );
+    expect(swap).toMatch(/await this\.loadMissions\(\);\s*[\s\S]{0,200}for \(const e of arrived\) missionsChanged = this\.missions\.observe\(e\)/);
+    expect(swap).toMatch(/for \(const e of arrived\) discoveryChanged = discovery\.observe\(e\)/);
+  });
+
   it('does not read per-commander settings under a placeholder key', () => {
     // Reading under "unknown" returns nothing while looking like a real answer.
     const load = companionSrc.slice(

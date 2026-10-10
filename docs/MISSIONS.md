@@ -239,6 +239,24 @@ handed in since the snapshot, and one whose acceptance was seen live. If the
 acceptance is not within the 60 most recent journals, the mission stays as the
 snapshot described it, which is still active and still counted.
 
+## Missions handed in while the app was closed
+
+On startup the app re-reads the current journal from its first line, so a
+`CargoDepot` or `MissionCompleted` written while it was closed is replayed. It
+used to be lost anyway. The replay names the commander early, which starts the
+commander swap (`swapDiscoveryCommander`), and the swap awaits the database
+while the rest of the replay keeps arriving. The stored rows, saved before the
+app closed, then loaded over the replayed hand-in. On 2026-10-10 "Mine 192 Units
+of Bromellite" was handed in at 20:00:05 with the app closed, and stayed on the
+overlay as active with "48 t left of 192".
+
+Now every event that arrives during the swap is kept (`swapArrivals`) and
+applied again, in journal order, once the stored missions have loaded (and the
+same for discovery state). Replaying is safe: `ItemsDelivered` is assigned, not
+added, and an ending that is already recorded changes nothing.
+`MissionStore.load()` now replaces what the store holds, so the swap's
+`load([])` really empties it.
+
 ## Not yet built: recommended next destination
 
 §8 permits a routing feature only when reliable coordinate and distance data exists.

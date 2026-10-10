@@ -176,8 +176,13 @@ export class MissionStore {
     this.expiringSoonMs = options.expiringSoonMs ?? 60 * 60 * 1000;
   }
 
-  /** Seed from persisted rows on startup. */
+  /**
+   * Replace everything held with persisted rows: on startup, and when the
+   * commander changes. Replaces rather than merges, so `load([])` really does
+   * empty the store and nothing from one commander survives into the next.
+   */
   load(missions: readonly Mission[]): void {
+    this.missions.clear();
     for (const m of missions) this.missions.set(m.missionId, m);
   }
 

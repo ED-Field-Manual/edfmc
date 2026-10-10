@@ -599,3 +599,39 @@ describe('grouping', () => {
     expect(summary.categories['donation']).toBe(2);
   });
 });
+
+/* ---- A hand-in while the app was closed (2026-10-10) ---- */
+
+describe('a hand-in missed while the app was closed', () => {
+  const MINE_ACCEPTED =
+    '{ "timestamp":"2026-10-09T18:26:46Z", "event":"MissionAccepted", "Faction":"Test Pilots", "Name":"Mission_Mining", "LocalisedName":"Mine 192 Units of Bromellite", "Commodity":"$Bromellite_Name;", "Commodity_Localised":"Bromellite", "Count":192, "DestinationSystem":"Test System", "DestinationStation":"Test Hub", "Expiry":"2026-10-16T18:20:42Z", "Wing":true, "Influence":"++", "Reputation":"++", "Reward":26172400, "MissionID":1000000009 }';
+  const depot = (count: number, delivered: number) =>
+    `{ "timestamp":"2026-10-10T16:00:30Z", "event":"CargoDepot", "MissionID":1000000009, "UpdateType":"Deliver", "CargoType":"Bromellite", "Count":${count}, "StartMarketID":0, "EndMarketID":1, "ItemsCollected":0, "ItemsDelivered":${delivered}, "TotalItemsToDeliver":192, "Progress":0.000000 }`;
+  const MINE_COMPLETED =
+    '{ "timestamp":"2026-10-10T20:00:05Z", "event":"MissionCompleted", "Faction":"Test Pilots", "Name":"Mission_Mining_name", "LocalisedName":"Mine 192 Units of Bromellite", "MissionID":1000000009, "Commodity":"$Bromellite_Name;", "Commodity_Localised":"Bromellite", "Count":192, "DestinationSystem":"Test System", "DestinationStation":"Test Hub", "Reward":23766400, "FactionEffects":[] }';
+
+  it('load replaces what the store held, so load([]) empties it', () => {
+    const store = new MissionStore();
+    store.observe(ev(MINE_ACCEPTED));
+    store.load([]);
+    expect(store.all()).toEqual([]);
+  });
+
+  it('stays handed in when stale stored rows load over the catch-up and the arrivals are replayed', () => {
+    // What was saved before the app closed: active, 144 of 192 delivered.
+    const before = new MissionStore();
+    before.observe(ev(MINE_ACCEPTED));
+    before.observe(ev(depot(144, 144)));
+    const stored = before.all();
+
+    // The catch-up replays the missed lines while the commander swap is loading.
+    const arrived = [ev(depot(48, 192)), ev(MINE_COMPLETED)];
+    const store = new MissionStore();
+    for (const e of arrived) store.observe(e);
+    store.load(stored); // the swap's load lands afterwards, with the stale row
+    expect(store.get(1000000009)!.status).toBe('active'); // the bug, without the replay
+    for (const e of arrived) store.observe(e);
+    expect(store.get(1000000009)).toMatchObject({ status: 'completed', delivered: 192 });
+    expect(store.active()).toEqual([]);
+  });
+});
