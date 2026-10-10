@@ -221,6 +221,76 @@ def on_action(name, args):                    # the commander's input, main thre
 other threads ("main thread is not in main loop"). Router's workers only put
 results on a queue, and a poll scheduled from the main thread drains it.
 
+## Pages described as data (`ui-v1`)
+
+A `router-v1` page needs code in the app written for Router. Any other plugin
+can instead send page kind `ui-v1`: a fixed set of building blocks the app draws
+in its own theme, so no plugin needs code in the app.
+
+```python
+page.update({'kind': 'ui-v1', 'blocks': [
+    {'type': 'section', 'title': 'Materials', 'blocks': [
+        {'type': 'progress', 'label': 'Progress', 'value': 0.59},
+        {'type': 'stats', 'items': [{'label': 'System', 'value': 'Wregoe KO-G c24-7'}]},
+        {'type': 'table',
+         'columns': [{'key': 'm', 'label': 'Material'}, {'key': 'n', 'label': 'Left', 'align': 'right'}],
+         'rows': [{'id': 'steel', 'cells': {'m': {'text': 'Steel', 'mark': '✓', 'tone': 'ok'},
+                                            'n': {'text': '0', 'edit': {'action': 'set', 'kind': 'number', 'value': 0}}}}]},
+        {'type': 'controls', 'items': [
+            {'type': 'button', 'label': 'Remove', 'action': 'remove', 'args': {'id': 'x'},
+             'confirm': 'Remove it?'},
+            {'type': 'select', 'label': 'Site', 'action': 'pick', 'value': 'a',
+             'options': [{'value': 'a', 'label': 'A'}]},
+            {'type': 'toggle', 'label': 'Hide done', 'action': 'hide', 'value': False},
+            {'type': 'number', 'label': 'Hold', 'action': 'hold', 'value': 784, 'suffix': 't'},
+            {'type': 'text', 'label': 'Name', 'action': 'rename', 'value': ''},
+            {'type': 'copy', 'label': 'Copy list', 'text': 'Steel: 4,000 t'},
+        ]},
+    ]},
+]})
+```
+
+- **Blocks:** `heading`, `text` (tone `muted`/`ok`/`warn`/`bad`), `stats`,
+  `progress` (0..1, always shown as a percentage too), `table`, `controls`, and
+  `section` (a card, nested up to three deep).
+- **Input** comes back as `on_action(action, args)`: a select, toggle, number or
+  text sends `{value}`; an editable cell sends `{row, value}`; a button sends its
+  own `args`. Inputs commit on Enter or when they lose focus. A button with
+  `confirm` asks first.
+- **Copy** is done by the app, with the text the plugin gave. Nothing in `ui-v1`
+  can open a link, run code or touch a file.
+- **Checked and capped** on arrival (`src/lib/pluginUi.ts`): 60 blocks, 300 table
+  rows, 12 columns, 16 controls a row, string lengths. Anything unrecognised is
+  dropped. Status should never rely on colour alone: give a `mark` or words.
+
+## Overlay panels
+
+```python
+panel = edfmc.register_overlay('Construction')   # in plugin_start3
+panel.update({'blocks': [...]})                  # ui-v1 blocks; None to hide
+```
+
+Each plugin may have one panel in the game overlay. It is display only, since
+the overlay is click-through while playing, so controls and editable cells are
+dropped. Tables show at most 14 rows and a panel at most 12 blocks.
+
+- It appears on the **Overlay page** with its own switch (on by default),
+  takes its position from edit mode like any widget, and uses the overlay's
+  transparency.
+- It exists only while its plugin is running: a plugin that is switched off
+  never runs, so never has a panel, and stopping the plugin host clears every
+  panel it published.
+
+## A folder for a plugin's data
+
+`edfmc.data_dir()`, called in `plugin_start3`, returns
+`Documents\EDFMC\plugin-data\<folder>`, creating it. It sits beside the
+plugins folder rather than inside the plugin's own, because updating a plugin
+means replacing its folder. Construction Logistics keeps one file per commander
+there.
+
+`edfmc.API_VERSION` is 2 with these three additions.
+
 ## Update checks
 
 Each Python plugin's card shows whether GitHub has a newer version

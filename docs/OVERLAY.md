@@ -306,6 +306,15 @@ commander without one never sees it. The app checks every published field on
 arrival, because the data comes from a plugin: strings are capped, and counts
 must be finite and non-negative. The route clears when the plugin host stops.
 
+### Plugin panels
+
+A plugin can add one panel of its own (`edfmc.register_overlay`, see
+docs/PYTHON-PLUGINS.md). The overlay draws it from the same `ui-v1` blocks as
+plugin pages, display only, under the plugin's chosen title. Each has a switch
+on the Overlay page and is positioned in edit mode like any other widget; a new
+panel opens in a column to the right of the built-in ones. Construction
+Logistics uses one for its hauling, delivery and shopping views.
+
 ## Guidance in the overlay
 
 New CMDR Mode adds one line of explanation to a context, drawn from the rule's own

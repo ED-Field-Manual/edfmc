@@ -336,7 +336,7 @@ filesystem permission, so a renderer compromise cannot reach arbitrary user file
 
 `apps/desktop/src/lib/companion.ts` coordinates journal ingestion, commander
 state, contexts, missions, verification, discovery, reference data, submission
-queues, research, logistics, plugins, overlay state, SQLite persistence and
+queues, research, plugins, overlay state, SQLite persistence and
 contribution statistics. It was 2,237 lines with 78 private fields.
 
 That is worth being honest about rather than defending. It is also worth being
@@ -371,7 +371,7 @@ automatically a problem, and churning it into eight files for tidiness would mov
 regression risk around rather than reduce it.
 
 **The seams that already work.** Journal parsing, context rules, missions,
-verification, research, logistics and plugins are all *already* separate
+verification, research and plugins are all *already* separate
 packages with their own tests. `Companion` is the wiring between them and the
 host, not a monolith that swallowed them. Much of its length is the wiring
 being explicit rather than clever.

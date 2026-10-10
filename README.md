@@ -31,9 +31,6 @@ Current core capabilities include:
   click-through in-game overlay.
 - **Mission tracking** for mission state, destinations and cargo delivery progress
   where Frontier reports it.
-- **Colonisation and logistics tools** that track construction-site requirements
-  and deliveries, then build market sourcing plans when the commander asks for
-  one.
 - **Exobiology tracking** for detected biological genera, live sample progress,
   completed specimens and EDFM reference links without claiming first discovery
   or first footfall.
@@ -45,11 +42,14 @@ Current core capabilities include:
   optional Field Journal links and a local screenshot library.
 - **Plugin infrastructure** for validated declarative extensions and compatible
   Python companion-tool plugins, with management and diagnostics in the app.
+  Plugins can describe their own pages and overlay panels, which the app draws.
+  Colonisation construction tracking and sourcing are an optional plugin,
+  [Construction Logistics](plugins/ConstructionLogistics).
 - **Optional community-service integrations** with explicit controls and visible
   sharing status.
 
 Detailed behaviour and current limitations are documented in
-[missions](docs/MISSIONS.md), [logistics](docs/LOGISTICS.md),
+[missions](docs/MISSIONS.md),
 [activity tracking](docs/ACTIVITY-JOURNAL.md),
 [screenshots](docs/SCREENSHOTS.md) and the [overlay](docs/OVERLAY.md) documentation.
 

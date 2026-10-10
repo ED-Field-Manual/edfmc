@@ -315,12 +315,20 @@ describe('the app queries strictly', () => {
     // Each of these reads must filter by commander. A query that forgot would
     // show another commander's data.
     const source = readFileSync(join(__dirname, '..', 'src', 'lib', 'companion.ts'), 'utf8');
-    for (const table of ['FROM missions', 'FROM construction_sites']) {
-      const index = source.indexOf(table);
-      expect(index, `${table} is not queried at all`).toBeGreaterThan(-1);
-      const nearby = source.slice(index, index + 220);
-      expect(nearby, `${table} is read without scoping`).toContain('commander_fid');
-    }
+    const index = source.indexOf('FROM missions');
+    expect(index, 'FROM missions is not queried at all').toBeGreaterThan(-1);
+    expect(source.slice(index, index + 220), 'missions are read without scoping').toContain('commander_fid');
+
+    // construction_sites is no longer read by the app at all. Its one reader is
+    // the Construction Logistics plugin's one-time import, scoped the same way.
+    expect(source).not.toContain('FROM construction_sites');
+    const plugin = readFileSync(
+      join(__dirname, '..', '..', '..', 'plugins', 'ConstructionLogistics', 'logistics_core', 'migrate.py'),
+      'utf8',
+    );
+    const at = plugin.indexOf('FROM construction_sites');
+    expect(at).toBeGreaterThan(-1);
+    expect(plugin.slice(at, at + 120)).toContain('commander_fid = ?');
   });
 });
 

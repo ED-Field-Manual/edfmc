@@ -14,7 +14,6 @@ import { useEffect, useState } from 'react';
 
 import { openScreenshot } from './Screenshots';
 import {
-  constructionActivity,
   describeCargo,
   describeLocation,
   describeShip,
@@ -48,7 +47,7 @@ export function SessionPill({ status }: { status: SessionStatus }) {
   );
 }
 
-type Go = (to: 'Screenshots' | 'Journal' | 'Logistics', focus?: string) => void;
+type Go = (to: 'Screenshots' | 'Journal', focus?: string) => void;
 
 export function Dashboard({ snap, go }: { snap: Snap; go: Go }) {
   const s = snap.state;
@@ -57,13 +56,12 @@ export function Dashboard({ snap, go }: { snap: Snap; go: Go }) {
   const mode = gameModeLabel(isKnown(s.gameMode) ? s.gameMode : null, isKnown(s.gameGroup) ? s.gameGroup : null);
   const location = describeLocation(s);
   const ship = describeShip(s);
-  const cargo = describeCargo(s);
+  const cargo = describeCargo(s, Number.POSITIVE_INFINITY);
 
   const activity = [
     navigationActivity(s, live),
     exobiologyActivity(live ? snap.exobiology : null),
     missionsActivity(snap.missions.byExpiry, relativeExpiry),
-    constructionActivity(snap.logistics.sites),
   ].filter((a): a is ActivityItem => a !== null);
 
   return (
@@ -128,7 +126,7 @@ export function Dashboard({ snap, go }: { snap: Snap; go: Go }) {
                     {ship.away && <span className="dash-tag">Not aboard</span>}
                   </p>
                 )}
-                {cargo && <CargoList cargo={cargo} go={go} />}
+                {cargo && <CargoList cargo={cargo} />}
               </>
             ) : (
               <p className="dash-line muted-inline">Not reported yet. It appears once you board a ship.</p>
@@ -213,18 +211,27 @@ function CarrierJumps({ snap }: { snap: Snap }) {
   );
 }
 
-/** The hold, largest first; textual only. The rest is on the Logistics page. */
-function CargoList({ cargo, go }: { cargo: NonNullable<ReturnType<typeof describeCargo>>; go: Go }) {
+/** Cargo lines shown before "Show all". */
+const CARGO_SHOWN = 5;
+
+/**
+ * The hold, largest first; textual only. The five largest, and the rest on
+ * request, here: the whole hold belongs on the Ship card, not on another page.
+ */
+function CargoList({ cargo }: { cargo: NonNullable<ReturnType<typeof describeCargo>> }) {
+  const [all, setAll] = useState(false);
+  const lines = cargo.lines === null ? null : all ? cargo.lines : cargo.lines.slice(0, CARGO_SHOWN);
+  const more = cargo.lines === null ? 0 : cargo.lines.length - CARGO_SHOWN;
   return (
     <div className="dash-cargo">
       <p className="dash-sublabel">Cargo · {cargo.total}</p>
-      {cargo.lines === null ? (
+      {lines === null ? (
         <p className="dash-line muted-inline">Contents not reported yet.</p>
-      ) : cargo.lines.length === 0 ? (
+      ) : lines.length === 0 ? (
         <p className="dash-line muted-inline">Empty hold.</p>
       ) : (
         <ul className="dash-cargo-list">
-          {cargo.lines.map((c) => (
+          {lines.map((c) => (
             <li key={c.label}>
               <span className="dash-cargo-name">{c.label}</span>
               <span className="dash-cargo-t">{c.tonnes.toLocaleString()} t</span>
@@ -232,9 +239,9 @@ function CargoList({ cargo, go }: { cargo: NonNullable<ReturnType<typeof describ
           ))}
         </ul>
       )}
-      {cargo.more > 0 && (
-        <button type="button" className="link dash-more" onClick={() => go('Logistics')}>
-          {cargo.more} more on the Logistics page
+      {more > 0 && (
+        <button type="button" className="link dash-more" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? 'Show fewer' : `Show all ${cargo.lines!.length}`}
         </button>
       )}
     </div>

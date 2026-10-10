@@ -10,7 +10,6 @@ import { initialState, UNKNOWN, type CommanderState } from '@edfm/elite-journal'
 import type { LiveExobiology } from '@edfm/activity';
 
 import {
-  constructionActivity,
   describeLocation,
   describeShip,
   exobiologyActivity,
@@ -168,23 +167,5 @@ describe('activity: only what existing state supports', () => {
     expect(exobiologyActivity(midway)?.lines.at(-1)).toBe('Sampling Bacterium Informem · sampling');
     expect(exobiologyActivity(null)).toBeNull();
     expect(exobiologyActivity({ ...exo, total: 0, rows: [] })).toBeNull();
-  });
-
-  it('construction: what is still needed at the first open site', () => {
-    const site = {
-      marketId: '1', progress: 0.42, complete: false, failed: false, priority: 0, name: null, updatedAt: '',
-      resources: [
-        { commodity: 'steel', label: 'Steel', journalName: '', required: 6000, provided: 4000, remaining: 2000, payment: null },
-        { commodity: 'x', label: 'X', journalName: '', required: 10, provided: 10, remaining: 0, payment: null },
-      ],
-    };
-    expect(constructionActivity([site])).toEqual({
-      key: 'construction',
-      title: 'Construction',
-      lines: ['Construction site', '2,000 t still needed across 1 commodity'],
-      progress: 0.42,
-    });
-    expect(constructionActivity([{ ...site, complete: true }])).toBeNull();
-    expect(constructionActivity([])).toBeNull();
   });
 });

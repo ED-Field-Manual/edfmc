@@ -17,7 +17,6 @@
     "@edfm/context": "*",
     "@edfm/elite-journal": "*",
     "@edfm/integrations": "*",
-    "@edfm/logistics": "*",
     "@edfm/missions": "*",
     "@edfm/plugins": "*",
     "@edfm/research": "*",

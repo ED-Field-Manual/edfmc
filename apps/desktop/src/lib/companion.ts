@@ -79,17 +79,6 @@ import {
   type RejectedPlugin,
 } from '@edfm/plugins';
 import {
-  buildPlan,
-  combinedRequirements,
-  allocate,
-  siteFromDepot,
-  type ConstructionSite,
-  type SourcingPlan,
-  type PlanOptions,
-  type Requirement,
-  type CandidateStation,
-} from '@edfm/logistics';
-import {
   SessionTracker,
   SETTLEMENT_MATERIALS,
   summarise,
@@ -480,7 +469,6 @@ export interface CompanionSnapshot {
   readonly verificationEnabled: boolean;
   readonly research: ResearchView;
   readonly contributions: ContributionView;
-  readonly logistics: LogisticsView;
   readonly plugins: PluginView;
   /** Python plugins, run by a separate host process when switched on. */
   readonly pythonPlugins: PythonPluginView;
@@ -746,25 +734,6 @@ export interface PluginView {
    * require deleting it and finding it again later.
    */
   readonly disabledIds: readonly string[];
-}
-
-/**
- * Construction sites and the current sourcing plan.
- *
- * The plan is held rather than recomputed on render: building it costs a
- * network round trip, and §16's whole point is that a commander studies the
- * reasoning rather than watching it flicker.
- */
-export interface LogisticsView {
-  readonly sites: readonly ConstructionSite[];
-  /** Combined across active sites (§17). */
-  readonly requirements: readonly Requirement[];
-  readonly plan: SourcingPlan | null;
-  readonly planningState: 'idle' | 'searching' | 'error';
-  readonly planError: string | null;
-  /** Candidate stations the last search returned, for context. */
-  readonly candidatesConsidered: number;
-  readonly plannedAt: string | null;
 }
 
 /**
@@ -4035,14 +4004,6 @@ export class Companion {
   /** Persisted across restarts; read before the first load. */
   private disabledPlugins = new Set<string>();
 
-  /** Construction sites, keyed by depot MarketID. */
-  private sites = new Map<string, ConstructionSite>();
-  private sitesDirty = false;
-  private plan: SourcingPlan | null = null;
-  private planningState: 'idle' | 'searching' | 'error' = 'idle';
-  private planError: string | null = null;
-  private candidatesConsidered = 0;
-  private plannedAt: string | null = null;
   private contributions: ContributionView = {
     enabled: false,
     identityMode: 'anonymous',
@@ -4178,17 +4139,6 @@ export class Companion {
         removeScreenshotFromCatalog: this.removeScreenshotFromCatalog,
         refreshScreenshots: this.refreshScreenshots,
         deleteScreenshotImage: this.deleteScreenshotImage,
-        logistics: {
-          sites: [...this.sites.values()].sort(
-            (a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt),
-          ),
-          requirements: combinedRequirements([...this.sites.values()]),
-          plan: this.plan,
-          planningState: this.planningState,
-          planError: this.planError,
-          candidatesConsidered: this.candidatesConsidered,
-          plannedAt: this.plannedAt,
-        },
         contributions: {
           ...this.contributions,
           enabled: this.verificationEnabled,
@@ -4298,7 +4248,6 @@ export class Companion {
     await this.loadPluginsFromDisk();
 
     await this.loadResearch();
-    await this.loadSites();
     await this.refreshContributions();
 
     // Read here with the other overlay settings; actually starting it happens at
@@ -4451,10 +4400,6 @@ export class Companion {
         this.researchDirty = false;
         void this.saveResearch();
       }
-      if (this.sitesDirty) {
-        this.sitesDirty = false;
-        void this.saveSites();
-      }
       // Never awaited: an unreachable server must not become journal latency.
       void this.flushObservations();
     }, 3000);
@@ -4569,7 +4514,6 @@ export class Companion {
     // recording what happened is not the same as offering it to anyone.
     this.research.observe(event, this.state);
 
-    if (event.kind === 'colonisation-depot') this.observeConstructionDepot(event);
 
     if (event.kind === 'cargo' && this.state.cargoAt !== null && !isKnown(this.state.cargoManifest)) {
       this.scheduleCargoFileRead();
@@ -5053,20 +4997,17 @@ export class Companion {
     await this.loadActivity(fid);
 
     /*
-     * Missions and colonisation sites are personal too, and were not swapped.
-     * A second commander on the same machine inherited the first one's
-     * outstanding missions and construction requirements -- their cargo owed,
-     * their deadlines, their sites.
+     * Missions are personal too, and were not swapped. A second commander on
+     * the same machine inherited the first one's outstanding missions -- their
+     * cargo owed and their deadlines. (Construction sites moved to the
+     * Construction Logistics plugin, which keeps one file per commander.)
      *
      * Cleared before loading rather than merged, so nothing from the outgoing
      * commander can survive into the incoming one's view.
      */
     this.missions.load([]);
-    this.sites.clear();
     await this.loadMissions();
-    await this.loadSites();
     this.missionsDirty = false;
-    this.sitesDirty = false;
 
     // Integrations belong to the commander whose account they are linked to.
     // Reloaded so one commander's switches never apply to another's data.
@@ -5935,186 +5876,12 @@ export class Companion {
     }
   }
 
-  /* ------------------------------------------------------------- logistics */
-
-  /**
-   * A depot event is a complete snapshot, so the site is replaced, not merged.
-   *
-   * Commander-assigned name and priority survive, because they are the one
-   * part of the record the game does not supply and must not be lost every
-   * time the depot reports.
+  /*
+   * Construction logistics used to live here. It is now the Construction
+   * Logistics plugin (plugins/ConstructionLogistics), which reads the same
+   * journal events itself. The construction_sites table is kept, never written
+   * again: the plugin imports this commander's rows from it once, read-only.
    */
-  private observeConstructionDepot(event: NormalizedEvent): void {
-    const marketId = String((event.data as { marketId?: unknown }).marketId ?? '');
-    const site = siteFromDepot(event, this.sites.get(marketId));
-    if (site === null) return;
-
-    const previous = this.sites.get(site.marketId);
-    const merged: ConstructionSite = previous
-      ? { ...site, name: previous.name, priority: previous.priority }
-      : site;
-
-    // Only notify when something a commander would notice actually moved.
-    const changed =
-      previous === undefined ||
-      previous.complete !== merged.complete ||
-      previous.failed !== merged.failed ||
-      previous.resources.length !== merged.resources.length ||
-      previous.resources.some((r, i) => r.remaining !== merged.resources[i]?.remaining);
-
-    this.sites.set(site.marketId, merged);
-    if (changed) {
-      this.sitesDirty = true;
-      this.notify();
-    }
-  }
-
-  async setSiteName(marketId: string, name: string): Promise<void> {
-    const site = this.sites.get(marketId);
-    if (site === undefined) return;
-    this.sites.set(marketId, { ...site, name: name.trim() === '' ? null : name.trim() });
-    this.sitesDirty = true;
-    this.notify();
-    await this.saveSites();
-  }
-
-  async setSitePriority(marketId: string, priority: number): Promise<void> {
-    const site = this.sites.get(marketId);
-    if (site === undefined) return;
-    this.sites.set(marketId, { ...site, priority: Math.max(1, Math.round(priority)) });
-    this.sitesDirty = true;
-    this.notify();
-    await this.saveSites();
-  }
-
-  /** How a purchase should be split between sites (S17). */
-  allocationFor(commodity: string, amount: number) {
-    return allocate(commodity, amount, [...this.sites.values()]);
-  }
-
-  /**
-   * Build a sourcing plan.
-   *
-   * Commander-initiated, never background. The market search is required
-   * traffic for a feature the commander just asked for, which S21 keeps
-   * distinct from optional contribution -- so it is not gated behind the
-   * contribution setting, and it does not happen unless asked.
-   */
-  async buildSourcingPlan(options: PlanOptions = {}): Promise<void> {
-    const requirements = combinedRequirements([...this.sites.values()]);
-    if (requirements.length === 0) {
-      this.plan = null;
-      this.planningState = 'idle';
-      this.planError = 'No outstanding requirements.';
-      this.notify();
-      return;
-    }
-
-    this.planningState = 'searching';
-    this.planError = null;
-    this.notify();
-
-    try {
-      const response = await httpFetch(API_BASE_URL + '/v1/market/search', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          commodities: requirements.map((r) => r.commodity).slice(0, 64),
-          minStock: 1,
-          limit: 120,
-          includeFleetCarriers: options.allowFleetCarriers === true,
-          ...(options.allowPlanetary === false ? { includePlanetary: false } : {}),
-          ...(options.maxDataAgeSeconds === undefined
-            ? {}
-            : { maxAgeSeconds: options.maxDataAgeSeconds }),
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-
-      if (!response.ok) {
-        throw new Error('market search failed (' + String(response.status) + ')');
-      }
-      const body = (await response.json()) as { candidates: CandidateStation[] };
-      this.candidatesConsidered = body.candidates.length;
-
-      // Planning happens here, not on the server: the reasoning stays where
-      // the commander can inspect it.
-      this.plan = buildPlan(requirements, body.candidates, options);
-      this.plannedAt = new Date().toISOString();
-      this.planningState = 'idle';
-      logger.info('logistics', 'Sourcing plan built', {
-        requirements: requirements.length,
-        candidates: body.candidates.length,
-        stops: this.plan.totalStops,
-        unfulfilled: this.plan.unfulfilled.length,
-      });
-    } catch (error) {
-      this.planningState = 'error';
-      this.planError =
-        (error as Error).name === 'TimeoutError'
-          ? 'The market service did not respond in time.'
-          : (error as Error).message;
-      logger.warn('logistics', 'Sourcing plan failed', { error: this.planError });
-    }
-    this.notify();
-  }
-
-  private async saveSites(): Promise<void> {
-    if (!this.db) return;
-    try {
-      const now = new Date().toISOString();
-      for (const site of this.sites.values()) {
-        await this.db.execute(
-          `INSERT INTO construction_sites
-             (market_id, progress, complete, failed, resources, name, priority,
-              updated_at, first_seen_at, commander_fid)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-           ON CONFLICT(market_id) DO UPDATE SET
-             progress = excluded.progress,
-             complete = excluded.complete,
-             failed = excluded.failed,
-             resources = excluded.resources,
-             name = excluded.name,
-             priority = excluded.priority,
-             updated_at = excluded.updated_at`,
-          [
-            site.marketId, site.progress, site.complete ? 1 : 0, site.failed ? 1 : 0,
-            JSON.stringify(site.resources), site.name, site.priority, site.updatedAt, now,
-            // Same reason as missions: an unattributed row is a visible-to-all row.
-            this.discoveryFid,
-          ],
-        );
-      }
-    } catch (err) {
-      logger.warn('db', 'Could not save construction sites', { error: String(err) });
-    }
-  }
-
-  private async loadSites(): Promise<void> {
-    if (!this.db) return;
-    try {
-      const rows = await this.db.select<Array<Record<string, unknown>>>(
-        `SELECT * FROM construction_sites
-          WHERE commander_fid = $1
-          ORDER BY priority, updated_at DESC`,
-        [this.discoveryFid],
-      );
-      for (const r of rows) {
-        this.sites.set(String(r.market_id), {
-          marketId: String(r.market_id),
-          progress: r.progress === null ? null : Number(r.progress),
-          complete: Number(r.complete) === 1,
-          failed: Number(r.failed) === 1,
-          resources: JSON.parse(String(r.resources)) as ConstructionSite['resources'],
-          updatedAt: String(r.updated_at),
-          priority: Number(r.priority),
-          name: r.name === null ? null : String(r.name),
-        });
-      }
-    } catch (err) {
-      logger.warn('db', 'Could not load construction sites', { error: String(err) });
-    }
-  }
 
   /* ----------------------------------------------------------- contribution */
 

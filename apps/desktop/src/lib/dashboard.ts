@@ -11,7 +11,6 @@
 
 import { cargoLines, isKnown, shipDisplayName, type CommanderState } from '@edfm/elite-journal';
 import type { ActivityEntry, ActivityGroup, LiveExobiology } from '@edfm/activity';
-import type { ConstructionSite } from '@edfm/logistics';
 import type { Mission } from '@edfm/missions';
 
 const known = <T>(v: unknown): T | null => (isKnown(v as never) ? (v as T) : null);
@@ -182,25 +181,6 @@ export function exobiologyActivity(exo: LiveExobiology | null): ActivityItem | n
     title: 'Exobiology',
     lines,
     progress: exo.total > 0 ? exo.completedCount / exo.total : undefined,
-  };
-}
-
-export function constructionActivity(sites: readonly ConstructionSite[]): ActivityItem | null {
-  const open = sites.filter((s) => !s.complete && !s.failed);
-  if (open.length === 0) return null;
-  const site = [...open].sort((a, b) => a.priority - b.priority)[0]!;
-  const remaining = site.resources.reduce((t, r) => t + Math.max(0, r.remaining), 0);
-  const outstanding = site.resources.filter((r) => r.remaining > 0).length;
-  const lines = [
-    site.name ?? 'Construction site',
-    `${remaining.toLocaleString()} t still needed across ${outstanding} ${outstanding === 1 ? 'commodity' : 'commodities'}`,
-  ];
-  if (open.length > 1) lines.push(`${open.length - 1} more ${open.length - 1 === 1 ? 'site' : 'sites'} on the Logistics page`);
-  return {
-    key: 'construction',
-    title: 'Construction',
-    lines,
-    progress: site.progress !== null ? Math.max(0, Math.min(1, site.progress)) : undefined,
   };
 }
 

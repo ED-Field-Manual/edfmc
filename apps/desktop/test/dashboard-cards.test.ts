@@ -55,7 +55,7 @@ describe('cargo on the Dashboard', () => {
     });
   });
 
-  it('more than five commodities: five shown, the rest counted for the Logistics link', () => {
+  it('more than five commodities: five shown, the rest counted for Show all', () => {
     const many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n, i) => item(n, n.toUpperCase(), 10 - i));
     const v = describeCargo(state({ cargoCount: 49, cargoManifest: many }));
     expect(v?.lines).toHaveLength(5);

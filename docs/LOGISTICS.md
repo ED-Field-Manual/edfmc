@@ -1,8 +1,32 @@
 # Logistics and Market Confidence
 
-Status: **complete.** Confidence engine, sourcing planner, multi-site
-construction tracking, the market search endpoint and the Logistics screen all
-work, proven end to end against live data.
+Status: **moved into a plugin (2026-10-10).** Construction tracking, the
+sourcing planner and the confidence rules described here are now the optional
+[Construction Logistics](../plugins/ConstructionLogistics) plugin. EDFM
+Companion no longer has a Logistics page, and the `@edfm/logistics` package is
+gone. The ship's full cargo list moved to the Dashboard's Ship card.
+
+What stayed true, and what changed:
+
+- **The measurements and rules below still hold**; the plugin implements them.
+  The planner was ported to Python, and its output is pinned to the original
+  TypeScript planner by `plugins/ConstructionLogistics/tests/golden/planner.json`
+  (58 plans, confidence, symbol folding, combined requirements, allocation),
+  generated from the TypeScript before it was removed.
+- **The plugin sends the commander's position** as the search origin. The old
+  page never did, so every candidate's distance was "unknown" and the distance
+  part of each score was never used.
+- **Carrier stock and ship cargo** are now part of the picture (the plugin
+  subtracts them before sourcing), and so is hauling: load plans within the hold,
+  and what is left after a delivery.
+- **`construction_sites`** stays in the app's database, unwritten. The plugin
+  imports each commander's rows from it once, read-only.
+- **`/v1/market/search`** on the EDFM API is unchanged; the plugin calls it.
+
+The rest of this page is the original design record, kept for the reasoning.
+
+---
+
 
 ## What was measured first
 

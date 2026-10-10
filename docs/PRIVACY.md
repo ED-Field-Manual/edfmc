@@ -9,9 +9,9 @@ commitment we hold ourselves to.
 
 **No background contribution or community-service sharing from EDFM Companion's
 own features starts unless you switch it on.** Those controls are off by default,
-and the application has no telemetry and no analytics. Commander-initiated market
-searches and the separately controlled Python-plugin update check are described
-below.
+and the application has no telemetry and no analytics. The separately controlled
+Python-plugin update check is described below. Market searches for construction
+sourcing are made by the optional Construction Logistics plugin, not by the app.
 
 There are six network controls, and this section used to name only the first.
 Verification was once the only thing that sent anything, so "with verification
@@ -75,12 +75,11 @@ build, and the Companion version.
 Contribution being off means the contribution feature initiates nothing on its
 own. It does not mean the application never makes a request.
 
-Building a sourcing plan queries `/v1/market/search`. That is not contribution
-and is deliberately not gated behind the contribution setting: it is the feature
-the commander just asked for, and a feature that silently did nothing would be
-worse than one that explains itself. The request carries the commodity names
-being planned for and the search options; it carries no identity, no location and
-no journal content, and it happens only on an explicit action.
+The app itself no longer queries `/v1/market/search`. The Construction Logistics
+plugin does, when the commander presses "Find where to buy": the request carries
+the commodity names still needed, the search options and the commander's current
+star position (so stations come back with distances). It carries no identity and
+no journal content. That is the plugin's own traffic, documented in its README.
 
 Reference lookups during verification are different — those *are* gated, and
 switching contribution off stops them at the next call rather than the next
@@ -176,7 +175,7 @@ diagnostics export applies the same redaction plus a payload-free allowlist.
 
 ## Network features, and the rules they follow
 
-Station verification and market/logistics queries are built. Research
+Station verification is built. Research
 contribution is not: sessions are recorded locally and never sent, and
 `research_sessions.submitted_at` exists with nothing setting it. All of them
 honour these rules:

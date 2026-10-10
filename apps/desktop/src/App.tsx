@@ -12,7 +12,6 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import logo from './assets/logo.png';
-import { Logistics } from './Logistics';
 import { FirstRunGuidance, GuidanceChoice } from './Guidance';
 import { Integrations } from './Integrations';
 import { ScreenshotDialog, ScreenshotSettings, Screenshots } from './Screenshots';
@@ -56,7 +55,6 @@ const SECTIONS = [
   'Dashboard',
   'Context',
   'Missions',
-  'Logistics',
   'Overlay',
   'Journal',
   'Research',
@@ -74,7 +72,6 @@ const IMPLEMENTED: ReadonlySet<Section> = new Set<Section>([
   'Missions',
   'Dashboard',
   'Overlay',
-  'Logistics',
   'Journal',
   'Research',
   'Contributions',
@@ -97,7 +94,7 @@ export default function App() {
   const [pluginTab, setPluginTab] = useState<string | null>(null);
   /** An entry the Journal page should open at, from the Dashboard. */
   const [journalFocus, setJournalFocus] = useState<string | null>(null);
-  const go = (to: 'Screenshots' | 'Journal' | 'Logistics', focus?: string) => {
+  const go = (to: 'Screenshots' | 'Journal', focus?: string) => {
     setPluginTab(null);
     setJournalFocus(to === 'Journal' ? (focus ?? null) : null);
     setSection(to);
@@ -186,7 +183,6 @@ export default function App() {
           {section === 'Context' && <ContextPanel snap={snap} />}
           {section === 'Missions' && <MissionsPanel snap={snap} />}
           {section === 'Overlay' && <OverlayPanel />}
-          {section === 'Logistics' && <Logistics snap={snap} />}
           {section === 'Journal' && <Journal snap={snap} focusId={journalFocus} />}
           {section === 'Research' && <Research snap={snap} />}
           {section === 'Contributions' && <Contributions snap={snap} />}
