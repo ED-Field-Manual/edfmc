@@ -44,7 +44,14 @@ reqwest = { version = "0.12", default-features = false, features = [
     "charset",
     "http2",
 ] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "macros"] }
+# Frontier login (src/frontier.rs): PKCE needs a CSPRNG, SHA-256 and base64url;
+# `url` builds the authorization URL and parses the redirect. All four were
+# already in the build through Tauri; these lines only make them direct.
+getrandom = "0.2"
+sha2 = "0.10"
+base64 = "0.22"
+url = "2"
 # PNG encoding only. The `image` crate would bring a dozen decoders for formats
 # this never reads; captures are always written as PNG.
 png = "0.17"

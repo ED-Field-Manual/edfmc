@@ -24,10 +24,11 @@ import {
   type SharingRow,
 } from '@edfm/integrations';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { InaraPanel } from './InaraPanel';
 import { JournalSync } from './JournalSync';
+import { failureText, frontier, type FrontierStatus } from './lib/frontier';
 import type { CompanionSnapshot } from './lib/companion.js';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -125,12 +126,101 @@ export function Integrations({ snap }: { snap: CompanionSnapshot }) {
           community database, so it leads. */}
       <JournalSync snap={snap} />
 
+      <FrontierCard />
+
       {audit.rows
         .filter((row) => row.id !== 'edfm-journal')
         .map((row) => (
           <IntegrationCard key={row.id} row={row} snap={snap} />
         ))}
     </>
+  );
+}
+
+/**
+ * Frontier Developments: log in so EDFM Companion can use Frontier's Companion
+ * API once it is approved to. Status, Connect and Disconnect, nothing else.
+ * The login happens on Frontier's own site; tokens stay in Rust.
+ */
+export function FrontierCard() {
+  const [status, setStatus] = useState<FrontierStatus | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = () =>
+    void frontier
+      .status()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  useEffect(refresh, []);
+
+  const connect = async () => {
+    setMessage(null);
+    setStatus((s) => (s ? { ...s, connecting: true } : s));
+    try {
+      await frontier.connect();
+    } catch (error) {
+      setMessage(failureText(error));
+    }
+    refresh();
+  };
+  const disconnect = async () => {
+    setMessage(null);
+    try {
+      await frontier.disconnect();
+    } catch (error) {
+      setMessage(failureText(error));
+    }
+    refresh();
+  };
+
+  const label = !status
+    ? 'Unavailable'
+    : !status.configured
+      ? (status.reason ?? 'Awaiting Frontier API Approval')
+      : status.connecting
+        ? 'Waiting for you to log in'
+        : status.connected
+          ? 'Connected'
+          : 'Not connected';
+  const kind = !status?.configured ? 'needs-configuration' : status.connected ? 'connected' : 'not-connected';
+
+  return (
+    <section className="card">
+      <div className="integration-head">
+        <h2>Frontier Developments</h2>
+        <span className={`integration-status status-${kind}`}>{label}</span>
+      </div>
+      <p className="muted">
+        Log in with your Frontier account so EDFM Companion can read your commander&apos;s data from
+        Frontier&apos;s Companion API. You log in on Frontier&apos;s own website; your password never
+        reaches this app, and the login is kept in Windows Credential Manager.
+      </p>
+      {status?.connecting && (
+        <p className="audit-line">Finish logging in in the browser window that opened.</p>
+      )}
+      {message && <p className="note">{message}</p>}
+      <div className="row">
+        {status?.connected && !status.connecting ? (
+          <button type="button" className="secondary" onClick={() => void disconnect()}>
+            Disconnect
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="primary"
+            disabled={!status?.configured || status.connecting}
+            onClick={() => void connect()}
+          >
+            Connect
+          </button>
+        )}
+        {status?.connecting && (
+          <button type="button" className="secondary" onClick={() => void frontier.cancel()}>
+            Cancel
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 

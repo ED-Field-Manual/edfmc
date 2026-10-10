@@ -8,6 +8,7 @@
 mod credentials;
 mod edfm_journal;
 mod edsm;
+mod frontier;
 mod inara;
 mod journal;
 mod overlay;
@@ -829,6 +830,7 @@ pub fn run() {
         .manage(journal::WatcherState::default())
         .manage(overlay::OverlayState::default())
         .manage(plugin_host::PluginHostState::default())
+        .manage(frontier::FrontierState::default())
         .setup(|app| {
             // Arm click-through at creation, before the overlay can ever be shown.
             // The overlay is sized to the whole game window, so an interactive one
@@ -896,6 +898,10 @@ pub fn run() {
             app.exit(0);
         })
         .invoke_handler(tauri::generate_handler![
+            frontier::frontier_status,
+            frontier::frontier_connect,
+            frontier::frontier_cancel,
+            frontier::frontier_disconnect,
             journal::saved_games_dir,
             journal::journal_read_dir,
             journal::journal_file_size,

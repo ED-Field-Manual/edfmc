@@ -82,6 +82,13 @@ worse than one that explains itself. The request carries the commodity names
 being planned for and the search options; it carries no identity, no location and
 no journal content, and it happens only on an explicit action.
 
+Logging in to Frontier (Connections & Data Sharing → Frontier Developments) is
+commander-initiated too, and not yet available: it waits on Frontier approving
+the app. When it is, the login happens on Frontier's own site; EDFM Companion
+keeps only a refresh token, in Windows Credential Manager, and Disconnect
+removes it. Nothing is read from Frontier's Companion API yet. See
+[FRONTIER-AUTH.md](FRONTIER-AUTH.md).
+
 Reference lookups during verification are different — those *are* gated, and
 switching contribution off stops them at the next call rather than the next
 restart.

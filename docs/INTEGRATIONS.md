@@ -27,6 +27,7 @@ generate there. It is off until you connect it.
 | **EDSM** | **Built and wired**; tested against live API responses | Your personal EDSM API key |
 | **Inara** | **Built**; Inara approved `EDFM Companion` on 2026-10-09; first live test pending | Your personal Inara API key, in a build made with `VITE_INARA_APP_AUTHORIZED=true` |
 | **EDFM Commander Journal** | **Built** — push-only, new activity plus an optional history upload | A journal sync token from your EDFM account |
+| **Frontier (login only)** | **Prepared, awaiting Frontier's approval**; tested with mocks only. Reads no CAPI data yet | The approved Client ID and redirect URI in the build. See [FRONTIER-AUTH.md](FRONTIER-AUTH.md) |
 
 Every one ships **off**. The Connections & Data Sharing screen shows whether a
 service is connected, queued, sending, paused or refusing requests. Inara has

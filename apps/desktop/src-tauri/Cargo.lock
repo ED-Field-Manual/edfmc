@@ -1089,12 +1089,15 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "edfm-companion"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.2.17",
  "keyring",
  "notify",
  "png 0.17.16",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-global-shortcut",
@@ -1102,6 +1105,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-sql",
  "tokio",
+ "url",
  "windows 0.58.0",
 ]
 
