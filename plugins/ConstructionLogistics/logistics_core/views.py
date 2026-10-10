@@ -146,8 +146,15 @@ def _materials(state: dict[str, Any], site: dict[str, Any]) -> dict[str, Any]:
     shown.sort(key=lambda r: (r['status'] == 'done', r['priority'], -r['toSource'], r['label']))
     table_rows = []
     for r in shown:
-        carrier_value: dict[str, Any] = {'text': f"{r['carrier']:,}",
-                                         'edit': {'action': 'setCarrier', 'kind': 'number', 'value': r['carrier'], 'min': 0}}
+        done = r['status'] == 'done'
+        # Inputs only where a change matters: a delivered material needs neither
+        # a carrier correction nor a hauling priority.
+        carrier_value: Any = f"{r['carrier']:,}" if done else {
+            'text': f"{r['carrier']:,}",
+            'edit': {'action': 'setCarrier', 'kind': 'number', 'value': r['carrier'], 'min': 0}}
+        priority_value: Any = '' if done else {
+            'text': str(r['priority']),
+            'edit': {'action': 'setPriority', 'kind': 'number', 'value': r['priority'], 'min': 1, 'max': 5}}
         table_rows.append({
             'id': r['commodity'],
             'tone': TONE[r['status']],
@@ -160,8 +167,7 @@ def _materials(state: dict[str, Any], site: dict[str, Any]) -> dict[str, Any]:
                 'ship': f"{r['ship']:,}",
                 'remaining': f"{r['remaining']:,}",
                 'toSource': {'text': f"{r['toSource']:,}", 'tone': 'warn' if r['toSource'] > 0 else 'muted'},
-                'priority': {'text': str(r['priority']),
-                             'edit': {'action': 'setPriority', 'kind': 'number', 'value': r['priority'], 'min': 1, 'max': 5}},
+                'priority': priority_value,
             },
         })
     estimated = sum(1 for r in rows if r['carrierSource'] == 'estimated')
