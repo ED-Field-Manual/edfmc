@@ -274,6 +274,40 @@ pub struct OverlayState {
     last_visible: Arc<Mutex<Option<bool>>>,
 }
 
+/// Whether the overlay should be on screen for this game-window state.
+///
+/// Pure, so the rule is tested directly: shown over a game window that exists
+/// and is not minimised, and -- when the commander chose it -- only while the
+/// game is the active window.
+pub fn should_show(found: bool, minimised: bool, hide_when_inactive: bool, foreground: bool) -> bool {
+    found && !minimised && (!hide_when_inactive || foreground)
+}
+
+/// What the Overlay page shows as status: observed, never inferred from the switch.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OverlayRuntime {
+    pub running: bool,
+    pub visible: bool,
+    pub editing: bool,
+}
+
+fn runtime_of(state: &OverlayState) -> OverlayRuntime {
+    OverlayRuntime {
+        running: state.running.load(Ordering::Relaxed),
+        visible: (*state.last_visible.lock().unwrap_or_else(|e| e.into_inner())).unwrap_or(false),
+        editing: state.editing.load(Ordering::Relaxed),
+    }
+}
+
+fn emit_runtime(app: &AppHandle, runtime: OverlayRuntime) {
+    let _ = app.emit("overlay://runtime", runtime);
+}
+
+#[tauri::command]
+pub fn overlay_runtime(state: tauri::State<'_, OverlayState>) -> OverlayRuntime {
+    runtime_of(&state)
+}
+
 /// Make the overlay ignore the mouse entirely, or accept it.
 ///
 /// This is the single most important call in the module. The overlay window is
@@ -314,9 +348,11 @@ pub fn overlay_start(
     if state.running.swap(true, Ordering::SeqCst) {
         return Ok(()); // already running
     }
+    emit_runtime(&app, runtime_of(&state));
 
     let running = state.running.clone();
     let hide_inactive = state.hide_when_inactive.clone();
+    let editing = state.editing.clone();
     let last = state.last.clone();
     let last_visible = state.last_visible.clone();
 
@@ -325,9 +361,12 @@ pub fn overlay_start(
             let info = elite_window();
 
             if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-                let should_show = info.found
-                    && !info.is_minimised
-                    && (!hide_inactive.load(Ordering::Relaxed) || info.is_foreground);
+                let should_show = should_show(
+                    info.found,
+                    info.is_minimised,
+                    hide_inactive.load(Ordering::Relaxed),
+                    info.is_foreground,
+                );
 
                 if should_show {
                     let geometry = (info.x, info.y, info.width, info.height);
@@ -355,14 +394,31 @@ pub fn overlay_start(
                 // Only call show/hide on an actual transition. Calling show() ten
                 // times a second is pointless work and risks fighting the
                 // compositor for z-order.
-                let mut guard = last_visible.lock().unwrap_or_else(|e| e.into_inner());
-                if *guard != Some(should_show) {
-                    *guard = Some(should_show);
-                    if should_show {
-                        let _ = win.show();
+                let changed = {
+                    let mut guard = last_visible.lock().unwrap_or_else(|e| e.into_inner());
+                    if *guard != Some(should_show) {
+                        *guard = Some(should_show);
+                        if should_show {
+                            let _ = win.show();
+                        } else {
+                            let _ = win.hide();
+                        }
+                        true
                     } else {
-                        let _ = win.hide();
+                        false
                     }
+                };
+                // Told only on a change, so the Overlay page can say whether the
+                // overlay is really on screen without polling for it.
+                if changed {
+                    emit_runtime(
+                        &app,
+                        OverlayRuntime {
+                            running: running.load(Ordering::Relaxed),
+                            visible: should_show,
+                            editing: editing.load(Ordering::Relaxed),
+                        },
+                    );
                 }
             }
 
@@ -390,6 +446,9 @@ pub fn overlay_stop(
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.hide();
     }
+    // Edit mode ended with it: tell both windows, so neither keeps showing it.
+    let _ = app.emit("overlay://edit-mode", false);
+    emit_runtime(&app, runtime_of(&state));
     Ok(())
 }
 
@@ -417,6 +476,7 @@ pub fn overlay_set_edit_mode(
     // focus), otherwise its checkbox lies about the real state.
     app.emit("overlay://edit-mode", editing)
         .map_err(|e| e.to_string())?;
+    emit_runtime(&app, runtime_of(&state));
     Ok(())
 }
 
@@ -429,4 +489,47 @@ pub fn overlay_set_edit_mode(
 pub fn overlay_push_state(app: AppHandle, payload: serde_json::Value) -> Result<(), String> {
     app.emit_to(OVERLAY_LABEL, "overlay://state", payload)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shown_only_over_a_game_window_that_exists_and_is_not_minimised() {
+        assert!(should_show(true, false, false, false));
+        assert!(!should_show(false, false, false, true), "no game window, nothing to draw over");
+        assert!(!should_show(true, true, false, true), "minimised game");
+    }
+
+    #[test]
+    fn hide_when_inactive_follows_focus() {
+        assert!(should_show(true, false, true, true));
+        assert!(!should_show(true, false, true, false));
+        // Off: stays up while the commander is in another window.
+        assert!(should_show(true, false, false, false));
+    }
+
+    #[test]
+    fn runtime_starts_stopped_and_hidden() {
+        let state = OverlayState::default();
+        assert_eq!(
+            runtime_of(&state),
+            OverlayRuntime { running: false, visible: false, editing: false }
+        );
+        *state.last_visible.lock().unwrap() = Some(true);
+        state.editing.store(true, Ordering::SeqCst);
+        assert_eq!(
+            runtime_of(&state),
+            OverlayRuntime { running: false, visible: true, editing: true }
+        );
+    }
+
+    #[test]
+    fn display_mode_tag_reader_degrades_rather_than_panics() {
+        assert_eq!(extract_tag_i64("<FullScreen>2</FullScreen>", "FullScreen"), Some(2));
+        assert_eq!(extract_tag_i64("<FullScreen>x</FullScreen>", "FullScreen"), None);
+        assert_eq!(extract_tag_i64("<FullScreen>2", "FullScreen"), None);
+        assert_eq!(extract_tag_i64("", "FullScreen"), None);
+    }
 }

@@ -20,11 +20,11 @@ import {
 } from '../src/lib/overlay.js';
 
 const overlaySrc = readFileSync(
-  fileURLToPath(new URL('../src/overlay/Overlay.tsx', import.meta.url)),
+  fileURLToPath(new URL('../src/overlay/widgets.tsx', import.meta.url)),
   'utf8',
 );
 const overlayCss = readFileSync(
-  fileURLToPath(new URL('../src/overlay/overlay.css', import.meta.url)),
+  fileURLToPath(new URL('../src/overlay/widgets.css', import.meta.url)),
   'utf8',
 );
 const companionSrc = readFileSync(

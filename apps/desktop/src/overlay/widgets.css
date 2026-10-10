@@ -1,22 +1,12 @@
 /*
- * Overlay styling.
+ * Overlay widget styling, shared by the overlay window and the preview on the
+ * Overlay page, so the two cannot drift apart.
  *
- * The document background MUST stay fully transparent: the window is composited
- * over the game, so any opaque background would black out the screen.
+ * Every rule is scoped under .overlay-root: the main window imports this
+ * file too, and its own .row or .widget must not be restyled by it. The
+ * window-level rules (a transparent, click-through document) are in
+ * window.css, which only the overlay window loads.
  */
-
-html,
-body,
-#overlay-root {
-  margin: 0;
-  height: 100%;
-  background: transparent;
-  overflow: hidden;
-  /* Belt and braces alongside the native click-through flag: even if the window
-     is momentarily interactive, empty regions should never swallow a click. */
-  pointer-events: none;
-  user-select: none;
-}
 
 .overlay-root {
   /*
@@ -41,8 +31,17 @@ body,
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
-.widget {
+/*
+ * A widget is two boxes. The slot is positioned and sized in the overlay's own
+ * pixels; the panel inside carries everything visible and is scaled with
+ * zoom, so a bigger widget grows from its corner instead of moving, and a
+ * width set by resizing stays the width on screen at any scale.
+ */
+.overlay-root .widget-slot {
   position: absolute;
+}
+.overlay-root .widget {
+  zoom: var(--overlay-scale, 1);
   min-width: 15rem;
   padding: 0.625rem 0.75rem;
   border-radius: 8px;
@@ -59,15 +58,62 @@ body,
   line-height: 1.45;
 }
 
+.overlay-root.editing .widget-slot { pointer-events: auto; }
 .overlay-root.editing .widget {
-  pointer-events: auto;
   cursor: grab;
   border-color: #ff7d20;
   box-shadow: 0 0 0 2px rgba(255, 125, 32, 0.25);
 }
 .overlay-root.editing .widget:active { cursor: grabbing; }
 
-.widget-title {
+/* Resized: the slot's width is the widget's width, whatever its content. */
+.overlay-root .widget-slot.sized .widget { min-width: 0; max-width: none; }
+
+/*
+ * The resize grip, on the right edge, only while arranging. Outside the scaled
+ * panel so it is the same size at every scale.
+ */
+.overlay-root .widget-resize {
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  right: -0.4375rem;
+  width: 0.875rem;
+  cursor: ew-resize;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.overlay-root .widget-resize::before {
+  content: "";
+  width: 4px;
+  height: 2.25rem;
+  max-height: 100%;
+  border-radius: 2px;
+  background: #ff7d20;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.overlay-root .widget-size {
+  position: absolute;
+  right: 0.25rem;
+  bottom: -1.375rem;
+  font-size: 0.6875rem;
+  color: #1a1005;
+  background: rgba(255, 125, 32, 0.94);
+  border-radius: 3px;
+  padding: 0 0.3125rem;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+/* Compact spacing: less padding and leading, same text size. */
+.overlay-root.spacing-compact .widget { padding: 0.375rem 0.5rem; line-height: 1.3; }
+.overlay-root.spacing-compact .widget-title { margin-bottom: 0.1875rem; }
+.overlay-root.spacing-compact .row { padding-block: 0; }
+.overlay-root.spacing-compact .context { margin-top: 0.3125rem; padding-top: 0.3125rem; }
+
+.overlay-root .widget-title {
   display: flex;
   align-items: center;
   gap: 0.375rem;
@@ -77,24 +123,24 @@ body,
   color: #b9b9b9;
   margin-bottom: 0.375rem;
 }
-.widget-title .dot { color: #ff7d20; }
+.overlay-root .widget-title .dot { color: #ff7d20; }
 
 /* A little vertical air between rows. Padding rather than margin so adjacent rows
    share the gap and the block does not grow at its ends. */
-.row {
+.overlay-root .row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 0.75rem;
   padding-block: 0.09375rem;
 }
-.row-label {
+.overlay-root .row-label {
   color: var(--text-dim);
   font-size: 0.8125rem;
   /* Never squeezed: the label is the thing that makes the value legible. */
   flex: 0 0 auto;
 }
-.row-value {
+.overlay-root .row-value {
   font-variant-numeric: tabular-nums;
   /* Right-aligned, and allowed to wrap rather than push the widget wider. Body
      names such as "Wregoe LT-F c25-8 A 5" are long and entirely normal. */
@@ -102,12 +148,12 @@ body,
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.row-value.unknown { color: #9d9d9d; font-style: italic; }
-.row.muted { color: #9d9d9d; font-style: italic; }
+.overlay-root .row-value.unknown { color: #9d9d9d; font-style: italic; }
+.overlay-root .row.muted { color: #9d9d9d; font-style: italic; }
 
 /* Where the commander is *going*, as opposed to where they are. */
-.row-nav .row-value { color: var(--accent-soft); }
-.row-nav-glyph {
+.overlay-root .row-nav .row-value { color: var(--accent-soft); }
+.overlay-root .row-nav-glyph {
   color: var(--accent);
   font-size: 0.625rem;
   margin-right: 0.3125rem;
@@ -115,23 +161,27 @@ body,
   vertical-align: 0.05em;
 }
 /* Readable but clearly subordinate to the system name. */
-.row-meta {
+.overlay-root .row-meta {
   color: var(--text-faint);
   font-size: 0.6875rem;
   white-space: nowrap;
   margin-left: 0.375rem;
 }
-.row-meta::before {
+.overlay-root .row-meta::before {
   content: "·";
   margin-right: 0.375rem;
   color: #6f6f6f;
 }
 
-.edit-banner {
+/* A pill at the top centre rather than a full-width bar, so it covers as
+   little of the arrangement as possible. */
+.overlay-root .edit-banner {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 6px;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -149,7 +199,7 @@ body,
   pointer-events: auto;
 }
 
-.edit-done {
+.overlay-root .edit-done {
   pointer-events: auto;
   cursor: pointer;
   border: 1px solid rgba(0, 0, 0, 0.35);
@@ -160,17 +210,15 @@ body,
   border-radius: 5px;
   padding: 0.125rem 0.625rem;
 }
-.edit-done:hover { background: rgba(0, 0, 0, 0.3); }
+.overlay-root .edit-done:hover { background: rgba(0, 0, 0, 0.3); }
 
-.edit-hint { opacity: 0.8; font-weight: 600; }
+.overlay-root .edit-hint { opacity: 0.8; font-weight: 600; }
 
 /* The root is focused programmatically so Escape reaches it; that focus is a
    mechanism, not something to advertise with a ring across the whole screen. */
 .overlay-root:focus,
 .overlay-root:focus-visible { outline: none; }
 
-/* Keep the widget clear of the banner when it is parked at the very top. */
-.overlay-root.editing .widget { margin-top: 2.25rem; }
 
 /*
  * Text opacity, applied to the widget's contents rather than the widget.
@@ -182,12 +230,12 @@ body,
  *
  * Colour only. Nothing here is a size, so no opacity change can move anything.
  */
-.widget > * {
+.overlay-root .widget > * {
   opacity: var(--overlay-text-opacity, 1);
 }
 
 /* Beginner guidance. Present only in New CMDR mode; same facts, more words. */
-.context-guidance {
+.overlay-root .context-guidance {
   color: #c9c9c9;
   font-size: 0.75rem;
   line-height: 1.35;
@@ -199,19 +247,19 @@ body,
 
 /* ------------------------------------------------- field journal widget */
 
-.lj-place { color: #b9b9b9; font-size: 0.75rem; }
-.lj-body { color: var(--text-dim); font-size: 0.75rem; }
-.lj-title {
+.overlay-root .lj-place { color: #b9b9b9; font-size: 0.75rem; }
+.overlay-root .lj-body { color: var(--text-dim); font-size: 0.75rem; }
+.overlay-root .lj-title {
   color: var(--accent);
   font-weight: 600;
   margin-top: 0.125rem;
   overflow-wrap: anywhere;
 }
-.lj-detail { color: #d8d8d8; font-size: 0.8125rem; overflow-wrap: anywhere; }
-.lj-here { color: var(--text-faint); font-size: 0.6875rem; margin-top: 0.25rem; }
+.overlay-root .lj-detail { color: #d8d8d8; font-size: 0.8125rem; overflow-wrap: anywhere; }
+.overlay-root .lj-here { color: var(--text-faint); font-size: 0.6875rem; margin-top: 0.25rem; }
 
 /* The collapsed state, once the entry is no longer recent. */
-.lj-collapsed { color: var(--text-dim); font-size: 0.8125rem; }
+.overlay-root .lj-collapsed { color: var(--text-dim); font-size: 0.8125rem; }
 
 /* ------------------------------------------- live exobiology progress */
 
@@ -223,7 +271,7 @@ body,
  * mid-run is the counter, and what they want on returning is which organism they
  * were halfway through.
  */
-.lx-roster {
+.overlay-root .lx-roster {
   list-style: none;
   margin: 0.125rem 0 0;
   padding: 0;
@@ -232,7 +280,7 @@ body,
   gap: 0.1875rem;
 }
 
-.lx-genus {
+.overlay-root .lx-genus {
   display: flex;
   align-items: baseline;
   gap: 0.375rem;
@@ -240,16 +288,16 @@ body,
   line-height: 1.3;
 }
 
-.lx-genus-mark { width: 0.6875rem; flex: none; font-weight: 700; }
-.lx-genus-name { color: var(--text); overflow-wrap: anywhere; }
+.overlay-root .lx-genus-mark { width: 0.6875rem; flex: none; font-weight: 700; }
+.overlay-root .lx-genus-name { color: var(--text); overflow-wrap: anywhere; }
 
 /* The variant colour rides with the name but reads as secondary: it identifies
    the specimen, it is not what the row is about. */
-.lx-colour { color: var(--text-dim); }
+.overlay-root .lx-colour { color: var(--text-dim); }
 
 /* The state is the point of the row, so it sits at the end where the eye lands
    after the name, in tabular figures so the counts line up. */
-.lx-genus-state {
+.overlay-root .lx-genus-state {
   margin-left: auto;
   flex: none;
   font-size: 0.75rem;
@@ -258,22 +306,22 @@ body,
 }
 
 /* Collected: settled, and deliberately the quietest of the three. */
-.lx-complete .lx-genus-mark { color: #7ddc8a; }
-.lx-complete .lx-genus-name { color: var(--text-dim); }
-.lx-complete .lx-genus-state { color: #7ddc8a; }
+.overlay-root .lx-complete .lx-genus-mark { color: #7ddc8a; }
+.overlay-root .lx-complete .lx-genus-name { color: var(--text-dim); }
+.overlay-root .lx-complete .lx-genus-state { color: #7ddc8a; }
 
 /* In progress: the one the commander is working, so it carries the most weight. */
-.lx-sampling .lx-genus-mark { color: var(--accent); }
-.lx-sampling .lx-genus-name { font-weight: 600; }
-.lx-sampling .lx-genus-state { color: var(--accent); font-weight: 600; }
+.overlay-root .lx-sampling .lx-genus-mark { color: var(--accent); }
+.overlay-root .lx-sampling .lx-genus-name { font-weight: 600; }
+.overlay-root .lx-sampling .lx-genus-state { color: var(--accent); font-weight: 600; }
 
 /* Unscanned: the actionable one. Stated in words, never colour alone. */
-.lx-unscanned .lx-genus-mark { color: var(--text-faint); }
-.lx-unscanned .lx-genus-name { color: var(--text-dim); }
-.lx-unscanned .lx-genus-state { color: var(--text-faint); }
+.overlay-root .lx-unscanned .lx-genus-mark { color: var(--text-faint); }
+.overlay-root .lx-unscanned .lx-genus-name { color: var(--text-dim); }
+.overlay-root .lx-unscanned .lx-genus-state { color: var(--text-faint); }
 
 /* The answer to "am I done here?", so it does not have to be counted. */
-.lx-summary {
+.overlay-root .lx-summary {
   margin-top: 0.375rem;
   padding-top: 0.3125rem;
   border-top: 1px solid var(--accent-line);
@@ -286,13 +334,13 @@ body,
 /* Reads as a section rather than text that happens to follow a line: a fainter
    rule than before, and more space above it than below, so the heading belongs to
    what comes after it. */
-.context {
+.overlay-root .context {
   margin-top: 0.5625rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--rule-line);
 }
 
-.context-title {
+.overlay-root .context-title {
   color: var(--accent);
   font-weight: 600;
   font-size: 0.75rem;
@@ -301,14 +349,14 @@ body,
   /* Long titles wrap instead of widening the widget. */
   overflow-wrap: anywhere;
 }
-.context-sub {
+.overlay-root .context-sub {
   color: #b9b9b9;
   font-size: 0.8125rem;
   margin-top: 0.0625rem;
   overflow-wrap: anywhere;
 }
 
-.context-actions {
+.overlay-root .context-actions {
   list-style: none;
   padding: 0;
   margin: 0.375rem 0 0;
@@ -316,14 +364,14 @@ body,
   flex-direction: column;
   gap: 0.1875rem;
 }
-.context-actions li {
+.overlay-root .context-actions li {
   font-size: 0.8125rem;
   color: #d8d8d8;
   line-height: 1.3;
   padding-left: 0.875rem;
   position: relative;
 }
-.context-actions li::before {
+.overlay-root .context-actions li::before {
   content: "→";
   position: absolute;
   left: 0;
@@ -338,13 +386,13 @@ body,
  * promised an interaction that cannot happen. A dark translucent chip with a thin
  * accent-tinted border belongs to the HUD and reads as information.
  */
-.context-links {
+.overlay-root .context-links {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.3125rem;
   margin-top: 0.4375rem;
 }
-.context-link {
+.overlay-root .context-link {
   font-size: 0.6875rem;
   line-height: 1.5;
   color: #cbcbcb;
@@ -366,7 +414,7 @@ body,
  * than a bullet in a list. Kept below the primary context's own weight: the
  * marker is the bright accent, the title only the soft one.
  */
-.context-also {
+.overlay-root .context-also {
   list-style: none;
   padding: 0;
   margin: 0.4375rem 0 0;
@@ -374,24 +422,24 @@ body,
   flex-direction: column;
   gap: 0.3125rem;
 }
-.context-also li {
+.overlay-root .context-also li {
   display: flex;
   flex-direction: column;
   gap: 0.0625rem;
 }
-.context-also-title {
+.overlay-root .context-also-title {
   color: var(--accent-soft);
   font-size: 0.8125rem;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.context-also-mark {
+.overlay-root .context-also-mark {
   color: var(--accent);
   font-size: 0.5625rem;
   margin-right: 0.375rem;
   vertical-align: 0.12em;
 }
-.context-also-sub {
+.overlay-root .context-also-sub {
   color: var(--text-faint);
   font-size: 0.75rem;
   line-height: 1.3;
@@ -400,7 +448,7 @@ body,
   overflow-wrap: anywhere;
 }
 
-.context-note {
+.overlay-root .context-note {
   font-size: 0.6875rem;
   color: #b0b0b0;
   line-height: 1.35;
@@ -409,71 +457,72 @@ body,
 
 /* -------------------------------------------------- carrier jump widget */
 
-.cj { display: flex; flex-direction: column; gap: 0.0625rem; }
-.cj + .cj {
+.overlay-root .cj { display: flex; flex-direction: column; gap: 0.0625rem; }
+.overlay-root .cj + .cj {
   margin-top: 0.375rem;
   padding-top: 0.375rem;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.cj-name { color: #b9b9b9; font-size: 0.75rem; }
-.cj-line { display: flex; align-items: baseline; gap: 0.125rem; flex-wrap: wrap; }
+.overlay-root .cj-name { color: #b9b9b9; font-size: 0.75rem; }
+.overlay-root .cj-line { display: flex; align-items: baseline; gap: 0.125rem; flex-wrap: wrap; }
 
 /* Tabular figures so the seconds do not shift the line as they tick. */
-.cj-time {
+.overlay-root .cj-time {
   color: #ff9d5f;
   font-weight: 600;
   font-size: 1.0625rem;
   font-variant-numeric: tabular-nums;
 }
-.cj-departing {
+.overlay-root .cj-departing {
   color: #ffb84d;
   font-weight: 600;
   font-size: 0.9375rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.cj-dest { color: #d8d8d8; font-size: 0.8125rem; }
-.cj-body { color: #9a9a9a; }
+.overlay-root .cj-dest { color: #d8d8d8; font-size: 0.8125rem; }
+.overlay-root .cj-body { color: #9a9a9a; }
 
 /* ------------------------------------------------------- missions widget */
 
-.widget { max-width: 26rem; }
+.overlay-root .widget { max-width: 26rem; }
+.overlay-root .widget-slot.sized .widget { max-width: none; }
 
-.mission-summary {
+.overlay-root .mission-summary {
   display: flex; flex-wrap: wrap; gap: 0.75rem;
   font-size: 0.8125rem; color: #c8c8c8;
   padding-bottom: 0.375rem;
 }
-.mission-summary strong { color: #ededed; font-variant-numeric: tabular-nums; }
-.urgent { color: #e8c44a; }
+.overlay-root .mission-summary strong { color: #ededed; font-variant-numeric: tabular-nums; }
+.overlay-root .urgent { color: #e8c44a; }
 
-.next-stop {
+.overlay-root .next-stop {
   border-top: 1px solid rgba(255, 255, 255, 0.14);
   padding-top: 0.4375rem;
   margin-bottom: 0.375rem;
 }
-.next-stop-label {
+.overlay-root .next-stop-label {
   font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.07em; color: #a8a8a8;
 }
-.next-stop-where { color: #ff9d5f; font-weight: 600; }
-.next-stop-meta { font-size: 0.75rem; color: #b9b9b9; }
+.overlay-root .next-stop-where { color: #ff9d5f; font-weight: 600; }
+.overlay-root .next-stop-meta { font-size: 0.75rem; color: #b9b9b9; }
 
-.mission-rows { border-top: 1px solid rgba(255, 255, 255, 0.14); padding-top: 0.375rem; }
-.mission-row { padding: 0.1875rem 0; }
-.mission-row + .mission-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.overlay-root .mission-rows { border-top: 1px solid rgba(255, 255, 255, 0.14); padding-top: 0.375rem; }
+.overlay-root .mission-row { padding: 0.1875rem 0; }
+.overlay-root .mission-row + .mission-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
 
-.mission-row-head { display: flex; justify-content: space-between; gap: 0.75rem; }
-.mission-row-name {
+.overlay-root .mission-row-head { display: flex; justify-content: space-between; gap: 0.75rem; }
+.overlay-root .mission-row-name {
   font-size: 0.8125rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.mission-row-exp {
+.overlay-root .mission-row-exp {
   font-size: 0.75rem; color: #b9b9b9; white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.mission-row-meta { font-size: 0.6875rem; color: #a8a8a8; }
-.mission-row-meta .unknown { font-style: italic; color: #9d9d9d; }
+.overlay-root .mission-row-meta { font-size: 0.6875rem; color: #a8a8a8; }
+.overlay-root .mission-row-meta .unknown { font-style: italic; color: #9d9d9d; }
 
 /*
  * A mission whose objective is done and which only needs handing in.
@@ -486,30 +535,30 @@ body,
  * it is turned in -- and fading it would read as "dealt with", which is exactly
  * the mission a commander then forgets to collect on.
  */
-.mission-row-exp.done {
+.overlay-root .mission-row-exp.done {
   color: #6fcf7f;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 /* A quiet marker down the edge, so the row is findable in a list without
    relying on colour alone. */
-.mission-row.done {
+.overlay-root .mission-row.done {
   border-left: 2px solid #6fcf7f;
   padding-left: 0.375rem;
   margin-left: -0.5rem;
 }
 
-.mission-row-note {
+.overlay-root .mission-row-note {
   font-size: 0.6875rem; color: #b0b0b0; line-height: 1.35; margin-top: 0.125rem;
 }
-.note-label {
+.overlay-root .note-label {
   display: inline-block; margin-right: 0.3125rem; padding: 0 0.25rem;
   border-radius: 3px; background: rgba(255, 125, 32, 0.22); color: #ff9d5f;
   font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.04em;
   text-transform: uppercase; vertical-align: 1px;
 }
 
-.mission-more { font-size: 0.6875rem; color: #9d9d9d; padding-top: 0.25rem; }
+.overlay-root .mission-more { font-size: 0.6875rem; color: #9d9d9d; padding-top: 0.25rem; }
 
 /*
  * Base value and walking distance, under the organism they belong to.
@@ -517,7 +566,7 @@ body,
  * A second line rather than a wider row: the organism name is already long, and
  * this is reference the commander glances at rather than reads.
  */
-.lx-genus-info {
+.overlay-root .lx-genus-info {
   display: flex;
   gap: 0.625rem;
   margin: -0.0625rem 0 0.125rem 1.0625rem;
@@ -527,37 +576,43 @@ body,
 }
 
 /* Route: the next system is the one thing to read, so it is the large line. */
-.rt-next { font-size: 1.05em; font-weight: 700; }
-.rt-neutron { font-size: 0.75em; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
-.rt-line, .rt-done { font-size: 0.85em; opacity: 0.85; }
+.overlay-root .rt-next { font-size: 1.05em; font-weight: 700; }
+.overlay-root .rt-neutron { font-size: 0.75em; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
+.overlay-root .rt-line,
+.overlay-root .rt-done { font-size: 0.85em; opacity: 0.85; }
 
-.rt-carrier { margin-top: 0.25rem; }
+.overlay-root .rt-carrier { margin-top: 0.25rem; }
 
 /* ------------------------------------------- plugin panels (ui-v1, display only) */
 
 /* A plugin's overlay panel: same blocks as its page, sized for a HUD. */
-.plugin-panel { max-width: 26rem; }
-.plugin-panel .pui-heading { margin: 0.375rem 0 0.125rem; font-size: 0.8125rem; font-weight: 600; color: var(--accent); }
-.plugin-panel .pui-text { margin: 0.125rem 0; font-size: 0.8125rem; }
-.plugin-panel .tone-muted, .plugin-panel .pui-note { color: var(--text-dim); }
-.plugin-panel .tone-ok { color: #6fd38a; }
-.plugin-panel .tone-warn { color: #e8c44a; }
-.plugin-panel .tone-bad { color: #f0564c; }
-.plugin-panel .pui-stats { display: flex; flex-wrap: wrap; gap: 0.125rem 1rem; margin: 0.25rem 0; }
-.plugin-panel .pui-stat dt { font-size: 0.625rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
-.plugin-panel .pui-stat dd { margin: 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
-.plugin-panel .pui-progress { margin: 0.25rem 0 0.375rem; }
-.plugin-panel .pui-progress-head { display: flex; justify-content: space-between; font-size: 0.75rem; }
-.plugin-panel .pui-bar { height: 4px; background: var(--rule-line); border-radius: 2px; overflow: hidden; margin-top: 0.125rem; }
-.plugin-panel .pui-bar > div { height: 100%; background: var(--accent); }
-.plugin-panel .pui-table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
-.plugin-panel .pui-table th {
+.overlay-root .plugin-panel { max-width: 26rem; }
+.overlay-root .plugin-panel .pui-heading { margin: 0.375rem 0 0.125rem; font-size: 0.8125rem; font-weight: 600; color: var(--accent); }
+.overlay-root .plugin-panel .pui-text { margin: 0.125rem 0; font-size: 0.8125rem; }
+.overlay-root .plugin-panel .tone-muted,
+.overlay-root .plugin-panel .pui-note { color: var(--text-dim); }
+.overlay-root .plugin-panel .tone-ok { color: #6fd38a; }
+.overlay-root .plugin-panel .tone-warn { color: #e8c44a; }
+.overlay-root .plugin-panel .tone-bad { color: #f0564c; }
+.overlay-root .plugin-panel .pui-stats { display: flex; flex-wrap: wrap; gap: 0.125rem 1rem; margin: 0.25rem 0; }
+.overlay-root .plugin-panel .pui-stat dt { font-size: 0.625rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.overlay-root .plugin-panel .pui-stat dd { margin: 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.overlay-root .plugin-panel .pui-progress { margin: 0.25rem 0 0.375rem; }
+.overlay-root .plugin-panel .pui-progress-head { display: flex; justify-content: space-between; font-size: 0.75rem; }
+.overlay-root .plugin-panel .pui-bar { height: 4px; background: var(--rule-line); border-radius: 2px; overflow: hidden; margin-top: 0.125rem; }
+.overlay-root .plugin-panel .pui-bar > div { height: 100%; background: var(--accent); }
+.overlay-root .plugin-panel .pui-table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
+.overlay-root .plugin-panel .pui-table th {
   text-align: left; font-size: 0.625rem; font-weight: 600; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.06em; padding: 0 0.5rem 0.125rem 0;
 }
-.plugin-panel .pui-table td { padding: 0.0625rem 0.5rem 0.0625rem 0; border-top: 1px solid var(--rule-line); }
-.plugin-panel .pui-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.plugin-panel .pui-table th:last-child, .plugin-panel .pui-table td:last-child { padding-right: 0; }
-.plugin-panel .pui-table caption { display: none; }
-.plugin-panel .pui-mark { font-weight: 700; }
-.plugin-panel .pui-section-title { font-size: 0.6875rem; color: var(--accent-soft); margin-top: 0.375rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.overlay-root .plugin-panel .pui-table td { padding: 0.0625rem 0.5rem 0.0625rem 0; border-top: 1px solid var(--rule-line); }
+.overlay-root .plugin-panel .pui-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.overlay-root .plugin-panel .pui-table th:last-child,
+.overlay-root .plugin-panel .pui-table td:last-child { padding-right: 0; }
+.overlay-root .plugin-panel .pui-table caption { display: none; }
+.overlay-root .plugin-panel .pui-mark { font-weight: 700; }
+.overlay-root .plugin-panel .pui-section-title { font-size: 0.6875rem; color: var(--accent-soft); margin-top: 0.375rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* A plugin widget whose content could not be drawn: the rest of the overlay carries on. */
+.overlay-root .plugin-failed { color: var(--text-dim); font-size: 0.8125rem; font-style: italic; }

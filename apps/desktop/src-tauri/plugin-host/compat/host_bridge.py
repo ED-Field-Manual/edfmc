@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 _status: Callable[[str], None] = lambda message: None
-_publish: Callable[[str, Any], None] = lambda topic, data: None
+_publish: Callable[[str, Any, Any], None] = lambda topic, data, folder: None
 
 
 def set_status_handler(handler: Callable[[str], None]) -> None:
@@ -17,13 +17,13 @@ def status(message: str) -> None:
     _status(message)
 
 
-def set_publish_handler(handler: Callable[[str, Any], None]) -> None:
+def set_publish_handler(handler: Callable[[str, Any, Any], None]) -> None:
     global _publish
     _publish = handler
 
 
-def publish(topic: str, data: Any) -> None:
-    _publish(topic, data)
+def publish(topic: str, data: Any, folder: str | None = None) -> None:
+    _publish(topic, data, folder)
 
 
 # --- native pages ------------------------------------------------------------
@@ -47,13 +47,16 @@ def page_update(folder: str, state: Any) -> None:
 
 # --- overlay panels ----------------------------------------------------------
 
-_overlay_update: Callable[[str, str, Any], None] = lambda folder, title, content: None
+#: folder -> the widget ids it registered ('' for its unnamed one).
+overlay_widgets: dict[str, set[str]] = {}
+_overlay_update: Callable[..., None] = lambda folder, title, content, widget=None, description=None: None
 
 
-def set_overlay_handler(handler: Callable[[str, str, Any], None]) -> None:
+def set_overlay_handler(handler: Callable[..., None]) -> None:
     global _overlay_update
     _overlay_update = handler
 
 
-def overlay_update(folder: str, title: str, content: Any) -> None:
-    _overlay_update(folder, title, content)
+def overlay_update(folder: str, title: str, content: Any, widget: str | None = None,
+                   description: str | None = None) -> None:
+    _overlay_update(folder, title, content, widget, description)

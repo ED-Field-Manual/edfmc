@@ -26,7 +26,7 @@ A separate Tauri window, distinct from the main window:
 | `alwaysOnTop` | true |
 | `skipTaskbar` | true |
 | `focus` | false |
-| Click-through | `set_ignore_cursor_events(true)` in normal mode, `false` in edit mode |
+| Click-through | `set_ignore_cursor_events(true)` in normal mode, `false` in Arrange mode |
 
 Position is tracked against the Elite Dangerous window via Win32, so the overlay
 follows the game as it moves and resizes. DPI is handled per-monitor: a window
@@ -106,29 +106,154 @@ EDMCOverlay and EDMC Modern Overlay are GPL-licensed. We have not read or copied
 their source. If we ever want to study their behaviour, that is an intentional
 licensing decision to be made deliberately, not by accident during implementation.
 
-## Edit mode
+## Arrange mode
 
 Two modes, one window:
 
 - **Normal:** click-through. Mouse input passes to the game; the overlay cannot
   be interacted with and cannot steal focus.
-- **Edit:** accepts mouse input. Widgets become draggable and resizable, with layouts
-  persisted to `overlay_layouts` in local SQLite.
+- **Arrange:** accepts mouse input. Widgets can be dragged by any part and
+  resized from the grip on their right edge. A pill at the top of the screen
+  says so and has a **Done** button; **Esc** also ends it.
 
-## Widgets
+The Overlay page starts it with **Arrange widgets**, which is offered only while
+the overlay is actually showing over the game (arranging an overlay that is not
+on screen is impossible). The button follows the real state: the backend
+broadcasts `overlay://edit-mode` whenever it changes, including from Done or Esc
+in the overlay and when the overlay is switched off, which also ends it.
+Leaving Arrange mode always goes through `overlay_set_edit_mode(false)`, which
+restores click-through (`set_ignore_cursor_events(true)`). Switching the overlay
+off leaves Arrange mode first, so the window can never be left hidden and
+interactive.
 
-Phase 2 builds the overlay *engine* plus exactly one trivial widget (Current
-Context), to prove positioning, DPI, click-through and edit mode. Building eight
-widgets against an unproven engine would mean rewriting eight widgets.
+### Positions, sizes and where they are kept
 
-Planned afterwards, in rough priority order: Current Context, Mission Next Stop,
-Mission Summary, Settlement Info, Research Session, Colonisation Needs, Market
-Destination, Notifications.
+A widget's placement is `{x, y, width}` in the overlay window's CSS pixels
+(`src/lib/overlayLayout.ts`). `width` is null until the commander resizes it;
+height always follows the content. Resizing is limited to 200-720 px.
+
+The layout is stored in the **settings table** (key `overlayLayout`, version 3)
+with every other overlay setting, and owned by the main window. It reaches the
+overlay with the rest of its pushed state; when the commander moves or resizes
+something, the overlay sends the new layout back (`overlay://layout`) once, on
+release, and the main window stores it and pushes it back with a new
+`layoutRevision`. The overlay applies a pushed layout only when the revision
+changes, so an ordinary state push during a drag cannot snap a widget back.
+
+Before this, positions lived in the overlay window's own browser storage
+(`localStorage`, key `edfm.overlay.layout.v2`), and this document wrongly said
+SQLite (`overlay_layouts`, a table that never existed). The first start of a
+build with this change copies that layout into settings, so nobody's
+arrangement is lost; the old key is left in place and no longer read.
+
+**Resolution, DPI and monitors.** The overlay window is always the size of the
+game window, on whichever monitor the game is on, so positions are relative to
+the game, not the desktop. A layout records the window size it was arranged in;
+drawn in a window of a different size (another resolution, another monitor,
+another DPI scale), positions are scaled to fit and widths are kept.
+
+**Never lost.** However a layout was stored, every widget is drawn with at least
+48 px on screen. A corrupt or partial layout falls back to standard positions,
+widget by widget. Clamping happens when drawing and is never written back, so a
+commander who plays at two resolutions keeps one layout that fits both.
+
+### Reset Layout, presets and saved layouts
+
+- **Reset Layout** puts every widget, plugin widgets included, back in its
+  standard position at its natural width. It changes nothing else: which
+  widgets are on, their options and appearance stay. It asks first, and is
+  offered only when the layout differs from the standard one.
+- **Presets** are starting points, not modes. Applying one (after confirming)
+  sets which built-in widgets are on, a few of their options, and their
+  positions, laid out for the game window's size; everything can be changed
+  afterwards. Plugin widgets keep their positions.
+
+  | Preset | On | Notes |
+  |---|---|---|
+  | Minimal | Current Context, Carrier Jump, Route | Compact route, narrow column |
+  | Standard | Context, Missions, Carrier Jump, Route | The shipped arrangement |
+  | Detailed | Everything, including Live Journal | Wider panels, 8 missions |
+
+- **Your layouts:** up to ten named snapshots of positions, sizes, which
+  built-in widgets are on and their options (setting `overlayProfiles`).
+  Switching to one asks first. Saving under an existing name, ignoring case,
+  replaces it. Plugin widgets' switches are not part of a saved layout.
+
+## Showing and hiding while playing
+
+An optional global hotkey switches the overlay on and off, the same as the
+switch on the Overlay page. It is **unset by default** so it cannot clash with a
+commander's game bindings, is chosen like the screenshot hotkey, and is stored
+as `overlay.toggleHotkey`. It is bound together with the app's other hotkeys
+(screenshot capture, Router's copy-waypoint and copy-carrier-jump), and none of
+them may share a combination: picking one that another already has is refused
+with which one has it (`src/lib/hotkeys.ts`). A combination the OS will not
+give is refused too, and the previous one is kept. The hotkey only starts or
+stops EDFMC's own overlay window; it sends nothing to the game.
+
+## The Overlay page
+
+For players, in this order:
+
+1. **The switch**, and **one status line** built from what is observed: the
+   game window (found, minimised, focused), Elite's own display-mode setting,
+   and whether the overlay window is really on screen (`overlay://runtime`,
+   emitted by the tracking thread when visibility changes, and
+   `overlay_runtime`). It never says the overlay is showing because the switch
+   is on. Examples: *Elite Dangerous offline — Borderless mode supported.*,
+   *Elite Dangerous running (Borderless) — overlay showing.*, *... — overlay
+   hidden until Elite is the active window.*, *Elite Dangerous running in
+   Fullscreen — switch to Borderless to see the overlay.*
+   Then **Arrange widgets**, **Reset layout**, and *Hide when Elite isn't the
+   active window*.
+2. **Widgets:** one list, a row each with a short description, a switch and,
+   where a widget has them, options (below). Plugin widgets follow under *From
+   plugins*.
+3. **Appearance**, with a preview.
+4. **Layouts**: presets and saved layouts.
+5. **Shortcut**: the show/hide hotkey.
+
+Raw display-mode values, window position and size, monitor size, DPI, focus,
+tracking and visibility flags and the layout's reference size moved to the
+**Overlay** card on the Diagnostics page. Nothing was removed.
+
+### Widget options
+
+Each one changes what the overlay draws; none is decorative (setting
+`overlayWidgetOptions`).
+
+| Widget | Options |
+|---|---|
+| Missions | Missions listed (1-10, default 5); EDFM notes on mission types |
+| Route | Compact (next system and jumps left) or Detailed; waypoint count; destination; which plugin's route, when more than one publishes one |
+| Live Journal / Exobiology | Show the newest journal entry when not sampling (off: exobiology only); value and sample distance per organism |
+
+Current Context and Carrier Jump have none.
+
+### Preview
+
+The Appearance section shows the enabled widgets drawn by **the overlay's own
+components** (`src/overlay/widgets.tsx`) and stylesheet
+(`src/overlay/widgets.css`, every rule scoped under `.overlay-root` so the main
+window's styles are untouched), so the preview cannot drift from the overlay.
+It uses sample data labelled **Sample data**, with names such as *Sample
+Commander* that cannot be mistaken for the commander's own, follows every
+appearance setting and widget option, and can be shown over a dark or a bright
+scene. It is static: the sample carrier countdown does not tick, so the page
+costs nothing while open. Plugin widgets appear as a placeholder, since their
+content is the plugin's and live.
 
 ## Performance
 
 The overlay redraws only when the underlying state actually changes, or when an
-animation genuinely requires a frame. It must not run a render loop. This matters
+animation genuinely requires a frame. It must not run a render loop. The only
+timers are the carrier countdown (1 s, only while a jump is scheduled) and the
+Live Journal's fresh-or-collapsed check (1 min). Dragging and resizing update
+only while the pointer moves in Arrange mode, and the layout is sent to the
+main window once, on release. Window tracking stays at 10 Hz and moves or
+shows the window only on a change; visibility changes are announced as events
+rather than polled for. With the overlay off, the Overlay page checks for the
+game window every 5 s, only while that page is open. This matters
 more here than anywhere else in the application: the overlay is, by definition,
 always running while a game is running (§30).
 
@@ -178,8 +303,21 @@ text opacity stays at 1, text changes while the background stays at 0.72, and al
 four render at **identical dimensions** -- these are colour properties only, so no
 opacity change can move anything.
 
-Settings shows a live preview using the same two variables, so opacity can be
-judged without alt-tabbing into Elite.
+Two more, both applied to each widget's contents so nothing moves:
+
+```
+--overlay-scale          widget size, text included   0.8 .. 1.5  default 1
+spacing                  comfortable | compact        compact: less padding and leading
+```
+
+Size uses CSS `zoom` on the panel inside each positioned slot, so a widget grows
+from its corner and a resized width stays its width on screen at any size. The
+bounds keep the smallest labels above roughly 9 px at 1080p and stop one widget
+covering a quarter of the screen. Text size is part of Size rather than a
+separate control, because changing it alone breaks the widgets' proportions.
+
+The Overlay page's preview uses the same variables and the same components; see
+**Preview** above.
 
 ### Live Journal lifecycle
 
@@ -301,19 +439,36 @@ hotkeys are bound together, because the shortcut plugin's `unregisterAll` would
 otherwise drop whichever one was not being changed. The two hotkeys cannot share
 a combination.
 
+Routes are kept per plugin, so two route plugins do not overwrite each other. The
+widget shows the plugin the commander picks in its options (offered only when
+more than one plugin has published a route this session), or otherwise whichever
+route changed most recently.
+
 It is on by default because it only appears while a plugin has a route. A
 commander without one never sees it. The app checks every published field on
 arrival, because the data comes from a plugin: strings are capped, and counts
 must be finite and non-negative. The route clears when the plugin host stops.
 
-### Plugin panels
+### Plugin widgets
 
-A plugin can add one panel of its own (`edfmc.register_overlay`, see
-docs/PYTHON-PLUGINS.md). The overlay draws it from the same `ui-v1` blocks as
-plugin pages, display only, under the plugin's chosen title. Each has a switch
-on the Overlay page and is positioned in edit mode like any other widget; a new
-panel opens in a column to the right of the built-in ones. Construction
-Logistics uses one for its hauling, delivery and shopping views.
+A plugin can add up to four widgets of its own (`edfmc.register_overlay`, see
+docs/PYTHON-PLUGINS.md). The overlay draws them from the same `ui-v1` blocks as
+plugin pages, display only, under the plugin's chosen titles, through the same
+positioning, resizing, appearance, layouts and reset as built-in widgets: there
+is no second overlay system. Each has a switch on the Overlay page (on by
+default; the list of those switched *off* is kept, keyed by `folder` or
+`folder:id`). A new widget opens in a column to the right of the built-in ones.
+
+Content is validated in the main window (`readUiOverlay`) before it reaches the
+overlay; anything that is not a recognised block is dropped, so a plugin cannot
+send HTML or script. Each plugin widget renders inside an error boundary: if its
+content still cannot be drawn, that widget says so and the rest of the overlay
+carries on. A plugin that is switched off, uninstalled or crashes takes its
+widgets with it (the host's exit clears them).
+
+Construction Logistics uses one widget for its hauling, delivery and shopping
+views. The mechanism is generic and lives in core; what a widget shows is the
+plugin's business.
 
 ## Guidance in the overlay
 

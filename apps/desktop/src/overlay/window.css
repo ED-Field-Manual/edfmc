@@ -1,0 +1,21 @@
+/*
+ * The overlay window itself. Imported only by the overlay window's entry,
+ * never by the main window, which shows the same widgets in its preview.
+ *
+ * The document background MUST stay fully transparent: the window is
+ * composited over the game, so any opaque background would black out the
+ * screen.
+ */
+
+html,
+body,
+#overlay-root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  /* Belt and braces alongside the native click-through flag: even if the window
+     is momentarily interactive, empty regions should never swallow a click. */
+  pointer-events: none;
+  user-select: none;
+}

@@ -181,8 +181,16 @@ understands one topic:
 | `route` | The overlay's Route widget (`docs/OVERLAY.md`) | `next`, `nextIsNeutron`, `destination`, `jumpsLeft`, `waypoint`, `waypoints`, `finished`; or `None` to clear |
 
 Unknown topics are ignored. Nothing published leaves the machine. The host sends
-it to the app as `{"type":"publish","topic":...,"data":...}`, and the app checks
-every field before using it.
+it to the app as `{"type":"publish","topic":...,"data":...,"folder":...}`, and the
+app checks every field before using it.
+
+`folder` is the plugin that published it, found by the host from the call stack
+(the first frame inside the plugins folder), so a plugin cannot speak for
+another by accident. Routes are kept **per plugin**: two route plugins do not
+overwrite each other. The overlay shows the one the commander picks under the
+Route widget's options (offered only when more than one plugin has published a
+route), or otherwise whichever changed most recently. A plugin clearing its route
+(`None`) clears only its own.
 
 ## Native pages: tabs the app draws
 
@@ -263,23 +271,38 @@ page.update({'kind': 'ui-v1', 'blocks': [
   rows, 12 columns, 16 controls a row, string lengths. Anything unrecognised is
   dropped. Status should never rely on colour alone: give a `mark` or words.
 
-## Overlay panels
+## Overlay widgets
 
 ```python
 panel = edfmc.register_overlay('Construction')   # in plugin_start3
 panel.update({'blocks': [...]})                  # ui-v1 blocks; None to hide
+
+# Further widgets need an id; a description is shown on the Overlay page.
+needs = edfmc.register_overlay('Site needs', id='needs',
+                               description='What the next site still needs')
 ```
 
-Each plugin may have one panel in the game overlay. It is display only, since
-the overlay is click-through while playing, so controls and editable cells are
-dropped. Tables show at most 14 rows and a panel at most 12 blocks.
+A plugin may have up to **four** widgets in the game overlay. Each is display
+only, since the overlay is click-through while playing, so controls and editable
+cells are dropped. Tables show at most 14 rows and a widget at most 12 blocks.
 
-- It appears on the **Overlay page** with its own switch (on by default),
-  takes its position from edit mode like any widget, and uses the overlay's
-  transparency.
+- **Ids** are lower-case letters, digits and hyphens, up to 32 characters. The
+  first widget may have none; it is keyed by the plugin folder alone, as it was
+  before ids existed, so existing positions and switches still apply. Others
+  are keyed `<folder>:<id>`. A fifth raises an error in the plugin, and the app
+  ignores one regardless.
+- Each appears on the **Overlay page** under *From plugins*, with its title, its
+  description (or which plugin it is from) and its own switch (on by default).
+  It is moved and resized in Arrange mode like any widget, and follows the
+  overlay's appearance settings and layouts.
 - It exists only while its plugin is running: a plugin that is switched off
-  never runs, so never has a panel, and stopping the plugin host clears every
-  panel it published.
+  never runs, so never has a widget, and stopping the plugin host clears every
+  widget it published.
+- **Isolation.** Content is checked by `readUiOverlay` before the overlay sees
+  it: only `ui-v1` blocks, rendered as text by the app. Nothing a plugin sends
+  can become HTML or script. A widget whose content still cannot be drawn shows
+  *This widget could not be shown.*, and the rest of the overlay carries on.
+- The host sends `{"type":"overlay","folder":...,"widget":...,"title":...,"description":...,"content":...}`.
 
 ## A folder for a plugin's data
 

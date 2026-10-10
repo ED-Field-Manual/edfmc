@@ -21,11 +21,31 @@ import { logger } from './logger.js';
 import { checkForUpdates, type UpdateResult } from './pluginUpdates.js';
 import { readUiOverlay, type UiBlock } from './pluginUi.js';
 
-/** A plugin's overlay panel (`edfmc.register_overlay`), already checked. */
-export interface PluginOverlayPanel {
+/**
+ * A plugin's overlay widget (`edfmc.register_overlay`), already checked.
+ *
+ * Keyed in `overlays` by `folder` for a plugin's first, unnamed widget (as
+ * before widgets had ids, so existing layouts and switches still apply), and
+ * by `folder:id` for each further one.
+ */
+export interface PluginOverlayWidget {
   readonly folder: string;
+  /** The plugin's own id for it, or null for its unnamed widget. */
+  readonly widget: string | null;
   readonly title: string;
-  readonly blocks: readonly UiBlock[];
+  /** One line for the Overlay page, or null. */
+  readonly description: string | null;
+  /** Null while the plugin has nothing to show. */
+  readonly blocks: readonly UiBlock[] | null;
+}
+
+/** A plugin may register this many overlay widgets; more are ignored. */
+export const MAX_PLUGIN_WIDGETS = 4;
+const WIDGET_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/** The key a plugin widget is stored and switched under. */
+export function pluginWidgetKey(folder: string, widget: string | null): string {
+  return widget === null ? folder : `${folder}:${widget}`;
 }
 
 export interface PythonPluginStatus {
@@ -67,11 +87,11 @@ export interface PythonPluginView {
   /** Native pages' latest state, by plugin folder. See `edfmc.register_page`. */
   readonly pages: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
-   * Overlay panels plugins registered, by folder: `title` always, `blocks`
-   * null while the plugin has nothing to show. Only plugins that are running
-   * have one; switching a plugin off or stopping the host removes it.
+   * Overlay widgets plugins registered, by key (see `pluginWidgetKey`). Only
+   * plugins that are running have any; switching a plugin off or stopping the
+   * host removes them.
    */
-  readonly overlays: Readonly<Record<string, { readonly title: string; readonly blocks: readonly UiBlock[] | null }>>;
+  readonly overlays: Readonly<Record<string, PluginOverlayWidget>>;
 }
 
 /**
@@ -156,10 +176,17 @@ export class PythonPlugins {
   private updateChecks = true;
   private checking = false;
   private updates: Record<string, UpdateResult> = {};
-  private route: PluginRoute | null = null;
+  /**
+   * Routes by the plugin that published them, with when, so that two route
+   * plugins do not overwrite each other: the commander picks one on the
+   * Overlay page, or the overlay follows whichever changed last. A publish the
+   * host could not attribute is kept under "".
+   */
+  private routes: Record<string, { route: PluginRoute | null; at: number }> = {};
+  private routeClock = 0;
   /** The latest page state each native plugin published, by folder. */
   private pages: Record<string, Readonly<Record<string, unknown>>> = {};
-  private overlays: Record<string, { title: string; blocks: readonly UiBlock[] | null }> = {};
+  private overlays: Record<string, PluginOverlayWidget> = {};
   /** Repos the commander pasted, by plugin folder. */
   private repos: Record<string, string> = {};
 
@@ -176,10 +203,30 @@ export class PythonPlugins {
       updateChecks: this.updateChecks,
       checking: this.checking,
       updates: this.updates,
-      route: this.route,
+      route: this.routeFor(null),
       pages: this.pages,
       overlays: this.overlays,
     };
+  }
+
+  /**
+   * The route to show: the chosen plugin's when it has one, otherwise the
+   * most recently changed route from any plugin still running.
+   */
+  routeFor(source: string | null): PluginRoute | null {
+    if (source !== null && this.routes[source]?.route) return this.routes[source]!.route;
+    let best: { route: PluginRoute | null; at: number } | null = null;
+    for (const entry of Object.values(this.routes)) {
+      if (entry.route !== null && (best === null || entry.at > best.at)) best = entry;
+    }
+    return best?.route ?? null;
+  }
+
+  /** Plugins that have published a route (or cleared one) since they started. */
+  routeSources(): readonly string[] {
+    return Object.keys(this.routes)
+      .filter((f) => f !== '')
+      .sort();
   }
 
   /** Read the switch and, when it is on, start plugins for this journal folder. */
@@ -370,21 +417,34 @@ export class PythonPlugins {
         this.pages = { ...this.pages, [folder]: state as Record<string, unknown> };
         break;
       }
-      case 'publish':
+      case 'publish': {
         if (message['topic'] !== 'route') return;
-        this.route = readPluginRoute(message['data']);
+        const from = typeof message['folder'] === 'string' && message['folder'].length <= 200 ? message['folder'] : '';
+        this.routes = { ...this.routes, [from]: { route: readPluginRoute(message['data']), at: ++this.routeClock } };
         break;
+      }
       case 'overlay': {
         const folder = message['folder'];
-        if (typeof folder !== 'string' || folder.length > 200) return;
-        const title = typeof message['title'] === 'string' ? message['title'].slice(0, 60) : folder;
+        if (typeof folder !== 'string' || folder.length === 0 || folder.length > 200) return;
+        const rawId = message['widget'];
+        if (rawId !== undefined && rawId !== null && (typeof rawId !== 'string' || !WIDGET_ID.test(rawId))) return;
+        const widget = typeof rawId === 'string' ? rawId : null;
+        const key = pluginWidgetKey(folder, widget);
+        // A plugin's further widgets are capped; the one it already has keeps updating.
+        const mine = Object.values(this.overlays).filter((w) => w.folder === folder).length;
+        if (!(key in this.overlays) && mine >= MAX_PLUGIN_WIDGETS) return;
+        const title = typeof message['title'] === 'string' && message['title'].trim() ? message['title'].trim().slice(0, 60) : folder;
+        const description =
+          typeof message['description'] === 'string' && message['description'].trim()
+            ? message['description'].trim().slice(0, 140)
+            : null;
         // `content: null` is the plugin saying it has nothing to show right now.
         const blocks = message['content'] === null ? null : readUiOverlay(message['content']);
-        this.overlays = { ...this.overlays, [folder]: { title, blocks } };
+        this.overlays = { ...this.overlays, [key]: { folder, widget, title, description, blocks } };
         break;
       }
       case 'exited':
-        this.route = null;
+        this.routes = {};
         this.pages = {};
         this.overlays = {};
         this.running = false;
@@ -435,7 +495,7 @@ export class PythonPlugins {
     // What the stopped host published goes with it. Its own exit message is
     // ignored (the pid no longer matches), so it is cleared here: otherwise a
     // plugin just switched off would keep its page, route and overlay panel.
-    this.route = null;
+    this.routes = {};
     this.pages = {};
     this.overlays = {};
   }

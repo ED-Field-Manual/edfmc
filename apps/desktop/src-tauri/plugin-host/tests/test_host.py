@@ -196,7 +196,7 @@ class EdfmcModuleTest(unittest.TestCase):
         import edfmc
         import host_bridge
         sent = []
-        host_bridge.set_publish_handler(lambda topic, data: sent.append((topic, data)))
+        host_bridge.set_publish_handler(lambda topic, data, folder: sent.append((topic, data)))
         edfmc.publish('route', {'next': 'Achenar', 'jumpsLeft': 4})
         self.assertEqual(sent, [('route', {'next': 'Achenar', 'jumpsLeft': 4})])
         with self.assertRaises(TypeError):
@@ -255,7 +255,8 @@ class PluginApiV2Test(unittest.TestCase):
     def test_register_overlay_announces_itself_and_sends_updates(self) -> None:
         import host_bridge
         sent = []
-        host_bridge.set_overlay_handler(lambda folder, title, content: sent.append((folder, title, content)))
+        host_bridge.set_overlay_handler(lambda folder, title, content, widget=None, description=None:
+                                        sent.append((folder, title, content)))
         plugin = self._load('Panel', '''
             import edfmc
             def plugin_start3(plugin_dir):
@@ -271,6 +272,56 @@ class PluginApiV2Test(unittest.TestCase):
         with self.assertRaises(TypeError):
             plugin.module.panel.update({'x': object()})
 
+    def test_a_plugin_can_register_several_widgets_with_ids(self) -> None:
+        import host_bridge
+        sent = []
+        host_bridge.set_overlay_handler(lambda folder, title, content, widget=None, description=None:
+                                        sent.append((folder, title, widget, description)))
+        plugin = self._load('Multi', '''
+            import edfmc
+            def plugin_start3(plugin_dir):
+                global a, b
+                a = edfmc.register_overlay('Main')
+                b = edfmc.register_overlay('Needs', id='needs', description='What is still needed')
+                return 'Multi'
+        ''')
+        self.assertIsNone(plugin.error)
+        self.assertEqual(sent, [('Multi', 'Main', None, None), ('Multi', 'Needs', 'needs', 'What is still needed')])
+
+    def test_widget_ids_are_checked_and_capped(self) -> None:
+        plugin = self._load('Greedy', '''
+            import edfmc
+            errors = []
+            def plugin_start3(plugin_dir):
+                for bad in ('Has Space', 'UPPER', '-lead', 'x' * 40):
+                    try:
+                        edfmc.register_overlay('t', id=bad)
+                    except ValueError:
+                        errors.append(bad)
+                for i in range(4):
+                    edfmc.register_overlay('t', id=f'w{i}')
+                try:
+                    edfmc.register_overlay('t', id='w4')
+                except RuntimeError:
+                    errors.append('cap')
+                return 'Greedy'
+        ''')
+        self.assertIsNone(plugin.error)
+        self.assertEqual(plugin.module.errors, ['Has Space', 'UPPER', '-lead', 'x' * 40, 'cap'])
+
+    def test_publish_says_which_plugin_it_came_from(self) -> None:
+        import host_bridge
+        sent = []
+        host_bridge.set_publish_handler(lambda topic, data, folder: sent.append((topic, folder)))
+        plugin = self._load('RouteOwner', '''
+            import edfmc
+            def plugin_start3(plugin_dir):
+                return 'RouteOwner'
+            def later():
+                edfmc.publish('route', {'next': 'Sol'})
+        ''')
+        plugin.module.later()  # outside plugin_start3, as a route update would be
+        self.assertEqual(sent, [('route', 'RouteOwner')])
     def test_data_dir_is_beside_the_plugins_folder_not_inside_it(self) -> None:
         plugin = self._load('Keeper', '''
             import edfmc
@@ -303,7 +354,8 @@ class ConstructionLogisticsInHostTest(unittest.TestCase):
         shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__', 'tests'), dirs_exist_ok=True)
         pages, panels = [], []
         host_bridge.set_page_handler(lambda folder, state: pages.append((folder, state)))
-        host_bridge.set_overlay_handler(lambda folder, title, content: panels.append((folder, title, content)))
+        host_bridge.set_overlay_handler(lambda folder, title, content, widget=None, description=None:
+                                        panels.append((folder, title, content)))
         old = os.environ.get('LOCALAPPDATA')
         os.environ['LOCALAPPDATA'] = _TMP  # never this machine's EDMC folder
         try:

@@ -197,7 +197,28 @@ import {
   type OverlayMissions,
   type OverlayPluginPanel,
   type OverlayWidgets,
+  LAYOUT_EVENT,
 } from './overlay.js';
+import {
+  DEFAULT_LAYOUT,
+  DEFAULT_WIDGET_OPTIONS,
+  PRESETS,
+  isCustomised,
+  parseLayout,
+  parseProfiles,
+  parseWidgetOptions,
+  presetLayout,
+  resetLayout,
+  sameLayout,
+  saveProfile,
+  type OverlayLayout,
+  type OverlayProfile,
+  type OverlayWidgetOptions,
+  type PresetId,
+  type Viewport,
+  type WidgetVisibility,
+} from './overlayLayout.js';
+import { hotkeyConflict, type HotkeyAction } from './hotkeys.js';
 import { savedGamesDir, tauriFs, watchJournalDirectory } from './tauriFs.js';
 import { PythonPlugins, type PythonPluginView } from './pythonPlugins.js';
 
@@ -248,12 +269,26 @@ export function travelLabel(travel: CommanderState['travel']): string {
 }
 
 /**
- * How many mission rows reach the overlay.
- *
- * Small on purpose. The overlay competes with the game for attention, and a long
- * list there is worse than none — the main window holds the complete set.
+ * How many mission rows reach the overlay: the Missions widget's own setting,
+ * five by default and at most ten. Small on purpose. The overlay competes with
+ * the game for attention, and the main window holds the complete set.
  */
-const OVERLAY_MISSION_ROWS = 5;
+
+/** Browser storage the overlay used for positions before the main window kept them. */
+const LEGACY_LAYOUT_KEY = 'edfm.overlay.layout.v2';
+
+/** The Overlay page's view of overlay settings, beyond appearance and visibility. */
+export interface OverlayManagerView {
+  readonly layout: OverlayLayout;
+  /** Different from what Reset Layout gives, so Reset asks before overwriting it. */
+  readonly layoutCustomised: boolean;
+  readonly options: OverlayWidgetOptions;
+  readonly profiles: readonly OverlayProfile[];
+  /** Shows and hides the overlay; null when unset, which is the default. */
+  readonly toggleHotkey: string | null;
+  /** Plugin folders that have published a route this session, for the Route widget's source choice. */
+  readonly routeSources: readonly string[];
+}
 
 /** Stamped onto every observation so a report can be traced to a build. */
 const COMPANION_VERSION = '0.1.0';
@@ -411,6 +446,7 @@ export interface CompanionSnapshot {
    */
   readonly guidanceChosen: boolean;
   readonly appearance: OverlayAppearance;
+  readonly overlay: OverlayManagerView;
   /**
    * Per-integration state: enabled, and whether a credential exists. Never the
    * credential itself, which cannot reach JavaScript at all.
@@ -2779,6 +2815,9 @@ export class Companion {
   private routeHotkeyError: string | null = null;
   private carrierCopyHotkey: string | null = null;
   private carrierHotkeyError: string | null = null;
+  /** Shows and hides the overlay. Unset until the commander picks one. */
+  private overlayToggleHotkey: string | null = null;
+  private overlayHotkeyError: string | null = null;
   /** Rebuilt on every catalog read; never persisted, because it is not a fact
       about the screenshot but about the disk at this moment. */
   private missingScreenshots: ReadonlySet<string> = new Set();
@@ -2830,6 +2869,7 @@ export class Companion {
     this.screenshotFolderOk = await this.checkScreenshotFolder();
     this.routeCopyHotkey = (await this.getSetting('route.copyHotkey')) || null;
     this.carrierCopyHotkey = (await this.getSetting('route.carrierCopyHotkey')) || null;
+    this.overlayToggleHotkey = (await this.getSetting('overlay.toggleHotkey')) || null;
     await this.registerScreenshotHotkey();
     this.notify();
   }
@@ -2883,7 +2923,7 @@ export class Companion {
       ({ unregisterAll, register } = await import('@tauri-apps/plugin-global-shortcut'));
       await unregisterAll();
     } catch (err) {
-      logger.warn('screenshot', 'Global shortcuts unavailable', { error: String(err) });
+      logger.warn('hotkeys', 'Global shortcuts unavailable', { error: String(err) });
       return;
     }
     const bind = async (binding: string | null, run: () => void): Promise<boolean> => {
@@ -2896,7 +2936,7 @@ export class Companion {
         });
         return true;
       } catch (err) {
-        logger.warn('screenshot', 'Hotkey registration failed', { error: String(err) });
+        logger.warn('hotkeys', 'Hotkey registration failed', { error: String(err) });
         return false;
       }
     };
@@ -2914,7 +2954,50 @@ export class Companion {
       this.carrierHotkeyError = taken;
       this.notify();
     }
+    // Shows and hides EDFMC's own overlay window. Sends nothing to the game.
+    if (!(await bind(this.overlayToggleHotkey, () => void this.setOverlayOn(!this.overlayEnabled)))) {
+      this.overlayHotkeyError = taken;
+      this.notify();
+    }
   }
+
+  /** Every hotkey and what it is bound to, for conflict checks. */
+  private hotkeyBindings(): Record<HotkeyAction, string | null> {
+    return {
+      screenshot: this.screenshotHotkey,
+      routeCopy: this.routeCopyHotkey,
+      carrierCopy: this.carrierCopyHotkey,
+      overlayToggle: this.overlayToggleHotkey,
+    };
+  }
+
+  /**
+   * Choose or clear the hotkey that shows and hides the overlay.
+   * Returns null on success, or a reason, like the others. Unset by default.
+   */
+  readonly setOverlayToggleHotkey = async (binding: string | null): Promise<string | null> => {
+    if (binding !== null) {
+      const check = validateHotkey(binding);
+      if (!check.ok) return check.reason;
+      const conflict = hotkeyConflict(this.hotkeyBindings(), 'overlayToggle', binding);
+      if (conflict) return conflict;
+    }
+    const previous = this.overlayToggleHotkey;
+    this.overlayToggleHotkey = binding;
+    this.overlayHotkeyError = null;
+    await this.registerScreenshotHotkey();
+    if (this.overlayHotkeyError !== null) {
+      const reason = this.overlayHotkeyError;
+      this.overlayToggleHotkey = previous;
+      await this.registerScreenshotHotkey();
+      this.overlayHotkeyError = reason;
+      this.notify();
+      return reason;
+    }
+    await this.setSetting('overlay.toggleHotkey', binding ?? '');
+    this.notify();
+    return null;
+  };
 
   /**
    * Choose or clear the hotkey that copies the next route waypoint.
@@ -2924,8 +3007,8 @@ export class Companion {
     if (binding !== null) {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
-      if (binding === this.screenshotHotkey) return 'That combination already captures screenshots.';
-      if (binding === this.carrierCopyHotkey) return 'That combination already copies the carrier’s next jump.';
+      const conflict = hotkeyConflict(this.hotkeyBindings(), 'routeCopy', binding);
+      if (conflict) return conflict;
     }
     const previous = this.routeCopyHotkey;
     this.routeCopyHotkey = binding;
@@ -2949,8 +3032,8 @@ export class Companion {
     if (binding !== null) {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
-      if (binding === this.screenshotHotkey) return 'That combination already captures screenshots.';
-      if (binding === this.routeCopyHotkey) return 'That combination already copies your next waypoint.';
+      const conflict = hotkeyConflict(this.hotkeyBindings(), 'carrierCopy', binding);
+      if (conflict) return conflict;
     }
     const previous = this.carrierCopyHotkey;
     this.carrierCopyHotkey = binding;
@@ -2979,8 +3062,8 @@ export class Companion {
     if (binding !== null) {
       const check = validateHotkey(binding);
       if (!check.ok) return check.reason;
-      if (binding === this.routeCopyHotkey) return 'That combination already copies the next waypoint.';
-      if (binding === this.carrierCopyHotkey) return 'That combination already copies the carrier’s next jump.';
+      const conflict = hotkeyConflict(this.hotkeyBindings(), 'screenshot', binding);
+      if (conflict) return conflict;
     }
 
     const previous = this.screenshotHotkey;
@@ -4071,6 +4154,14 @@ export class Companion {
         guidance: this.guidanceMode,
         guidanceChosen: this.guidanceChosen,
         appearance: this.appearance,
+        overlay: {
+          layout: this.overlayLayout,
+          layoutCustomised: isCustomised(this.overlayLayout),
+          options: this.widgetOptions,
+          profiles: this.overlayProfiles,
+          toggleHotkey: this.overlayToggleHotkey,
+          routeSources: this.pythonPlugins.routeSources(),
+        },
         integrations: this.integrationState,
         setIntegrationEnabled: this.setIntegrationEnabled,
         setIntegrationCredential: this.setIntegrationCredential,
@@ -4281,7 +4372,10 @@ export class Companion {
         DEFAULT_APPEARANCE.textOpacity,
         APPEARANCE_BOUNDS.text,
       ),
+      scale: clampOpacity(await this.getSetting('overlayScale'), DEFAULT_APPEARANCE.scale, APPEARANCE_BOUNDS.scale),
+      spacing: (await this.getSetting('overlaySpacing')) === 'compact' ? 'compact' : 'comfortable',
     };
+    await this.loadOverlayLayout();
 
     await this.loadIntegrationState();
     await this.loadScreenshotSettings();
@@ -4748,8 +4842,11 @@ export class Companion {
         guidance: this.guidanceMode,
         liveJournal: this.projectLiveJournal(),
         liveActivity: this.projectLiveActivity(),
-        pluginRoute: this.pythonPlugins.view().route,
+        pluginRoute: this.pythonPlugins.routeFor(this.widgetOptions.routeSource),
         pluginPanels: this.overlayPluginPanels(),
+        options: this.widgetOptions,
+        layout: this.overlayLayout,
+        layoutRevision: this.layoutRevision,
         context: top
           ? {
               title: top.title,
@@ -4777,11 +4874,12 @@ export class Companion {
     const view = this.pythonPlugins.view();
     const off = new Set(this.widgets.pluginPanelsOff ?? []);
     return Object.entries(view.overlays)
-      .filter(([folder, panel]) => {
-        const plugin = view.plugins.find((p) => p.folder === folder);
-        return plugin !== undefined && plugin.loaded && !plugin.disabled && !off.has(folder) && panel.blocks !== null;
+      .filter(([key, panel]) => {
+        const plugin = view.plugins.find((p) => p.folder === panel.folder);
+        return plugin !== undefined && plugin.loaded && !plugin.disabled && !off.has(key) && panel.blocks !== null;
       })
-      .map(([folder, panel]) => ({ id: `plugin:${folder}`, title: panel.title, blocks: panel.blocks ?? [] }));
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, panel]) => ({ id: `plugin:${key}`, title: panel.title, blocks: panel.blocks ?? [] }));
   }
 
   /** Widgets the overlay should draw. Persisted, and pushed on every update. */
@@ -4813,12 +4911,206 @@ export class Companion {
     this.appearance = {
       backgroundOpacity: clampNumber(appearance.backgroundOpacity, APPEARANCE_BOUNDS.background),
       textOpacity: clampNumber(appearance.textOpacity, APPEARANCE_BOUNDS.text),
+      scale: clampNumber(appearance.scale, APPEARANCE_BOUNDS.scale),
+      spacing: appearance.spacing === 'compact' ? 'compact' : 'comfortable',
     };
     this.notify();
     this.pushOverlayState();
     await this.setSetting('overlayBackgroundOpacity', String(this.appearance.backgroundOpacity));
     await this.setSetting('overlayTextOpacity', String(this.appearance.textOpacity));
+    await this.setSetting('overlayScale', String(this.appearance.scale));
+    await this.setSetting('overlaySpacing', this.appearance.spacing);
   }
+
+  /* ------------------------------------------------- overlay layout */
+
+  private overlayLayout: OverlayLayout = DEFAULT_LAYOUT;
+  /** See `layoutRevision` in lib/overlay.ts. */
+  private layoutRevision = 0;
+  private widgetOptions: OverlayWidgetOptions = DEFAULT_WIDGET_OPTIONS;
+  private overlayProfiles: OverlayProfile[] = [];
+  /** The overlay window's last reported size, so a preset can be laid out for it. */
+  private overlayViewport: Viewport | null = null;
+  private layoutListening = false;
+
+  /**
+   * Read the stored layout, widget options and saved layouts.
+   *
+   * Positions used to live in the overlay window's own browser storage
+   * (`edfm.overlay.layout.v2`), out of reach of the main window and of the
+   * settings table every other overlay setting is in. The first time this runs
+   * without a stored layout it copies that one across, so nobody's arrangement
+   * is lost; the old key is left in place, unused.
+   */
+  private async loadOverlayLayout(): Promise<void> {
+    const stored = await this.getSetting('overlayLayout');
+    if (stored) {
+      this.overlayLayout = parseLayout(stored);
+    } else {
+      let legacy: string | null = null;
+      try {
+        legacy = globalThis.localStorage?.getItem(LEGACY_LAYOUT_KEY) ?? null;
+      } catch {
+        legacy = null;
+      }
+      this.overlayLayout = legacy ? parseLayout(legacy) : DEFAULT_LAYOUT;
+      if (legacy) {
+        await this.setSetting('overlayLayout', JSON.stringify(this.overlayLayout));
+        logger.info('overlay', 'Moved the overlay layout into settings');
+      }
+    }
+    this.widgetOptions = parseWidgetOptions(await this.getSetting('overlayWidgetOptions'));
+    this.overlayProfiles = parseProfiles(await this.getSetting('overlayProfiles'));
+    this.layoutRevision += 1;
+    await this.listenForLayout();
+  }
+
+  /** The overlay reports what the commander moved or resized in Arrange mode. */
+  private async listenForLayout(): Promise<void> {
+    if (this.layoutListening) return;
+    this.layoutListening = true;
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      await listen<{ layout?: unknown; viewport?: unknown }>(LAYOUT_EVENT, (e) => {
+        if (e.payload?.layout === undefined) return;
+        const next = parseLayout(e.payload.layout);
+        if (next.viewport) this.overlayViewport = next.viewport;
+        void this.storeLayout(next);
+      });
+    } catch {
+      this.layoutListening = false; // no Tauri runtime (tests)
+    }
+  }
+
+  private async storeLayout(layout: OverlayLayout): Promise<void> {
+    if (sameLayout(layout, this.overlayLayout)) return;
+    this.overlayLayout = layout;
+    this.layoutRevision += 1;
+    this.notify();
+    if (this.overlayEnabled) this.pushOverlayState();
+    await this.setSetting('overlayLayout', JSON.stringify(layout));
+  }
+
+  /** Standard positions and natural widths. Visibility and every other setting stay. */
+  readonly resetOverlayLayout = async (): Promise<void> => {
+    const plugins = this.overlayPluginPanels().map((p) => p.id);
+    await this.storeLayout(resetLayout(this.overlayLayout, plugins));
+  };
+
+  /** A starting arrangement: which built-in widgets are on, their options and positions. */
+  readonly applyOverlayPreset = async (id: PresetId): Promise<void> => {
+    const preset = PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    this.widgetOptions = { ...this.widgetOptions, ...preset.options };
+    this.widgets = { ...this.widgets, ...preset.visibility };
+    await this.setSetting('overlayWidgetOptions', JSON.stringify(this.widgetOptions));
+    await this.setSetting('overlayWidgets', JSON.stringify(this.widgets));
+    await this.storeLayout(presetLayout(preset, this.overlayLayout, await this.gameViewport()));
+    this.notify();
+    this.pushOverlayState();
+  };
+
+  /**
+   * The overlay window's size in its own (CSS) pixels: the game window's
+   * physical size over its DPI scale. Falls back to the last size the overlay
+   * reported, then to none (presets then use their 1920 x 1080 reference).
+   */
+  private async gameViewport(): Promise<Viewport | null> {
+    try {
+      const win = await overlayApi.eliteWindow();
+      if (win.found && win.width > 0 && win.height > 0) {
+        const scale = win.dpi > 0 ? win.dpi / 96 : 1;
+        return { width: Math.round(win.width / scale), height: Math.round(win.height / scale) };
+      }
+    } catch {
+      // No game window: use what is known.
+    }
+    return this.overlayViewport ?? this.overlayLayout.viewport;
+  }
+
+  readonly setWidgetOptions = async (options: OverlayWidgetOptions): Promise<void> => {
+    this.widgetOptions = parseWidgetOptions(options);
+    this.notify();
+    this.pushOverlayState();
+    await this.setSetting('overlayWidgetOptions', JSON.stringify(this.widgetOptions));
+  };
+
+  private visibility(): WidgetVisibility {
+    const w = this.widgets;
+    return {
+      context: w.context,
+      missions: w.missions,
+      edfmNotes: w.edfmNotes,
+      carrierJump: w.carrierJump,
+      liveJournal: w.liveJournal,
+      route: w.route,
+    };
+  }
+
+  /** Save the current arrangement under a name. Returns null, or why not. */
+  readonly saveOverlayProfile = async (name: string): Promise<string | null> => {
+    const result = saveProfile(this.overlayProfiles, {
+      name,
+      layout: this.overlayLayout,
+      visibility: this.visibility(),
+      options: this.widgetOptions,
+      savedAt: new Date().toISOString(),
+    });
+    if (!result.ok) return result.reason;
+    this.overlayProfiles = result.profiles;
+    this.notify();
+    await this.setSetting('overlayProfiles', JSON.stringify(this.overlayProfiles));
+    return null;
+  };
+
+  readonly applyOverlayProfile = async (name: string): Promise<void> => {
+    const profile = this.overlayProfiles.find((p) => p.name === name);
+    if (!profile) return;
+    this.widgetOptions = profile.options;
+    // Plugin widgets keep their own switches: a profile is about the built-in ones.
+    this.widgets = { ...this.widgets, ...profile.visibility };
+    await this.setSetting('overlayWidgetOptions', JSON.stringify(this.widgetOptions));
+    await this.setSetting('overlayWidgets', JSON.stringify(this.widgets));
+    await this.storeLayout(profile.layout);
+    this.notify();
+    this.pushOverlayState();
+  };
+
+  readonly deleteOverlayProfile = async (name: string): Promise<void> => {
+    this.overlayProfiles = this.overlayProfiles.filter((p) => p.name !== name);
+    this.notify();
+    await this.setSetting('overlayProfiles', JSON.stringify(this.overlayProfiles));
+  };
+
+  /**
+   * Switch the overlay on or off: the page's switch and the show/hide hotkey.
+   *
+   * Leaves Arrange mode first, so the window is never left interactive, then
+   * starts or stops the tracking thread and remembers the choice.
+   */
+  readonly setOverlayOn = async (on: boolean): Promise<string | null> => {
+    try {
+      if (on) {
+        await overlayApi.start(this.overlayHideInactive);
+      } else {
+        await overlayApi.setEditMode(false).catch(() => undefined);
+        await overlayApi.stop();
+      }
+      this.setOverlayEnabled(on);
+      return null;
+    } catch (err) {
+      logger.warn('overlay', on ? 'Could not start the overlay' : 'Could not stop the overlay', {
+        error: String(err),
+      });
+      return String(err);
+    }
+  };
+
+  /** Hide-while-inactive, applied to a running overlay at once. */
+  readonly setOverlayHideWhenInactive = async (hide: boolean): Promise<void> => {
+    this.setOverlayEnabled(this.overlayEnabled, hide);
+    if (this.overlayEnabled) await overlayApi.start(hide).catch(() => undefined);
+  };
 
   /** Whether anything has ever been written to settings. See the guidance load. */
   private async hasAnySetting(): Promise<boolean> {
@@ -4855,7 +5147,7 @@ export class Companion {
 
     const rows: OverlayMissionRow[] = this.missions
       .byExpiry()
-      .slice(0, OVERLAY_MISSION_ROWS)
+      .slice(0, this.widgetOptions.missionRows)
       .map((m) => ({
         id: m.missionId,
         name: isKnown(m.localisedName) ? m.localisedName : m.name,

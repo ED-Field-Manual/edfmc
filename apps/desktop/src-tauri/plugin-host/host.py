@@ -516,12 +516,13 @@ class Host:
 
         host_bridge.set_status_handler(self._status_all)
         host_bridge.set_publish_handler(
-            lambda topic, data: emit({'type': 'publish', 'topic': topic, 'data': data}))
+            lambda topic, data, folder: emit({'type': 'publish', 'topic': topic, 'data': data, 'folder': folder}))
         host_bridge.set_page_handler(
             lambda folder, state: emit({'type': 'page', 'folder': folder, 'state': state}))
         host_bridge.set_overlay_handler(
-            lambda folder, title, content: emit({'type': 'overlay', 'folder': folder, 'title': title,
-                                                 'content': content}))
+            lambda folder, title, content, widget=None, description=None: emit(
+                {'type': 'overlay', 'folder': folder, 'title': title, 'content': content,
+                 'widget': widget, 'description': description}))
 
     def _status_all(self, message: str) -> None:
         for panel in self.panels.values():

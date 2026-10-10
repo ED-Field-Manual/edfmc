@@ -261,7 +261,7 @@ They never throw and never halt the pipeline.
 ## 7. Overlay approach
 
 Built as described: a separate Tauri window — `transparent`, `alwaysOnTop`, `decorations: false`
-— with `set_ignore_cursor_events(true)` in normal mode and `false` in edit mode.
+— with `set_ignore_cursor_events(true)` in normal mode and `false` in Arrange mode (docs/OVERLAY.md).
 Position tracked against the Elite Dangerous window via Win32.
 
 **No DLL injection, no code injection, no input automation** (§31). Hard constraint.

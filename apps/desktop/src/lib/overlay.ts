@@ -79,8 +79,9 @@ export interface OverlayWidgets {
   pluginPanelsOff?: readonly string[];
 }
 
-/** A plugin's overlay panel as the overlay receives it: checked and display-only. */
+/** A plugin's overlay widget as the overlay receives it: checked and display-only. */
 export interface OverlayPluginPanel {
+  /** `plugin:<key>`: the widget's id in the layout. */
   readonly id: string;
   readonly title: string;
   readonly blocks: readonly import('./pluginUi.js').UiBlock[];
@@ -107,6 +108,13 @@ export interface OverlayAppearance {
   readonly backgroundOpacity: number;
   /** Text and icon alpha. */
   readonly textOpacity: number;
+  /**
+   * Widget size, text included, as a multiple of the shipped size. Applied to
+   * each widget's contents, so positions do not move when it changes.
+   */
+  readonly scale: number;
+  /** `compact` tightens padding and line spacing; the text size is unchanged. */
+  readonly spacing: 'comfortable' | 'compact';
 }
 
 /**
@@ -122,13 +130,86 @@ export interface OverlayAppearance {
 export const APPEARANCE_BOUNDS = {
   background: { min: 0, max: 1 },
   text: { min: 0.35, max: 1 },
+  /*
+   * Below 80% the smallest labels drop under 9px at 1080p, which is not
+   * readable over a game; above 150% a single widget covers a quarter of a
+   * 1080p screen.
+   */
+  scale: { min: 0.8, max: 1.5 },
 } as const;
 
 /** Matches the styling that shipped before this was configurable. */
 export const DEFAULT_APPEARANCE: OverlayAppearance = {
   backgroundOpacity: 0.72,
   textOpacity: 1,
+  scale: 1,
+  spacing: 'comfortable',
 };
+
+/* ---------------------------------------------------------------- status */
+
+/**
+ * The one line at the top of the Overlay page.
+ *
+ * Built from what is actually observed: the game window (found, minimised,
+ * focused), Elite's own display-mode setting, and whether the overlay window
+ * is really showing (reported by the tracking thread, not assumed from the
+ * switch). `tone` is also carried in words, never colour alone.
+ */
+export interface OverlayStatus {
+  readonly tone: 'ok' | 'warn' | 'off' | 'idle';
+  readonly text: string;
+}
+
+export interface OverlayRuntime {
+  /** The tracking thread is running (the overlay is switched on and started). */
+  readonly running: boolean;
+  /** The overlay window is currently shown over the game. */
+  readonly visible: boolean;
+  readonly editing: boolean;
+}
+
+function modeWords(mode: DisplayModeInfo | null): { name: string; supported: boolean | null } {
+  if (mode === null || mode.mode === 'unknown') return { name: 'display mode unknown', supported: null };
+  const name = mode.mode === 'borderless' ? 'Borderless' : mode.mode === 'windowed' ? 'Windowed' : 'Fullscreen';
+  return { name, supported: mode.overlay_supported };
+}
+
+export function overlayStatus(input: {
+  readonly enabled: boolean;
+  readonly runtime: OverlayRuntime | null;
+  readonly window: EliteWindowInfo | null;
+  readonly mode: DisplayModeInfo | null;
+  readonly hideWhenInactive: boolean;
+}): OverlayStatus {
+  const { name, supported } = modeWords(input.mode);
+  const found = input.window?.found === true;
+
+  if (!found) {
+    const support =
+      supported === true
+        ? `${name} mode supported`
+        : supported === false
+          ? `${name} mode: switch to Borderless to see the overlay`
+          : 'display mode not known yet';
+    return { tone: input.enabled ? 'idle' : 'off', text: `Elite Dangerous offline — ${support}.` };
+  }
+
+  if (supported === false) {
+    return { tone: 'warn', text: `Elite Dangerous running in ${name} — switch to Borderless to see the overlay.` };
+  }
+  const running = `Elite Dangerous running${supported === true ? ` (${name})` : ''}`;
+  if (!input.enabled) return { tone: 'off', text: `${running} — overlay is off.` };
+  if (input.runtime !== null && !input.runtime.running) {
+    return { tone: 'warn', text: `${running} — the overlay did not start. Switch it off and on again.` };
+  }
+  if (input.window?.is_minimised) return { tone: 'idle', text: `${running} — game minimised, overlay hidden.` };
+  if (input.runtime?.visible) return { tone: 'ok', text: `${running} — overlay showing.` };
+  if (input.hideWhenInactive && input.window?.is_foreground === false) {
+    return { tone: 'idle', text: `${running} — overlay hidden until Elite is the active window.` };
+  }
+  return { tone: 'idle', text: `${running} — waiting for the overlay to appear.` };
+}
 
 export function clampNumber(value: number, bounds: { min: number; max: number }): number {
   if (!Number.isFinite(value)) return bounds.max;
@@ -405,9 +486,24 @@ export interface OverlayPushState {
   liveActivity: OverlayLiveActivity | null;
   missions: OverlayMissions;
   widgets: OverlayWidgets;
+  /** Per-widget presentation options. */
+  options: import('./overlayLayout.js').OverlayWidgetOptions;
+  /** Where widgets sit. Owned by the main window; see lib/overlayLayout.ts. */
+  layout: import('./overlayLayout.js').OverlayLayout;
+  /**
+   * Bumped whenever the main window changes the layout (a reset, a preset, a
+   * saved layout, or storing what the overlay sent). The overlay applies a
+   * pushed layout only when this changes, so an ordinary state push during a
+   * drag cannot snap the widget back.
+   */
+  layoutRevision: number;
 }
 
+/** What the overlay sends back when the commander moves or resizes a widget. */
+export const LAYOUT_EVENT = 'overlay://layout';
+
 export const overlayApi = {
+  runtime: () => invoke<OverlayRuntime>('overlay_runtime'),
   eliteWindow: () => invoke<EliteWindowInfo>('elite_window_info'),
   displayMode: () => invoke<DisplayModeInfo>('elite_display_mode'),
   start: (hideWhenInactive: boolean) =>
@@ -420,10 +516,16 @@ export const overlayApi = {
 function subscribe<T>(event: string, fn: (payload: T) => void): () => void {
   let stop: (() => void) | null = null;
   let disposed = false;
-  void listen<T>(event, (e) => fn(e.payload)).then((f) => {
-    if (disposed) f();
-    else stop = f;
-  });
+  try {
+    void listen<T>(event, (e) => fn(e.payload))
+      .then((f) => {
+        if (disposed) f();
+        else stop = f;
+      })
+      .catch(() => undefined);
+  } catch {
+    // No Tauri runtime (a plain browser): nothing will be emitted, and the page still renders.
+  }
   return () => {
     disposed = true;
     stop?.();
@@ -443,4 +545,9 @@ export function onEliteWindow(fn: (info: EliteWindowInfo) => void): () => void {
  */
 export function onEditMode(fn: (editing: boolean) => void): () => void {
   return subscribe<boolean>('overlay://edit-mode', fn);
+}
+
+/** Subscribe to the overlay window actually being shown or hidden over the game. */
+export function onOverlayRuntime(fn: (runtime: OverlayRuntime) => void): () => void {
+  return subscribe<OverlayRuntime>('overlay://runtime', fn);
 }

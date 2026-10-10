@@ -92,7 +92,13 @@ describe('plugin overlay panels', () => {
   it('arrive checked, and go when the host stops (a plugin switched off keeps nothing)', async () => {
     const { p, internals } = host();
     internals.onMessage({ pid: 7, type: 'overlay', folder: 'ConstructionLogistics', title: 'Construction', content: null });
-    expect(p.view().overlays['ConstructionLogistics']).toEqual({ title: 'Construction', blocks: null });
+    expect(p.view().overlays['ConstructionLogistics']).toEqual({
+      folder: 'ConstructionLogistics',
+      widget: null,
+      title: 'Construction',
+      description: null,
+      blocks: null,
+    });
     internals.onMessage({ pid: 7, type: 'overlay', folder: 'ConstructionLogistics', title: 'Construction', content: { blocks: [{ type: 'heading', text: 'Hauling' }] } });
     expect(p.view().overlays['ConstructionLogistics']!.blocks).toEqual([{ type: 'heading', text: 'Hauling' }]);
     internals.onMessage({ pid: 7, type: 'page', folder: 'ConstructionLogistics', state: { kind: 'ui-v1', blocks: [] } });
@@ -126,5 +132,91 @@ describe('plugin overlay panels', () => {
     internals.plugins = [];
     expect(c.overlayPluginPanels()).toEqual([]);
     expect((c as unknown as Companion).snapshot().pythonPlugins.plugins).toEqual([]);
+  });
+});
+
+describe('plugin overlay widgets (several per plugin)', () => {
+  type Msg = Record<string, unknown>;
+  const host = () => {
+    const p = new PythonPlugins({ getSetting: async () => null, setSetting: async () => undefined, changed: () => {} });
+    const internals = p as unknown as { pid: number | null; onMessage: (m: Msg) => void; stop: () => Promise<void> };
+    internals.pid = 7;
+    return { p, send: (m: Msg) => internals.onMessage({ pid: 7, ...m }), internals };
+  };
+
+  it('keys each further widget by its id, with a description', () => {
+    const { p, send } = host();
+    send({ type: 'overlay', folder: 'CL', title: 'Construction', content: null });
+    send({ type: 'overlay', folder: 'CL', widget: 'needs', title: 'Site needs', description: 'What is left', content: null });
+    expect(Object.keys(p.view().overlays).sort()).toEqual(['CL', 'CL:needs']);
+    expect(p.view().overlays['CL:needs']).toMatchObject({ folder: 'CL', widget: 'needs', description: 'What is left' });
+  });
+
+  it('caps a plugin at four widgets, and still updates the ones it has', () => {
+    const { p, send } = host();
+    for (const id of ['a', 'b', 'c', 'd', 'e']) send({ type: 'overlay', folder: 'Greedy', widget: id, title: id, content: null });
+    expect(Object.keys(p.view().overlays)).toHaveLength(4);
+    send({ type: 'overlay', folder: 'Greedy', widget: 'a', title: 'A again', content: null });
+    expect(p.view().overlays['Greedy:a']!.title).toBe('A again');
+  });
+
+  it('refuses bad ids and folders, and drops content it cannot check', () => {
+    const { p, send } = host();
+    send({ type: 'overlay', folder: 'X', widget: 'Has Space', title: 't', content: null });
+    send({ type: 'overlay', folder: 'X', widget: 42, title: 't', content: null });
+    send({ type: 'overlay', folder: '', title: 't', content: null });
+    send({ type: 'overlay', folder: 7, title: 't', content: null });
+    expect(p.view().overlays).toEqual({});
+    // Not ui-v1: shown as nothing rather than passed through.
+    send({ type: 'overlay', folder: 'X', title: '<b>t</b>', content: { html: '<script>alert(1)</script>' } });
+    expect(p.view().overlays['X']!.blocks).toEqual([]);
+    send({ type: 'overlay', folder: 'X', title: 't', content: { blocks: [{ type: 'html', html: '<img onerror=x>' }] } });
+    expect(p.view().overlays['X']!.blocks).toEqual([]);
+  });
+
+  it('a message from another host process is ignored', () => {
+    const { p, internals } = host();
+    internals.onMessage({ pid: 99, type: 'overlay', folder: 'X', title: 't', content: null });
+    expect(p.view().overlays).toEqual({});
+  });
+});
+
+describe('routes from more than one plugin', () => {
+  type Msg = Record<string, unknown>;
+  const route = (next: string) => ({ next, destination: 'D', jumpsLeft: 3, waypoint: 1, waypoints: 2, finished: false });
+  const setup = () => {
+    const p = new PythonPlugins({ getSetting: async () => null, setSetting: async () => undefined, changed: () => {} });
+    const internals = p as unknown as { pid: number | null; onMessage: (m: Msg) => void; stop: () => Promise<void> };
+    internals.pid = 7;
+    return { p, send: (m: Msg) => internals.onMessage({ pid: 7, ...m }), internals };
+  };
+
+  it('are kept apart, and the newest is shown unless one is chosen', () => {
+    const { p, send } = setup();
+    send({ type: 'publish', topic: 'route', folder: 'Router', data: route('A') });
+    send({ type: 'publish', topic: 'route', folder: 'Other', data: route('B') });
+    expect(p.routeSources()).toEqual(['Other', 'Router']);
+    expect(p.routeFor(null)?.next).toBe('B');
+    expect(p.routeFor('Router')?.next).toBe('A');
+    // Router updates: it is now the newest.
+    send({ type: 'publish', topic: 'route', folder: 'Router', data: route('A2') });
+    expect(p.routeFor(null)?.next).toBe('A2');
+  });
+
+  it('one plugin clearing its route does not clear another’s', () => {
+    const { p, send } = setup();
+    send({ type: 'publish', topic: 'route', folder: 'Router', data: route('A') });
+    send({ type: 'publish', topic: 'route', folder: 'Other', data: null });
+    expect(p.routeFor(null)?.next).toBe('A');
+    // A chosen source with no route falls back to the others.
+    expect(p.routeFor('Other')?.next).toBe('A');
+  });
+
+  it('all go when the host stops', async () => {
+    const { p, send, internals } = setup();
+    send({ type: 'publish', topic: 'route', folder: 'Router', data: route('A') });
+    await internals.stop();
+    expect(p.routeFor(null)).toBeNull();
+    expect(p.routeSources()).toEqual([]);
   });
 });

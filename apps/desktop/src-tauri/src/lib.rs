@@ -915,6 +915,7 @@ pub fn run() {
             overlay::overlay_stop,
             overlay::overlay_set_edit_mode,
             overlay::overlay_push_state,
+            overlay::overlay_runtime,
             screenshot::capture_screenshot,
             screenshot::commit_screenshot,
             screenshot::pictures_dir,

@@ -235,4 +235,41 @@ describe('application startup', () => {
     await mountApp();
     expect(httpFetch).not.toHaveBeenCalled();
   });
+
+  it('the Overlay page is for players: one status line, one Widgets list, technical detail on Diagnostics', async () => {
+    await mountApp();
+    const go = async (name: string) => {
+      const button = [...container.querySelectorAll('nav button')].find((b) => b.textContent?.trim() === name);
+      expect(button, `${name} should be reachable`).toBeDefined();
+      await act(async () => {
+        (button as HTMLButtonElement).click();
+      });
+    };
+
+    await go('Overlay');
+    const text = container.textContent ?? '';
+    // A status sentence, not cards of raw values.
+    expect(text).toContain('Elite Dangerous offline');
+    for (const technical of ['Raw setting', 'Reported DPI', 'Covers monitor', 'Monitor', 'Position']) {
+      expect(text, technical).not.toContain(technical);
+    }
+    // One Widgets section with every built-in widget, and Arrange instead of an Edit Mode checkbox.
+    for (const name of ['Current Context', 'Missions', 'Carrier Jump', 'Route', 'Live Journal / Exobiology']) {
+      expect(text, name).toContain(name);
+    }
+    expect(text).not.toContain('Edit mode');
+    const arrange = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Arrange widgets');
+    expect(arrange, 'Arrange widgets').toBeDefined();
+    // The game is not running here, so there is nothing on screen to arrange.
+    expect((arrange as HTMLButtonElement).disabled).toBe(true);
+    // EDFM notes is an option of Missions, not a widget of its own.
+    const rows = [...container.querySelectorAll('.ow-row .ow-name')].map((n) => n.textContent);
+    expect(rows).not.toContain('Show EDFM notes on missions');
+    expect(text).toContain('Sample data');
+
+    await go('Diagnostics');
+    const diag = container.textContent ?? '';
+    expect(diag).toContain('Raw FullScreen value');
+    expect(diag).toContain('Overlay visible');
+  });
 });
