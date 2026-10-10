@@ -287,6 +287,21 @@ const REGISTRY: Record<string, { kind: string; fn: Normalizer }> = {
     }),
   },
   Commander: { kind: 'commander', fn: (r) => ({ name: str(r, 'Name'), fid: str(r, 'FID') }) },
+  /*
+   * The ship being flown, written after login, outfitting and shipyard swaps.
+   * Ship, ShipID, ShipName, ShipIdent and CargoCapacity are present on all 843
+   * in the corpus.
+   */
+  Loadout: {
+    kind: 'loadout',
+    fn: (r) => ({
+      ship: str(r, 'Ship'),
+      shipId: num(r, 'ShipID'),
+      shipName: str(r, 'ShipName'),
+      shipIdent: str(r, 'ShipIdent'),
+      cargoCapacity: num(r, 'CargoCapacity'),
+    }),
+  },
   Fileheader: {
     kind: 'file-header',
     fn: (r) => ({

@@ -10,6 +10,7 @@
 
 import type { NormalizedEvent, Known } from './types.js';
 import { UNKNOWN, isKnown } from './types.js';
+import { vehicleKind } from './ships.js';
 import type {
   ApproachSettlementData,
   DockedData,
@@ -71,6 +72,8 @@ export interface CommanderState {
   build: Known<string>;
   odyssey: Known<boolean>;
   gameMode: Known<string>;
+  /** Private group name, from `LoadGame.Group`, present only with GameMode "Group". */
+  gameGroup: Known<string>;
 
   starSystem: Known<string>;
   systemAddress: Known<number>;
@@ -182,10 +185,25 @@ export interface CommanderState {
   remainingJumps: Known<number>;
 
   vehicle: VehicleState;
+  /**
+   * The commander's current **ship**, as a journal symbol (`PantherMkII`).
+   *
+   * Never an SRV, suit or taxi: `LoadGame.Ship` names whatever the commander
+   * logged in as (`TestBuggy`, `TacticalSuit_Class2`, `vulture_taxi` all occur
+   * in the corpus), and those set `vehicle` instead. Updated by `Loadout`,
+   * which the game writes for the ship after a login, an outfitting change or a
+   * swap at the shipyard, so a swap mid-session is reflected.
+   */
   ship: Known<string>;
+  /** `ShipID`: which of the commander's ships, so a swap can be told from a refit. */
+  shipId: Known<number>;
+  /** The game's own localised model name, when it gave one for this ship. */
+  shipLocalised: Known<string>;
   shipName: Known<string>;
   shipIdent: Known<string>;
   cargoCount: Known<number>;
+  /** Tonnes, from `Loadout.CargoCapacity` (present on all 843 in the corpus). */
+  cargoCapacity: Known<number>;
 
   /** Most recent settlement approached, for context assistance (Phase 3). */
   lastSettlement: Known<string>;
@@ -206,6 +224,7 @@ export function initialState(): CommanderState {
     build: UNKNOWN,
     odyssey: UNKNOWN,
     gameMode: UNKNOWN,
+    gameGroup: UNKNOWN,
     starSystem: UNKNOWN,
     systemAddress: UNKNOWN,
     starPos: UNKNOWN,
@@ -230,9 +249,12 @@ export function initialState(): CommanderState {
     remainingJumps: UNKNOWN,
     vehicle: 'unknown',
     ship: UNKNOWN,
+    shipId: UNKNOWN,
+    shipLocalised: UNKNOWN,
     shipName: UNKNOWN,
     shipIdent: UNKNOWN,
     cargoCount: UNKNOWN,
+    cargoCapacity: UNKNOWN,
     lastSettlement: UNKNOWN,
     lastEventId: null,
     lastEventName: null,
@@ -430,6 +452,18 @@ function clearLocation(s: CommanderState): void {
 export function applyEvent(state: CommanderState, event: NormalizedEvent): CommanderState {
   const p = event.source.provenance;
 
+  /*
+   * A different commander: nothing about the previous one may carry over. Their
+   * ship, location and route are not this commander's, and showing them until
+   * the new session happened to overwrite each field would be a lie about who
+   * is where. Station facts learned from the game (carrier and trader
+   * identities) are about places, not people, and are kept.
+   */
+  if (p.fid !== null && isKnown(state.fid) && p.fid !== state.fid) {
+    const keep = { knownCarriers: state.knownCarriers, knownTraders: state.knownTraders };
+    Object.assign(state, initialState(), keep);
+  }
+
   state.lastEventId = p.eventId;
   state.lastEventName = event.source.event;
   state.lastEventAt = p.timestamp || null;
@@ -444,15 +478,59 @@ export function applyEvent(state: CommanderState, event: NormalizedEvent): Comma
     case 'load-game': {
       const d = event.data as {
         ship: Known<string>;
+        shipLocalised: Known<string>;
         shipName: Known<string>;
         shipIdent: Known<string>;
+        shipId: Known<number>;
         gameMode: Known<string>;
+        group: Known<string>;
       };
-      state.ship = set(state.ship, d.ship);
-      state.shipName = set(state.shipName, d.shipName);
-      state.shipIdent = set(state.shipIdent, d.shipIdent);
+      if (isKnown(d.ship)) {
+        const kind = vehicleKind(d.ship);
+        if (kind === 'ship') {
+          if (!isKnown(state.shipId) || !isKnown(d.shipId) || state.shipId !== d.shipId) {
+            state.cargoCapacity = UNKNOWN;
+          }
+          state.ship = d.ship;
+          state.shipId = d.shipId;
+          state.shipLocalised = d.shipLocalised;
+          state.shipName = d.shipName;
+          state.shipIdent = d.shipIdent;
+          state.vehicle = 'ship';
+        } else {
+          // Logged in on foot, in an SRV or in a taxi: the ship last flown stays
+          // as it was, and is not replaced by the suit's or buggy's name.
+          state.vehicle = kind === 'suit' ? 'on-foot' : kind === 'srv' ? 'srv' : kind === 'taxi' ? 'taxi' : state.vehicle;
+        }
+      }
       state.gameMode = set(state.gameMode, d.gameMode);
+      // Assigned directly: a group name belongs to this session's mode only.
+      state.gameGroup = d.group;
+      // A new session: whatever route was targeted last time is not live now.
+      state.jumpTarget = UNKNOWN;
+      state.remainingJumps = UNKNOWN;
       state.shutdown = false;
+      break;
+    }
+
+    case 'loadout': {
+      const d = event.data as {
+        ship: Known<string>;
+        shipId: Known<number>;
+        shipName: Known<string>;
+        shipIdent: Known<string>;
+        cargoCapacity: Known<number>;
+      };
+      if (!isKnown(d.ship)) break;
+      // A different ship's localised name would be wrong for this one.
+      if (!isKnown(state.shipId) || !isKnown(d.shipId) || state.shipId !== d.shipId) {
+        state.shipLocalised = UNKNOWN;
+      }
+      state.ship = d.ship;
+      state.shipId = d.shipId;
+      state.shipName = d.shipName;
+      state.shipIdent = d.shipIdent;
+      state.cargoCapacity = d.cargoCapacity;
       break;
     }
 

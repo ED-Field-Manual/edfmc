@@ -7,3 +7,4 @@ export * from './normalizer.js';
 export * from './engine.js';
 export * from './state.js';
 export * from './anomalies.js';
+export * from './ships.js';

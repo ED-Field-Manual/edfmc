@@ -151,6 +151,17 @@ describe('application startup', () => {
     expect(container.textContent).not.toContain('never uploaded');
   });
 
+  it('the Dashboard is a player screen: no commander yet, and no technical fields', async () => {
+    await mountApp();
+    const text = container.textContent ?? '';
+    expect(text).toContain('No commander yet');
+    // The status is a word, whichever state startup has reached in tests.
+    expect(text).toMatch(/Waiting for journal|Journal error|Game offline|Watching journal/);
+    for (const technical of ['System address', 'Market ID', 'Coordinates', 'Event ID', 'Game version', 'Journal.']) {
+      expect(text, technical).not.toContain(technical);
+    }
+  });
+
   it('asks for a guidance level on first run', async () => {
     // Shown because nothing has ever been chosen -- which is distinct from
     // having chosen Standard.

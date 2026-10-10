@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { isKnown, type CommanderState, type Known } from '@edfm/elite-journal';
+import { isKnown, type Known } from '@edfm/elite-journal';
 
 import { resourceUrl, type GuidanceMode } from '@edfm/context';
 import {
@@ -23,16 +23,16 @@ import { Contributions } from './Contributions';
 import { PluginCard, Plugins as PluginsScreen, PythonPluginCard } from './Plugins';
 import { PluginPanel } from './PluginPanels';
 import { NativePluginPage } from './NativePluginPage';
+import { Dashboard } from './Dashboard';
+import { SESSION_LABEL } from './lib/session';
 import { companion, relativeExpiry, travelLabel } from './lib/companion.js';
 import { logger, type LogEntry } from './lib/logger.js';
 import {
   onEditMode,
   onEliteWindow,
-  countdownTo,
   overlayApi,
   APPEARANCE_BOUNDS,
   type OverlayAppearance,
-  type OverlayCarrierJump,
   type DisplayModeInfo,
   type EliteWindowInfo,
 } from './lib/overlay.js';
@@ -204,20 +204,24 @@ type Snap = ReturnType<typeof companion.snapshot>;
 function ConnectionBadge({ snap }: { snap: Snap }) {
   // §29: never rely on colour alone. Each state carries a distinct glyph and word.
   const map = {
-    starting: { icon: '◐', label: 'Starting', cls: 'warn' },
-    watching: { icon: '●', label: 'Watching journal', cls: 'ok' },
-    'no-directory': { icon: '▲', label: 'No journal folder', cls: 'warn' },
-    stopped: { icon: '■', label: 'Stopped', cls: 'warn' },
-    error: { icon: '✕', label: 'Error', cls: 'bad' },
+    'game-active': { icon: '●', cls: 'ok', sub: 'Following the game' },
+    'game-offline': { icon: '○', cls: 'idle', sub: 'Showing last known state' },
+    'game-unknown': { icon: '◌', cls: 'idle', sub: 'Game status not confirmed' },
+    'waiting-for-journal': {
+      icon: '◐',
+      cls: 'warn',
+      sub: snap.connection === 'no-directory' ? 'No journal folder found' : 'Starting up',
+    },
+    'journal-error': { icon: '✕', cls: 'bad', sub: 'See Diagnostics' },
   } as const;
-  const s = map[snap.connection];
+  const s = map[snap.session];
 
   return (
     <div className={`status ${s.cls}`} role="status">
       <span aria-hidden="true">{s.icon}</span>
       <div>
-        <div className="status-label">{s.label}</div>
-        <div className="status-sub">{snap.activeFile ?? 'No active journal'}</div>
+        <div className="status-label">{SESSION_LABEL[snap.session]}</div>
+        <div className="status-sub">{s.sub}</div>
       </div>
     </div>
   );
@@ -230,162 +234,6 @@ function Field({ label, value, wide }: { label: string; value: string; wide?: bo
       <div className="field-label">{label}</div>
       <div className={`field-value${unknown ? ' unknown' : ''}`}>{value}</div>
     </div>
-  );
-}
-
-/**
- * True when the journal's Body and StationName describe the same place.
- *
- * Orbital and station-type docks report BodyType "Station" with Body equal to the
- * station name, so showing both is pure repetition. Surface ports and fleet
- * carriers report Planet or Star, where the body is genuinely separate
- * information worth keeping while flying and landing.
- */
-function bodyDuplicatesStation(s: CommanderState): boolean {
-  return isKnown(s.bodyType) && s.bodyType === 'Station';
-}
-
-/**
- * How to label the station.
- *
- * A carrier gets "Name (CALLSIGN)" on one line: the name is what the commander
- * calls it, the callsign is what the game shows on the dock, and separating them
- * across two rows made the pair harder to read rather than easier.
- */
-function stationDisplay(s: CommanderState): string {
-  if (!isKnown(s.stationName)) return travelLabel(s.travel);
-  if (isKnown(s.carrierName)) return `${s.carrierName} (${s.stationName})`;
-  return s.stationName;
-}
-
-/**
- * Scheduled jumps for the commander's own carriers.
- *
- * Rendered only when one is pending. Ticks once a second off the departure instant
- * the game stated, rather than a duration computed once and then drifting.
- *
- * There is deliberately no equivalent for anyone else's carrier. `CarrierJumpRequest`
- * is only ever written for a carrier the commander commands -- all 136 in the corpus
- * belong to their own three, and none of the 45 other carriers they have docked at
- * produced one. A carrier you are visiting can leave without the journal ever
- * mentioning it, and inventing a countdown for that would be a guess.
- */
-function CarrierJumpCard({ jumps }: { jumps: readonly OverlayCarrierJump[] }) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (jumps.length === 0) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [jumps.length]);
-
-  if (jumps.length === 0) return null;
-
-  return (
-    <section className="card">
-      <h2>Carrier jump</h2>
-      <div className="grid">
-        {jumps.map((j) => {
-          const remaining = countdownTo(j.departureTime, now);
-          return (
-            <Field
-              key={j.carrierId}
-              label={j.name}
-              wide
-              value={
-                remaining === null
-                  ? // The stated time has passed and no arrival has been confirmed.
-                    // "Departing" is what we know; "arrived" would be invented.
-                    `Departing → ${j.system}${j.body ? ` ${j.body}` : ''}`
-                  : `${remaining} → ${j.system}${j.body ? ` ${j.body}` : ''}`
-              }
-            />
-          );
-        })}
-      </div>
-      <p className="muted">
-        Your own carriers only. The game does not tell the Companion when someone
-        else&apos;s carrier is about to jump, so none is shown rather than guessed.
-      </p>
-    </section>
-  );
-}
-
-function Dashboard({ snap }: { snap: Snap }) {
-  const s = snap.state;
-  const pos = isKnown(s.starPos) ? s.starPos.map((n) => n.toFixed(2)).join(' / ') : 'Unknown';
-  const services = isKnown(s.stationServices) ? String(s.stationServices.length) : 'Unknown';
-  const bodyIsStation = bodyDuplicatesStation(s);
-  const stationLabel = stationDisplay(s);
-
-  return (
-    <>
-      <header className="page-head">
-        <h1>Dashboard</h1>
-        <p className="muted">
-          Live state built from journal events. Values the game did not report are shown as
-          Unknown rather than guessed.
-        </p>
-      </header>
-
-      <section className="card">
-        <h2>Commander</h2>
-        <div className="grid">
-          <Field label="CMDR" value={show(s.commander)} />
-          <Field label="Game version" value={show(s.gameVersion)} />
-          <Field label="Build" value={show(s.build).trim() || 'Unknown'} />
-          <Field label="Mode" value={show(s.gameMode)} />
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>Location</h2>
-        <div className="grid">
-          <Field label="System" value={show(s.starSystem)} />
-          <Field label="System address" value={show(s.systemAddress)} />
-          {/* BodyType "Station" means Body IS the station — the journal reports
-              Body='Elder Hub' next to StationName='Elder Hub'. Showing both would
-              just repeat it. A carrier is always Planet or Star, so its body stays
-              a separate, useful line. */}
-          {!bodyIsStation && <Field label="Body" value={show(s.body)} />}
-          <Field label="Coordinates" value={pos} wide />
-          <Field label="Station" value={stationLabel} />
-          <Field label="Market ID" value={show(s.marketId)} />
-          <Field label="Status" value={travelLabel(s.travel)} />
-          <Field label="Services reported" value={services} />
-          {isKnown(s.jumpTarget) && <Field label="Next jump" value={s.jumpTarget} />}
-          {isKnown(s.remainingJumps) && (
-            <Field label="Jumps remaining" value={String(s.remainingJumps)} />
-          )}
-        </div>
-      </section>
-
-      <CarrierJumpCard jumps={snap.carrierJumps} />
-
-      <section className="card">
-        <h2>Ship &amp; cargo</h2>
-        <div className="grid">
-          <Field label="Ship" value={show(s.ship)} />
-          <Field label="Ship name" value={show(s.shipName)} />
-          <Field label="Vehicle" value={s.vehicle === 'unknown' ? 'Unknown' : s.vehicle} />
-          <Field label="Cargo" value={show(s.cargoCount)} />
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>Last event</h2>
-        <div className="grid">
-          <Field label="Event" value={s.lastEventName ?? 'Unknown'} />
-          <Field label="Timestamp" value={s.lastEventAt ?? 'Unknown'} />
-          <Field label="Event ID" value={s.lastEventId ?? 'Unknown'} wide />
-        </div>
-        {s.shutdown && (
-          <p className="note">
-            <span aria-hidden="true">■</span> A Shutdown event was seen — the game has exited.
-          </p>
-        )}
-      </section>
-    </>
   );
 }
 
@@ -1224,6 +1072,8 @@ function Diagnostics({ snap }: { snap: Snap }) {
         Safe diagnostics for the EDFM connection. Credential presence, never the
         credential; error categories, never a server body or a token.
       */}
+      <JournalStateCard snap={snap} />
+
       <section className="card">
         <h2>EDFM Commander Journal</h2>
         <div className="grid">
@@ -1338,6 +1188,48 @@ function Diagnostics({ snap }: { snap: Snap }) {
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * Journal and game state, in full: what the Dashboard summarises in words.
+ * Identifiers and raw values are fine here; this is the screen for them.
+ */
+function JournalStateCard({ snap }: { snap: Snap }) {
+  const s = snap.state;
+  const pos = isKnown(s.starPos) ? s.starPos.map((n) => n.toFixed(2)).join(' / ') : 'Unknown';
+  return (
+    <section className="card">
+      <h2>Journal &amp; game state</h2>
+      <div className="grid">
+        <Field label="Game status" value={SESSION_LABEL[snap.session]} />
+        <Field label="Journal reader" value={snap.connection} />
+        <Field label="Shutdown seen" value={s.shutdown ? 'Yes' : 'No'} />
+        <Field label="Active journal" value={snap.activeFile ?? 'None'} wide />
+        <Field label="Game version" value={show(s.gameVersion)} />
+        <Field label="Build" value={show(s.build).trim() || 'Unknown'} />
+        <Field label="Frontier ID" value={show(s.fid)} />
+        <Field label="Game mode" value={show(s.gameMode)} />
+        <Field label="System address" value={show(s.systemAddress)} />
+        <Field label="Coordinates" value={pos} wide />
+        <Field label="Body (raw)" value={show(s.body)} />
+        <Field label="Body type" value={show(s.bodyType)} />
+        <Field label="Station type" value={show(s.stationType)} />
+        <Field label="Market ID" value={show(s.marketId)} />
+        <Field
+          label="Services reported"
+          value={isKnown(s.stationServices) ? String(s.stationServices.length) : 'Unknown'}
+        />
+        <Field label="Travel state" value={`${s.travel} (${travelLabel(s.travel)})`} />
+        <Field label="Vehicle" value={s.vehicle} />
+        <Field label="Ship symbol" value={show(s.ship)} />
+        <Field label="Ship ID" value={show(s.shipId)} />
+        <Field label="Cargo / capacity" value={`${show(s.cargoCount)} / ${show(s.cargoCapacity)}`} />
+        <Field label="Last event" value={s.lastEventName ?? 'Unknown'} />
+        <Field label="Last event time" value={s.lastEventAt ?? 'Unknown'} />
+        <Field label="Last event ID" value={s.lastEventId ?? 'Unknown'} wide />
+      </div>
+    </section>
   );
 }
 

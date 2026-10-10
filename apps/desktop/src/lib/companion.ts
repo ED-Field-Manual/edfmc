@@ -104,6 +104,7 @@ import {
 import { logger } from './logger.js';
 import { httpFetch } from './http.js';
 import { credentialClear, credentialPresent, credentialSet } from './credentials.js';
+import { sessionStatus, type SessionStatus } from './session.js';
 import {
   ActivityEngine,
   LiveActivityTracker,
@@ -112,6 +113,7 @@ import {
   speciesInfo,
   type BodyRef,
   type CompletedRecord,
+  type LiveExobiology,
   type SpeciesProgress,
   groupActivity,
   type ActivityEntry,
@@ -453,6 +455,10 @@ export interface CompanionSnapshot {
   readonly contextRuleVersion: number;
   readonly contextRuleSource: string;
   readonly missions: MissionView;
+  /** Whether the game is running, from the window check and the journal. See lib/session.ts. */
+  readonly session: SessionStatus;
+  /** Exobiology on the current body, when there is any; the overlay shows the same. */
+  readonly exobiology: LiveExobiology | null;
   readonly verification: VerificationStats;
   /** Whether the commander has opted in to verification (§21). */
   readonly verificationEnabled: boolean;
@@ -1172,6 +1178,34 @@ export class Companion {
         [integration, id, attempts, next, now.toISOString()],
       );
     }
+  }
+
+  /* ------------------------------------------------------ game window */
+
+  /**
+   * Whether Elite's window exists: true, false, or null when the check could
+   * not be made. The same window-class check the overlay uses to find the game.
+   */
+  private gameWindow: boolean | null = null;
+  private gameWindowTimer: ReturnType<typeof setInterval> | null = null;
+
+  private startGameWindowWatch(): void {
+    if (this.gameWindowTimer !== null) return;
+    const check = async () => {
+      let next: boolean | null;
+      try {
+        next = (await invoke<{ found: boolean }>('elite_window_info')).found === true;
+      } catch {
+        next = null;
+      }
+      if (next !== this.gameWindow) {
+        this.gameWindow = next;
+        this.notify();
+      }
+    };
+    void check();
+    // Cheap (one EnumWindows), and five seconds is soon enough for a status pill.
+    this.gameWindowTimer = setInterval(() => void check(), 5000);
   }
 
   /* ------------------------------------------------------------ Inara */
@@ -4009,6 +4043,12 @@ export class Companion {
         contextRuleVersion: this.resolver.version,
         contextRuleSource: this.resolver.source,
         missions: this.missionView(),
+        session: sessionStatus({
+          reader: this.connection,
+          gameWindow: this.gameWindow,
+          shutdownSeen: this.state.shutdown,
+        }),
+        exobiology: this.liveActivity.state?.exobiology ?? null,
         verification: this.verification.stats(),
         verificationEnabled: this.verificationEnabled,
         research: this.researchView(),
@@ -4281,6 +4321,7 @@ export class Companion {
       this.startEddnDrain();
       this.startEdsmDrain();
       this.startInaraDrain();
+      this.startGameWindowWatch();
       this.connection = 'watching';
       logger.info('journal', 'Watching', { file: this.engine.currentFile });
     } catch (err) {

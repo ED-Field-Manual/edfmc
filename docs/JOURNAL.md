@@ -218,6 +218,20 @@ from Market/EDDN naming — normalization required before Logistics.
   `BrokerPercentage` fields on `PayFines` / `PayBounties` / `RedeemVoucher`.
 - **`$`-wrapped localisation tokens** (`$economy_Colony;`, `$aluminium_name;`) appear
   alongside `_Localised` companions. Keep both.
+- **`LoadGame.Ship` is whatever the commander logged in as, not always a ship.**
+  `TestBuggy` and `Combat_Multicrew_SRV_01` (SRVs), `TacticalSuit_Class2`,
+  `ExplorationSuit_Class3` and `FlightSuit` (on foot) and `vulture_taxi` (a taxi)
+  all occur in the corpus. State keeps the commander's ship from `LoadGame` only
+  when it is one, and sets `vehicle` otherwise.
+- **The ship changes mid-session without a `LoadGame`.** A shipyard swap writes
+  `ShipyardSwap` and then `Loadout` for the new ship; `Loadout` (Ship, ShipID,
+  ShipName, ShipIdent, CargoCapacity all 100% across 843) is what state follows.
+- **`Ship_Localised` is absent when the symbol is a plain word** (`Corsair`,
+  `Anaconda`, `SideWinder`: present on 281 of 400 `LoadGame`). Display names come
+  from it when present, then from `ships.ts`; a raw symbol is never shown as a name.
+- **A `Shutdown` is written only on a clean exit**, and the journal file stays where
+  it was afterwards. Watching a journal is not evidence the game is running; the
+  Dashboard checks for the game's window as well (see `apps/desktop/src/lib/session.ts`).
 
 ## Event frequency (top of 197)
 
