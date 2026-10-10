@@ -306,7 +306,7 @@ function RecentJournal({ snap, go }: { snap: Snap; go: Go }) {
       </div>
       {entries.length === 0 ? (
         <p className="dash-line muted-inline dash-empty">
-          Nothing finished yet. Completed missions, specimens and exobiology sales appear here.
+          Nothing recorded yet. Your latest missions, specimens, mining and combat appear here.
         </p>
       ) : (
         <ul className="dash-journal">

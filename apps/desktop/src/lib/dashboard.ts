@@ -237,14 +237,26 @@ export function describeCargo(s: CommanderState, limit = 5): CargoView | null {
 /* ------------------------------------------------------------------ journal */
 
 /**
- * Things the commander finished: the Dashboard's "Recent journal" shows these
- * and nothing else. Finding signals and landing are where things happen, not
- * things done, and a body's signals used to be recorded on every visit.
+ * What the Dashboard's "Recent journal" shows: every kind of entry the Journal
+ * records today, across all categories, each with a short label.
+ *
+ * Only `landed` and `footfall` are left out. They are no longer recorded (one
+ * per touchdown buried everything else) but older databases still hold them,
+ * and they would push real activity off a five-line card.
  */
 export const DONE_SUBTYPES: Readonly<Record<string, string>> = {
   'mission-completed': 'Mission completed',
   'sample-completed': 'Specimen completed',
   'data-sold': 'Exobiology data sold',
+  'signals-detected': 'Biological signals',
+  'mining-run': 'Mining',
+  fight: 'Combat',
+  died: 'Death',
+  interdicted: 'Interdicted',
+  'interdiction-escaped': 'Interdiction escaped',
+  interdiction: 'Interdiction',
+  'bonds-redeemed': 'Combat bonds cashed in',
+  'bounties-redeemed': 'Bounties cashed in',
 };
 
 /**

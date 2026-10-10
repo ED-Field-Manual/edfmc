@@ -454,11 +454,12 @@ is open repeats Current Context and wastes the space.
 
 ## On the Dashboard
 
-The Dashboard's **Recent journal** card lists the five newest **finished**
-things from the same data this page shows (`recentJournal` and `DONE_SUBTYPES`
-in `apps/desktop/src/lib/dashboard.ts`): completed missions, completed
-specimens and exobiology data sold. Signals found, landings and old footfall
-rows stay on this page only. It is the active commander's only and adds no
+The Dashboard's **Recent journal** card lists the five newest entries across
+every category, from the same data this page shows (`recentJournal` and
+`DONE_SUBTYPES` in `apps/desktop/src/lib/dashboard.ts`): missions, specimens,
+data sold, biological signals, mining runs and combat. Only old `landed` and
+`footfall` rows, which are no longer recorded, are left off it (changed
+2026-10-10 at the commander's request; it used to show finished things only). It is the active commander's only and adds no
 interpretation of its own. Clicking an entry opens this page scrolled to it,
 outlined.
 

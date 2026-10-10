@@ -91,7 +91,26 @@ describe('recent journal', () => {
     expect(recentJournal([], 5)).toEqual([]);
   });
 
-  it('only things finished: no signals found, landings or footfalls', () => {
+  it('every category, newest first, without the retired landings and footfalls', () => {
+    const all: ActivityGroup[] = [
+      {
+        systemName: 'Wregoe FH-D d12-45',
+        bodyName: null,
+        startedAt: '',
+        entries: [
+          e('poll-data', '2026-10-10T15:00:00Z', 'mission-completed'),
+          e('mined', '2026-10-10T16:00:00Z', 'mining-run'),
+          e('fight', '2026-10-10T18:38:39Z', 'fight'),
+          e('died', '2026-10-10T19:01:32Z', 'died'),
+          e('signals', '2026-10-10T19:10:00Z', 'signals-detected'),
+          e('landed', '2026-10-10T19:20:00Z', 'landed'),
+        ],
+      },
+    ];
+    expect(recentJournal(all, 5).map((x) => x.id)).toEqual(['signals', 'died', 'fight', 'mined', 'poll-data']);
+  });
+
+  it('only things finished: no landings or footfalls', () => {
     const mixed: ActivityGroup[] = [
       {
         systemName: 'Wregoe FH-D d12-45',
@@ -107,8 +126,8 @@ describe('recent journal', () => {
         ],
       },
     ];
-    expect(recentJournal(mixed, 5).map((x) => x.id)).toEqual(['poll-data', 'specimen', 'sold']);
-    expect(recentJournal([{ ...mixed[0]!, entries: mixed[0]!.entries.slice(0, 3) }], 5)).toEqual([]);
+    expect(recentJournal(mixed, 5).map((x) => x.id)).toEqual(['signals', 'poll-data', 'specimen', 'sold']);
+    expect(recentJournal([{ ...mixed[0]!, entries: mixed[0]!.entries.slice(1, 3) }], 5)).toEqual([]);
   });
 
   it('times read as people say them, never as ISO strings', () => {
