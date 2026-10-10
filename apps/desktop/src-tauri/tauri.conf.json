@@ -14,8 +14,9 @@
       {
         "label": "main",
         "title": "EDFM Companion",
-        "width": 1100,
-        "height": 720,
+        "width": 1200,
+        "height": 900,
+        "center": true,
         "minWidth": 900,
         "minHeight": 600
       },

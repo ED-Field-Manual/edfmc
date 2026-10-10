@@ -14,6 +14,7 @@ mod overlay;
 mod plugin_host;
 mod plugins;
 mod screenshot;
+mod window_size;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -836,6 +837,10 @@ pub fn run() {
             use tauri::Manager;
             if let Some(win) = app.get_webview_window(overlay::OVERLAY_LABEL) {
                 let _ = win.set_ignore_cursor_events(true);
+            }
+            // Big enough for the whole Dashboard, but never bigger than the screen.
+            if let Some(main) = app.get_webview_window("main") {
+                window_size::fit_to_screen(&main);
             }
             Ok(())
         })
