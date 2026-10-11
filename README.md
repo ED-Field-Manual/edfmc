@@ -9,6 +9,11 @@ shows relevant EDFM guidance in the application or through an in-game overlay.
 > EDFM Companion is under active development and does not yet have a stable public
 > release.
 
+## Support EDFM
+
+If you find EDFM useful and want to support its continued development and
+hosting, [support XplosivOctopus on Patreon](https://patreon.com/XplosivOctopus?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink).
+
 ## What is EDFM Companion?
 
 EDFM Companion follows the journal as Elite Dangerous writes it. It does not read
