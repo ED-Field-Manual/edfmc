@@ -12,7 +12,7 @@ shows relevant EDFM guidance in the application or through an in-game overlay.
 ## Support EDFM
 
 If you find EDFM useful and want to support its continued development and
-hosting, [support XplosivOctopus on Patreon](https://patreon.com/XplosivOctopus?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink).
+hosting, [support EDFM on Patreon](https://patreon.com/EDFieldManual?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink).
 
 ## What is EDFM Companion?
 
